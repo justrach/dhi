@@ -1,0 +1,11 @@
+/Users/rachpradhan/projects/satya/dhi/rust/target/debug/deps/libnapi_build-60cdda34e3a48114.rmeta: /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/lib.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/android.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/macos.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/wasi.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/windows.rs
+
+/Users/rachpradhan/projects/satya/dhi/rust/target/debug/deps/libnapi_build-60cdda34e3a48114.rlib: /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/lib.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/android.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/macos.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/wasi.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/windows.rs
+
+/Users/rachpradhan/projects/satya/dhi/rust/target/debug/deps/napi_build-60cdda34e3a48114.d: /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/lib.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/android.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/macos.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/wasi.rs /Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/windows.rs
+
+/Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/lib.rs:
+/Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/android.rs:
+/Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/macos.rs:
+/Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/wasi.rs:
+/Users/rachpradhan/.cargo/registry/src/index.crates.io-6f17d22bba15001f/napi-build-2.1.4/src/windows.rs:
