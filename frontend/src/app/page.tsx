@@ -86,7 +86,7 @@ export default function Home() {
     <div className="min-h-screen bg-background">
       <HeroSection />
       
-      <div className="container mx-auto px-4 py-16">
+      <div id="try-it-yourself" className="container mx-auto px-4 py-16">
         <h2 className="text-3xl font-bold text-center mb-8">Try It Yourself!</h2>
         <p className="text-center text-muted-foreground mb-8">
           Compare DHI and Zod performance in real-time with your own data

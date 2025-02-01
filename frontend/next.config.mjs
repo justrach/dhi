@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  images: {
+    domains: ['images.bhumi.trilok.ai'],
+  },
   webpack: (config) => {
     config.experiments = {
       ...config.experiments,
@@ -15,6 +18,7 @@ const nextConfig = {
         filename: 'static/wasm/[hash][ext][query]'
       }
     });
+
 
     return config;
   },
