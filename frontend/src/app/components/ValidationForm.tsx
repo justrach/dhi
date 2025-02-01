@@ -30,6 +30,12 @@ export function ValidationForm({ sampleSchemas, sampleData }: ValidationFormProp
     zod: { time: 0, ops: 0, isValid: null as boolean | null }
   });
 
+  const loadExample = (type: 'simple' | 'complex') => {
+    setDhiSchema(sampleSchemas[type].dhi);
+    setZodSchema(sampleSchemas[type].zod);
+    setTestData(sampleData[type]);
+  };
+
   const runValidation = async (type: 'dhi' | 'zod') => {
     setIsRunning(true);
     
@@ -219,6 +225,20 @@ export function ValidationForm({ sampleSchemas, sampleData }: ValidationFormProp
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
       <div>
+        <div className="flex gap-4 justify-center mb-6">
+          <Button 
+            variant="outline" 
+            onClick={() => loadExample('simple')}
+          >
+            Load Simple Example
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={() => loadExample('complex')}
+          >
+            Load Complex Example
+          </Button>
+        </div>
         <Tabs defaultValue="schema" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="schema">Schema</TabsTrigger>

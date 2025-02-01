@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +14,16 @@ export function HeroSection() {
     <>
       {/* Hero Section */}
       <div className="container mx-auto px-4 py-24">
+        <div className="mb-12 max-w-5xl mx-auto">
+          <Image
+            src="https://images.bhumi.trilok.ai/dhi_logo.jpg"
+            alt="DHI Hero"
+            width={2100}
+            height={900}
+            className="rounded-lg shadow-xl"
+            priority
+          />
+        </div>
         <div className="text-center space-y-4">
           <h1 className="text-6xl font-bold tracking-tighter">
             DHI
@@ -28,7 +39,7 @@ export function HeroSection() {
               size="lg" 
               asChild
             >
-              <a href="https://dhi-demo.vercel.app">
+              <a href="#try-it-yourself">
                 Try Live Demo
               </a>
             </Button>
@@ -37,7 +48,7 @@ export function HeroSection() {
               size="lg"
               asChild
             >
-              <a href="https://github.com/rach-id/dhi-benchmark-ui" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/justrach/dhi/tree/main/frontend" target="_blank" rel="noopener noreferrer">
                 View Frontend Code
               </a>
             </Button>
@@ -145,12 +156,12 @@ const UserSchema = await dhi.object({
             </div>
             <div className="flex gap-4">
               <Button variant="ghost" size="sm" asChild>
-                <a href="https://github.com/rach-id/dhi" target="_blank" rel="noopener noreferrer">
+                <a href="https://github.com/justrach/dhi" target="_blank" rel="noopener noreferrer">
                   DHI Core
                 </a>
               </Button>
               <Button variant="ghost" size="sm" asChild>
-                <a href="https://github.com/rach-id/dhi-benchmark-ui" target="_blank" rel="noopener noreferrer">
+                <a href="https://github.com/justrach/dhi/tree/main/frontend" target="_blank" rel="noopener noreferrer">
                   Frontend Code
                 </a>
               </Button>
