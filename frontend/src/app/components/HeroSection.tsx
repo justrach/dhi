@@ -1,5 +1,6 @@
 "use client";
 import Image from "next/image";
+import { GitHubLogoIcon } from "@radix-ui/react-icons";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,6 +42,16 @@ export function HeroSection() {
             >
               <a href="#try-it-yourself">
                 Try Live Demo
+              </a>
+            </Button>
+            <Button 
+              variant="outline" 
+              size="lg"
+              asChild
+            >
+              <a href="https://github.com/justrach/dhi" target="_blank" rel="noopener noreferrer">
+                <GitHubLogoIcon className="mr-2 h-5 w-5" />
+                View Source
               </a>
             </Button>
             <Button 
