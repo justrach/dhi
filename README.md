@@ -6,7 +6,7 @@
 <div align="center">
   
 [![npm version](https://badge.fury.io/js/dhi.svg)](https://badge.fury.io/js/dhi)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)](https://www.typescriptlang.org/)
 
 </div>
@@ -132,7 +132,7 @@ These results showcase the performance edge DHI offers, especially for applicati
 
 ## License
 
-This project is licensed under the **MIT License**.
+This project is licensed under the **Apache 2.0 License**.
 
 ---
 
