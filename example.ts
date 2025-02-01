@@ -1,4 +1,5 @@
-import { dhi } from '../src';
+import { z } from 'zod';
+import { dhi } from 'dhi';
 
 async function runBenchmark() {
     // Create complex nested schemas with new types
@@ -67,7 +68,57 @@ async function runBenchmark() {
     DhiUserSchema.setDebug(false);
 
     // Create equivalent Zod schema
-   
+    const ZodUserSchema = z.object({
+        id: z.string(),
+        name: z.string(),
+        age: z.number(),
+        isAdmin: z.boolean(),
+        contact: z.object({
+            email: z.string(),
+            phone: z.string(),
+            address: z.object({
+                street: z.string(),
+                city: z.string(),
+                country: z.string(),
+                zipCode: z.string(),
+                coordinates: z.object({
+                    lat: z.number(),
+                    lng: z.number()
+                })
+            }),
+            lastContact: z.date(),
+            alternateEmails: z.array(z.string())
+        }),
+        metadata: z.object({
+            createdAt: z.date(),
+            updatedAt: z.date(),
+            tags: z.array(z.string()),
+            settings: z.object({
+                isPublic: z.boolean(),
+                notifications: z.boolean(),
+                preferences: z.record(z.unknown())
+            }),
+            flags: z.record(z.boolean())
+        }),
+        friends: z.array(z.string()),
+        status: z.enum(['active', 'inactive', 'banned']),
+        loginCount: z.bigint(),
+        uniqueKey: z.symbol(),
+        lastLoginAttempt: z.date().nullable(),
+        deletedAt: z.date().optional(),
+        posts: z.array(z.object({
+            id: z.string(),
+            title: z.string(),
+            content: z.string(),
+            likes: z.number(),
+            comments: z.array(z.object({
+                id: z.string(),
+                text: z.string(),
+                author: z.string()
+            }))
+        }))
+    });
+
     // Generate complex test data
     const testData = Array.from({ length: 1000_000 }, (_, i) => ({
         id: `user_${i}`,
@@ -142,6 +193,7 @@ async function runBenchmark() {
     // Warm up
     for (let i = 0; i < 100; i++) {
         DhiUserSchema.validate(testData[i]);
+        ZodUserSchema.safeParse(testData[i]);
     }
 
     console.log(`\nBenchmarking complex validations with new types (${testData.length.toLocaleString()} items):`);
@@ -153,12 +205,15 @@ async function runBenchmark() {
     
     // Zod Benchmark
     const zodStart = performance.now();
+    const zodResults = testData.map(item => ZodUserSchema.safeParse(item));
     const zodTime = performance.now() - zodStart;
 
     console.log('\nResults:');
     console.log(`DHI: ${dhiTime.toFixed(2)}ms`);
+    console.log(`Zod: ${zodTime.toFixed(2)}ms`);
     console.log(`\nValidations per second:`);
     console.log(`DHI: ${(testData.length / (dhiTime / 1000)).toFixed(0).toLocaleString()}`);
+    console.log(`Zod: ${(testData.length / (zodTime / 1000)).toFixed(0).toLocaleString()}`);
 }
 
 runBenchmark().catch(console.error); 
