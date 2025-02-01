@@ -120,7 +120,7 @@ async function runBenchmark() {
     });
 
     // Generate complex test data
-    const testData = Array.from({ length: 100_000 }, (_, i) => ({
+    const testData = Array.from({ length: 1000_000 }, (_, i) => ({
         id: `user_${i}`,
         name: `User ${i}`,
         age: 20 + Math.floor(Math.random() * 50),
@@ -214,6 +214,94 @@ async function runBenchmark() {
     console.log(`\nValidations per second:`);
     console.log(`DHI: ${(testData.length / (dhiTime / 1000)).toFixed(0).toLocaleString()}`);
     console.log(`Zod: ${(testData.length / (zodTime / 1000)).toFixed(0).toLocaleString()}`);
+
+    // Add chart creation
+    const { createCanvas } = require('canvas');
+    const { Chart } = require('chart.js/auto');
+
+    // Create canvas
+    const width = 800;
+    const height = 400;
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    const dhiColor = 'rgba(183, 228, 229, 0.8)'; // Light blue/turquoise from DHI logo
+    const zodColor = 'rgba(255, 99, 132, 0.8)';  // Keeping Zod's red color
+
+    // Create validations per second chart
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['DHI', 'Zod'],
+            datasets: [{
+                label: 'Validations per Second',
+                data: [
+                    testData.length / (dhiTime / 1000),
+                    testData.length / (zodTime / 1000)
+                ],
+                backgroundColor: [dhiColor, zodColor]
+            }]
+        },
+        options: {
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'DHI vs Zod Performance Comparison',
+                    font: { size: 16 }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Validations per Second'
+                    }
+                }
+            }
+        }
+    });
+
+    // Create execution time chart
+    const timeCanvas = createCanvas(width, height);
+    const timeCtx = timeCanvas.getContext('2d');
+
+    new Chart(timeCtx, {
+        type: 'bar',
+        data: {
+            labels: ['DHI', 'Zod'],
+            datasets: [{
+                label: 'Execution Time (ms)',
+                data: [dhiTime, zodTime],
+                backgroundColor: [dhiColor, zodColor]
+            }]
+        },
+        options: {
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'DHI vs Zod Execution Time Comparison',
+                    font: { size: 16 }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Time (milliseconds)'
+                    }
+                }
+            }
+        }
+    });
+
+    // Save both charts
+    const fs = require('fs');
+    const vpsBuffer = canvas.toBuffer('image/png');
+    const timeBuffer = timeCanvas.toBuffer('image/png');
+    fs.writeFileSync('benchmark-validations-per-second.png', vpsBuffer);
+    fs.writeFileSync('benchmark-execution-time.png', timeBuffer);
 }
 
 runBenchmark().catch(console.error); 

@@ -20,13 +20,19 @@
 DHI is designed to be fast, type-safe, and easy to use—offering a familiar API similar to Zod, but with performance that leaves it far behind. Benchmarks on complex validations with new types (1,000,000 items) show(Benchmarks are available in the [benchmarks](./benchmarks) folder):
 
 - **Results:**
-  - **DHI:** 3010.11ms
-  - **Zod:** 5679.42ms
+  - **DHI:** 2661.79ms
+  - **Zod:** 5832.30ms
 - **Validations per second:**
-  - **DHI:** 332,214
-  - **Zod:** 176,074
+  - **DHI:** 375,687
+  - **Zod:** 175,360
 
+<p align="center">
+  <img src="/assets/benchmark-execution-time.png" alt="Benchmark Execution Time" width="800"/>
+</p>
 
+<p align="center">
+  <img src="/assets/benchmark-validations-per-second.png" alt="Benchmark Validations per Second" width="800"/>
+</p>
 
 DHI leverages WebAssembly to accelerate validation tasks, ensuring that even complex validations with new types are handled with remarkable speed.
 
@@ -113,13 +119,13 @@ console.log(result.success);
 DHI is built with performance in mind. It uses WebAssembly to validate data at speeds significantly faster than traditional JavaScript validators. In our benchmarks on complex validations with new types:
 
 - **Benchmark 1 (1,000,000 items):**
-  - **DHI:** 3010.11ms
-  - **Zod:** 5679.42ms
-  - **Validations per second:** DHI: 332,214 vs. Zod: 176,074
+  - **DHI:** 2661.79ms
+  - **Zod:** 5832.30ms
+  - **Validations per second:** DHI: 375,687 vs. Zod: 175,360
 
 - **Benchmark 2 (1,000,000 items):**
-  - **DHI:** 3869.74ms
-  - **Validations per second:** DHI: 258,415
+  - **DHI:** 2885.60ms
+  - **Validations per second:** DHI: 346,548
 
 These results showcase the performance edge DHI offers, especially for applications requiring massive data validations.
 
