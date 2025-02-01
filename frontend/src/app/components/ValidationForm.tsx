@@ -224,7 +224,7 @@ export function ValidationForm({ sampleSchemas, sampleData }: ValidationFormProp
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div>
+      <div className="flex flex-col gap-4">
         <div className="flex gap-4 justify-center mb-6">
           <Button 
             variant="outline" 
