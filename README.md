@@ -2,7 +2,7 @@
   <img src="/assets/dhi_logo.jpg" alt="DHI Logo" width="1600"/>
 </p>
 
-<h1 align="center"><b>DHI (धि)</b></h1>
+<h1 align="center"><b>DHI</b></h1>
 <div align="center">
   
 [![npm version](https://badge.fury.io/js/dhi.svg)](https://badge.fury.io/js/dhi)
