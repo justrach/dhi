@@ -11,7 +11,7 @@
 
 </div>
 
-# DHI - High Performance TypeScript Validation
+# 🚀 DHI - High Performance TypeScript Validation
 
 **DHI** is a high-performance TypeScript validation library powered by WebAssembly. Named after the Sanskrit word **धि (Dhi)**, meaning "intellect" or "wisdom," DHI embodies the smart, precise, and efficient data validation you need in modern applications. 
 
@@ -48,7 +48,7 @@ DHI leverages WebAssembly to accelerate validation tasks, ensuring that even com
 
 ---
 
-## Installation
+## 📥 Installation
 
 ```bash
 npm install dhi
@@ -60,7 +60,7 @@ bun add dhi
 
 ---
 
-## Basic Usage
+## 🔨 Basic Usage
 
 ```typescript
 import { dhi } from 'dhi';
@@ -84,8 +84,7 @@ console.log(result.success);
 
 ---
 
-## Supported Types
-
+## 🏗️ Supported Types
 - `string`
 - `number`
 - `boolean`
@@ -105,7 +104,7 @@ console.log(result.success);
 
 ---
 
-## Advanced Features
+## 🎓 Advanced Features
 
 - **Optional Fields:** `dhi.optional(dhi.string())`
 - **Nullable Fields:** `dhi.nullable(dhi.number())`
@@ -147,6 +146,6 @@ Rach Pradhan
 
 For more information, bug reports, or contributions, please visit the [GitHub repository](https://github.com/justrach/dhi).
 
----
 
-DHI is the intelligent choice for TypeScript validation—built for speed, engineered for precision, and inspired by the timeless wisdom of Sanskrit.
+---
+🌟 DHI: Where Sanskrit wisdom meets modern TypeScript validation - delivering unmatched speed, precision, and reliability for your applications.
