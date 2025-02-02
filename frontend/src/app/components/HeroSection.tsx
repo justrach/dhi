@@ -54,13 +54,13 @@ export function HeroSection() {
                 View Source
               </a>
             </Button>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="lg"
               asChild
             >
-              <a href="https://github.com/justrach/dhi/tree/main/frontend" target="_blank" rel="noopener noreferrer">
-                View Frontend Code
+              <a href="/haiku">
+                Try Haiku Demo
               </a>
             </Button>
           </div>
