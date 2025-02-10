@@ -1,6 +1,6 @@
 {
   "name": "dhi",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "author": "Rach Pradhan",
   "repository": {
     "type": "git",
@@ -41,7 +41,8 @@
     "test:wasm": "cd rust && wasm-pack test --node",
     "test:jest": "jest",
     "benchmark": "bun run benchmarks/benchmark.ts",
-    "example": "bun run examples/example.ts"
+    "example": "bun run examples/example.ts",
+    "publish": "npm run build && npm publish"
   },
   "types": "dist/index.d.ts"
 }
