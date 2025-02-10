@@ -207,7 +207,13 @@ export class DhiType<T> {
 
     // Catch-all types
     any(): DhiType<any> {
-        this.typeString = 'any';
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "any", true);
+        this.typeString = "any";
+        this.optional = () => {
+            this.core.set_optional(true);
+            return this as unknown as DhiType<any | undefined>;
+        };
         return this as unknown as DhiType<any>;
     }
 
