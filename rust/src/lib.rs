@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 use js_sys::{Array, Object, Reflect};
 use std::collections::HashMap;
 
-const CHUNK_SIZE: usize = 10000;  // Process in chunks for better cache usage
+const CHUNK_SIZE: usize = 65536;  // Maximum chunk size for optimal cache usage
 
 #[wasm_bindgen(start)]
 pub fn init() {
@@ -12,16 +12,23 @@ pub fn init() {
 #[wasm_bindgen]
 pub struct DhiCore {
     schema: HashMap<String, FieldValidator>,
-    field_cache: HashMap<String, JsValue>,  // Pre-built cache of field names
     batch_size: i32,
     custom_types: HashMap<String, HashMap<String, FieldValidator>>,
     debug: bool,
+    // Cached analysis for fast path decisions
+    has_complex_types: bool,
+    is_strict_primitive_schema: bool,
+    // Flattened fast path data
+    strict_fields: Vec<(JsValue, u8)>, // (key, type_tag)
+    fast_fields: Vec<(JsValue, FieldType)>, // for non-strict fast path
 }
 
 #[derive(Debug, Clone)]
 struct FieldValidator {
     field_type: FieldType,
     required: bool,
+    // Cached JS property key to avoid rebuilding JsValue for field names
+    key: JsValue,
 }
 
 #[derive(Debug, Clone)]
@@ -51,10 +58,13 @@ impl DhiCore {
     pub fn new() -> Self {
         DhiCore {
             schema: HashMap::new(),
-            field_cache: HashMap::new(),
             batch_size: 1000,
             custom_types: HashMap::new(),
             debug: false,
+            has_complex_types: false,
+            is_strict_primitive_schema: false,
+            strict_fields: Vec::new(),
+            fast_fields: Vec::new(),
         }
     }
 
@@ -89,9 +99,11 @@ impl DhiCore {
         let custom_type = self.custom_types.get_mut(&type_name)
             .ok_or_else(|| JsValue::from_str("Custom type not defined"))?;
 
+        let key = JsValue::from_str(&field_name);
         custom_type.insert(field_name, FieldValidator {
             field_type: parsed_field_type,
             required,
+            key,
         });
         Ok(())
     }
@@ -99,17 +111,22 @@ impl DhiCore {
     #[wasm_bindgen]
     pub fn add_field(&mut self, name: String, field_type: String, required: bool) -> Result<(), JsValue> {
         let field_type = self.parse_field_type(&field_type)?;
-        self.schema.insert(name, FieldValidator { field_type, required });
+        let key = JsValue::from_str(&name);
+        self.schema.insert(name, FieldValidator { field_type, required, key });
+        self.invalidate_cache();
         Ok(())
     }
 
     // New method to add nested object
     #[wasm_bindgen]
     pub fn add_object_field(&mut self, name: String, required: bool) -> Result<(), JsValue> {
+        let key = JsValue::from_str(&name);
         self.schema.insert(name, FieldValidator { 
             field_type: FieldType::Object(HashMap::new()),
-            required 
+            required,
+            key,
         });
+        self.invalidate_cache();
         Ok(())
     }
 
@@ -121,10 +138,13 @@ impl DhiCore {
         
         if object_path.is_empty() {
             // If no path, add directly to root schema
+            let key = JsValue::from_str(&field_name);
             self.schema.insert(field_name, FieldValidator { 
                 field_type: parsed_field_type, 
-                required 
+                required,
+                key,
             });
+            self.invalidate_cache();
             return Ok(());
         }
 
@@ -141,72 +161,112 @@ impl DhiCore {
         }
 
         // Add the field to the nested object
+        let key = JsValue::from_str(&field_name);
         current_schema.insert(field_name, FieldValidator { 
             field_type: parsed_field_type, 
-            required 
+            required,
+            key,
         });
+        self.invalidate_cache();
         Ok(())
     }
 
     #[wasm_bindgen]
     pub fn validate(&self, value: JsValue) -> Result<bool, JsValue> {
-        match self.validate_value_internal(&value) {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false)
+        Ok(self.validate_value_internal(&value))
+    }
+
+    fn invalidate_cache(&mut self) {
+        // Recompute cached analysis
+        self.has_complex_types = self.schema.values().any(|v| {
+            matches!(v.field_type, FieldType::Object(_) | FieldType::Array(_) | FieldType::Custom(_))
+        });
+        
+        self.is_strict_primitive_schema = !self.has_complex_types && 
+            self.schema.values().all(|v| v.required && 
+                matches!(v.field_type, FieldType::String | FieldType::Number | FieldType::Boolean));
+        
+        // Rebuild flattened data structures
+        if self.is_strict_primitive_schema {
+            self.strict_fields = self.schema.iter()
+                .map(|(_k, v)| {
+                    let tag = match v.field_type {
+                        FieldType::String => 0u8,
+                        FieldType::Number => 1u8,
+                        FieldType::Boolean => 2u8,
+                        _ => 255u8,
+                    };
+                    (v.key.clone(), tag)
+                })
+                .collect();
+        } else {
+            self.strict_fields.clear();
+        }
+        
+        if !self.has_complex_types {
+            self.fast_fields = self.schema.iter()
+                .map(|(_k, v)| (v.key.clone(), v.field_type.clone()))
+                .collect();
+        } else {
+            self.fast_fields.clear();
         }
     }
 
     #[wasm_bindgen]
     pub fn validate_batch(&self, items: Array) -> Result<Array, JsValue> {
-        let results = Array::new();
         let len = items.length() as usize;
-        results.set_length(len as u32);
+        let results = Array::new_with_length(len as u32);
         
-        // Check if we have any complex types (objects/arrays)
-        let has_complex_types = self.schema.values().any(|v| {
-            matches!(v.field_type, FieldType::Object(_) | FieldType::Array(_) | FieldType::Custom(_))
-        });
-
-        if !has_complex_types {
-            // FAST PATH for simple objects
-            let field_jsvalues: Vec<_> = self.schema.iter()
-                .map(|(k, v)| (JsValue::from_str(k), &v.field_type))
-                .collect();
-
+        if self.is_strict_primitive_schema {
+            // OPTIMIZED PATH: Simple primitive validation
             for i in 0..len {
                 let item = items.get(i as u32);
-                if !item.is_object() {
+                let Some(obj) = item.dyn_ref::<Object>() else {
                     results.set(i as u32, JsValue::from_bool(false));
                     continue;
-                }
-
-                let obj = match item.dyn_ref::<Object>() {
-                    Some(o) => o,
-                    None => {
-                        results.set(i as u32, JsValue::from_bool(false));
-                        continue;
-                    }
                 };
 
-                let mut is_valid = true;
-                for (field_name, field_type) in &field_jsvalues {
-                    match Reflect::has(obj, field_name) {
-                        Ok(true) => {
-                            let value = Reflect::get(obj, field_name).unwrap();
-                            match field_type {
-                                FieldType::String => if !value.is_string() { is_valid = false; break; }
-                                FieldType::Number => if value.as_f64().is_none() { is_valid = false; break; }
-                                FieldType::Boolean => if value.as_bool().is_none() { is_valid = false; break; }
-                                _ => unreachable!()
-                            }
-                        }
-                        _ => {
-                            is_valid = false;
-                            break;
-                        }
+                let mut valid = true;
+                for (field_name, tag) in &self.strict_fields {
+                    let Ok(value) = Reflect::get(obj, field_name) else {
+                        valid = false;
+                        break;
+                    };
+                    if value.is_undefined() {
+                        valid = false;
+                        break;
+                    }
+                    valid = match tag {
+                        0 => value.is_string(),
+                        1 => value.as_f64().is_some(),
+                        2 => value.as_bool().is_some(),
+                        _ => false,
+                    };
+                    if !valid { break; }
+                }
+                results.set(i as u32, JsValue::from_bool(valid));
+            }
+        } else if !self.has_complex_types {
+            // FAST PATH for simple non-primitive objects
+            for i in 0..len {
+                let item = items.get(i as u32);
+                let Some(obj) = item.dyn_ref::<Object>() else {
+                    results.set(i as u32, JsValue::from_bool(false));
+                    continue;
+                };
+
+                let mut valid = true;
+                for (field_name, field_type) in &self.fast_fields {
+                    let Ok(value) = Reflect::get(obj, field_name) else {
+                        valid = false;
+                        break;
+                    };
+                    if !self.validate_value_bool(&value, field_type) {
+                        valid = false;
+                        break;
                     }
                 }
-                results.set(i as u32, JsValue::from_bool(is_valid));
+                results.set(i as u32, JsValue::from_bool(valid));
             }
         } else {
             // SLOW PATH for complex objects
@@ -215,7 +275,7 @@ impl DhiCore {
                 let chunk_end = (chunk_start + CHUNK_SIZE).min(len);
                 for i in chunk_start..chunk_end {
                     let item = items.get(i as u32);
-                    let is_valid = self.validate_value_internal(&item).is_ok();
+                    let is_valid = self.validate_value_internal(&item);
                     results.set(i as u32, JsValue::from_bool(is_valid));
                 }
             }
@@ -229,55 +289,77 @@ impl DhiCore {
         self.debug = debug;
     }
 
-    fn validate_value_internal(&self, value: &JsValue) -> Result<(), JsValue> {
+    fn validate_value_internal(&self, value: &JsValue) -> bool {
         if !value.is_object() {
-            return Err(JsValue::from_bool(false));
+            return false;
         }
 
-        let obj = value.dyn_ref::<Object>()
-            .ok_or_else(|| JsValue::from_bool(false))?;
+        let Some(obj) = value.dyn_ref::<Object>() else {
+            return false;
+        };
 
-        for (field_name, validator) in &self.schema {
+        for (_field_name, validator) in &self.schema {
             match &validator.field_type {
                 FieldType::Object(nested_schema) => {
                     // Handle nested object validation
-                    if validator.required && !Reflect::has(obj, &JsValue::from_str(field_name))? {
-                        return Err(JsValue::from_bool(false));
+                    let Ok(nested_value) = Reflect::get(obj, &validator.key) else {
+                        return false;
+                    };
+                    if validator.required && nested_value.is_undefined() {
+                        return false;
                     }
-                    if Reflect::has(obj, &JsValue::from_str(field_name))? {
-                        let nested_value = Reflect::get(obj, &JsValue::from_str(field_name))?;
-                        self.validate_object(&nested_value, nested_schema)?;
+                    if !nested_value.is_undefined() {
+                        if !self.validate_object_bool(&nested_value, nested_schema) {
+                            return false;
+                        }
                     }
                 }
                 _ => {
                     // Handle primitive types as before
-                    if validator.required && !Reflect::has(obj, &JsValue::from_str(field_name))? {
-                        return Err(JsValue::from_bool(false));
+                    let Ok(field_value) = Reflect::get(obj, &validator.key) else {
+                        return false;
+                    };
+                    if validator.required && field_value.is_undefined() {
+                        return false;
                     }
-                    if Reflect::has(obj, &JsValue::from_str(field_name))? {
-                        let field_value = Reflect::get(obj, &JsValue::from_str(field_name))?;
-                        self.validate_value(&field_value, &validator.field_type)?;
+                    if !field_value.is_undefined() {
+                        if !self.validate_value_bool(&field_value, &validator.field_type) {
+                            return false;
+                        }
                     }
                 }
             }
         }
-        Ok(())
+        true
     }
 
     fn validate_object(&self, value: &JsValue, schema: &HashMap<String, FieldValidator>) -> Result<(), JsValue> {
-        let obj = value.dyn_ref::<Object>()
-            .ok_or_else(|| JsValue::from_bool(false))?;
+        if self.validate_object_bool(value, schema) {
+            Ok(())
+        } else {
+            Err(JsValue::from_bool(false))
+        }
+    }
 
-        for (field_name, validator) in schema {
-            if validator.required && !Reflect::has(obj, &JsValue::from_str(field_name))? {
-                return Err(JsValue::from_bool(false));
+    fn validate_object_bool(&self, value: &JsValue, schema: &HashMap<String, FieldValidator>) -> bool {
+        let Some(obj) = value.dyn_ref::<Object>() else {
+            return false;
+        };
+
+        for (_field_name, validator) in schema {
+            let Ok(field_value) = Reflect::get(obj, &validator.key) else {
+                return false;
+            };
+            if validator.required && field_value.is_undefined() {
+                return false;
             }
-            if Reflect::has(obj, &JsValue::from_str(field_name))? {
-                let field_value = Reflect::get(obj, &JsValue::from_str(field_name))?;
-                self.validate_value(&field_value, &validator.field_type)?;
+            if !field_value.is_undefined() {
+                if !self.validate_value_bool(&field_value, &validator.field_type) {
+                    return false;
+                }
             }
         }
-        Ok(())
+        true
     }
 
     fn parse_field_type(&self, field_type: &str) -> Result<FieldType, JsValue> {
@@ -320,106 +402,71 @@ impl DhiCore {
     // Add back validate_value method
     #[inline(always)]
     fn validate_value(&self, value: &JsValue, field_type: &FieldType) -> Result<(), JsValue> {
+        if self.validate_value_bool(value, field_type) {
+            Ok(())
+        } else {
+            Err(JsValue::from_bool(false))
+        }
+    }
+
+    #[inline(always)]
+    fn validate_value_bool(&self, value: &JsValue, field_type: &FieldType) -> bool {
         match field_type {
-            FieldType::String => {
-                if !value.is_string() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Number => {
-                if value.as_f64().is_none() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Boolean => {
-                if value.as_bool().is_none() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
+            FieldType::String => value.is_string(),
+            FieldType::Number => value.as_f64().is_some(),
+            FieldType::Boolean => value.as_bool().is_some(),
             FieldType::Array(item_type) => {
-                let array = value.dyn_ref::<Array>()
-                    .ok_or_else(|| JsValue::from_bool(false))?;
+                let Some(array) = value.dyn_ref::<Array>() else {
+                    return false;
+                };
                 
                 for i in 0..array.length() {
                     let item = array.get(i);
-                    self.validate_value(&item, item_type)?;
+                    if !self.validate_value_bool(&item, item_type) {
+                        return false;
+                    }
                 }
-                Ok(())
+                true
             }
             FieldType::Object(nested_schema) => {
-                self.validate_object(value, nested_schema)
+                self.validate_object_bool(value, nested_schema)
             }
             FieldType::Custom(type_name) => {
                 if let Some(custom_type) = self.custom_types.get(type_name) {
-                    self.validate_object(value, custom_type)
+                    self.validate_object_bool(value, custom_type)
                 } else {
-                    Ok(())
+                    true
                 }
             }
             FieldType::Record(value_type) => {
-                let obj = value.dyn_ref::<Object>()
-                    .ok_or_else(|| JsValue::from_bool(false))?;
-                
-                let entries = Object::entries(obj);
-                for i in 0..entries.length() {
-                    let entry = entries.get(i);
-                    let value = Reflect::get(&entry, &JsValue::from(1))?;
-                    self.validate_value(&value, value_type)?;
+                let Some(obj) = value.dyn_ref::<Object>() else {
+                    return false;
+                };
+
+                // Iterate values directly to avoid building [key, value] pairs
+                let values = Object::values(obj);
+                for i in 0..values.length() {
+                    let v = values.get(i);
+                    if !self.validate_value_bool(&v, value_type) {
+                        return false;
+                    }
                 }
-                Ok(())
+                true
             }
-            FieldType::Date => {
-                // Check if value is a Date object
-                if !value.is_instance_of::<js_sys::Date>() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::BigInt => {
-                if !value.is_bigint() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Symbol => {
-                if !value.is_symbol() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Undefined => {
-                if !value.is_undefined() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Null => {
-                if !value.is_null() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Void => {
-                if !value.is_undefined() {
-                    return Err(JsValue::from_bool(false));
-                }
-                Ok(())
-            }
-            FieldType::Unknown => Ok(()), // accepts any value
-            FieldType::Never => Err(JsValue::from_bool(false)), // always fails validation
-            FieldType::Any => Ok(()),
+            FieldType::Date => value.is_instance_of::<js_sys::Date>(),
+            FieldType::BigInt => value.is_bigint(),
+            FieldType::Symbol => value.is_symbol(),
+            FieldType::Undefined => value.is_undefined(),
+            FieldType::Null => value.is_null(),
+            FieldType::Void => value.is_undefined(),
+            FieldType::Unknown => true, // accepts any value
+            FieldType::Never => false, // always fails validation
+            FieldType::Any => true,
             FieldType::Enum(allowed_values) => {
                 if let Some(str_val) = value.as_string() {
-                    if allowed_values.contains(&str_val) {
-                        Ok(())
-                    } else {
-                        Err(JsValue::from_bool(false))
-                    }
+                    allowed_values.contains(&str_val)
                 } else {
-                    Err(JsValue::from_bool(false))
+                    false
                 }
             }
         }
