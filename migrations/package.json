@@ -1,0 +1,25 @@
+{
+  "name": "dhi-migration-examples",
+  "version": "1.0.0",
+  "description": "Migration examples from Zod to DHI with one-line import changes",
+  "scripts": {
+    "demo:simple": "bun run 01-simple-user/after.ts",
+    "demo:nested": "bun run 02-nested-objects/after.ts", 
+    "demo:api": "bun run 03-api-validation/after.ts",
+    "demo:form": "bun run 04-form-validation/after.ts",
+    "benchmark": "bun run benchmark-comparison.ts",
+    "compare:simple": "echo 'Running Zod version...' && bun run 01-simple-user/before.ts && echo 'Running DHI version...' && bun run 01-simple-user/after.ts",
+    "compare:nested": "echo 'Running Zod version...' && bun run 02-nested-objects/before.ts && echo 'Running DHI version...' && bun run 02-nested-objects/after.ts"
+  },
+  "dependencies": {
+    "dhi": "file:../",
+    "zod": "^3.22.4",
+    "express": "^4.18.2",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/react": "^18.2.45",
+    "typescript": "^5.3.3"
+  }
+}
