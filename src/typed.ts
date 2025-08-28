@@ -272,6 +272,18 @@ function createOptimizedNestedValidator<T extends Record<string, unknown>>(keys:
   // Pre-compile validation paths for better performance
   const validationPaths = compileValidationPaths(keys, shape);
   
+  // Try building an iterative, non-recursive validator for object-only trees (no arrays)
+  const iterative = createIterativeObjectValidator(shape);
+  if (iterative) {
+    return function(obj: unknown): boolean {
+      try {
+        return iterative(obj);
+      } catch {
+        return false;
+      }
+    };
+  }
+
   // Return a specialized validator function that uses the general approach
   return function(obj: unknown): boolean {
     if (typeof obj !== 'object' || obj === null) return false;
@@ -291,6 +303,91 @@ function createOptimizedNestedValidator<T extends Record<string, unknown>>(keys:
 function generateValidationCode<T extends Record<string, unknown>>(keys: string[], shape: ObjectSchemaShape<T>): string {
   // This could be extended to generate actual optimized code
   return 'optimized';
+}
+
+// Iterative validator for nested object trees without arrays/unions
+type IterNode =
+  | { kind: 'string' }
+  | { kind: 'number' }
+  | { kind: 'boolean' }
+  | { kind: 'object'; keys: string[]; children: (IterNode | null)[]; optional: boolean[] };
+
+function createIterativeObjectValidator<T extends Record<string, unknown>>(shape: ObjectSchemaShape<T>): ((obj: unknown) => boolean) | null {
+  // Build a compact node tree. If we encounter non-object/primitive (e.g., arrays), abort and return null.
+  function toNode(s: Schema<any>): IterNode | null {
+    // unwrap optional
+    const isOptional = (s as any).__kind === 'optional' && (s as any).inner;
+    const inner = isOptional ? (s as any).inner as Schema<any> : s;
+    const kind = (inner as any).__kind as string | undefined;
+    if (kind === 'string') return { kind: 'string' };
+    if (kind === 'number') return { kind: 'number' };
+    if (kind === 'boolean') return { kind: 'boolean' };
+    if (kind === 'object' && typeof (inner as any).shape === 'object') {
+      const sh = (inner as any).shape as Record<string, Schema<any>>;
+      const keys = Object.keys(sh);
+      const children: (IterNode | null)[] = new Array(keys.length);
+      const optional: boolean[] = new Array(keys.length);
+      for (let i = 0; i < keys.length; i++) {
+        const childSchema = sh[keys[i]] as any;
+        const chOptional = childSchema && childSchema.__kind === 'optional' && childSchema.inner;
+        optional[i] = !!chOptional;
+        const base = chOptional ? (childSchema.inner as Schema<any>) : childSchema as Schema<any>;
+        const node = toNode(base);
+        if (!node) return null; // unsupported type in this fast path
+        children[i] = node;
+      }
+      return { kind: 'object', keys, children, optional };
+    }
+    // Unsupported (arrays, unions, etc.)
+    return null;
+  }
+
+  const rootNode = { kind: 'object', keys: Object.keys(shape), children: [] as (IterNode | null)[], optional: [] as boolean[] } as IterNode;
+  const rootKeys = (rootNode as any).keys as string[];
+  for (let i = 0; i < rootKeys.length; i++) {
+    const k = rootKeys[i];
+    const s = shape[k] as any;
+    const isOpt = s && s.__kind === 'optional' && s.inner;
+    (rootNode as any).optional[i] = !!isOpt;
+    const base = isOpt ? (s.inner as Schema<any>) : s as Schema<any>;
+    const node = toNode(base);
+    if (!node) return null;
+    (rootNode as any).children[i] = node;
+  }
+
+  // Depth-5 is small; implement an explicit stack without recursion
+  type Frame = { node: IterNode; value: any };
+  return function(obj: unknown): boolean {
+    if (obj === null || typeof obj !== 'object') return false;
+    const stack: Frame[] = new Array(64);
+    let sp = 0;
+    stack[sp++] = { node: rootNode, value: obj };
+
+    while (sp > 0) {
+      const fr = stack[--sp];
+      const n = fr.node;
+      const v = fr.value;
+      if (n.kind === 'string') { if (typeof v !== 'string') return false; continue; }
+      if (n.kind === 'number') { if (typeof v !== 'number') return false; continue; }
+      if (n.kind === 'boolean') { if (typeof v !== 'boolean') return false; continue; }
+      // object
+      if (v === null || typeof v !== 'object') return false;
+      const keys = (n as any).keys as string[];
+      const children = (n as any).children as IterNode[];
+      const optional = (n as any).optional as boolean[];
+      // validate properties; push children in reverse order to process in key order
+      for (let i = keys.length - 1; i >= 0; i--) {
+        const k = keys[i];
+        if (!Object.prototype.hasOwnProperty.call(v, k)) {
+          if (!optional[i]) return false;
+          continue;
+        }
+        const childVal = (v as any)[k];
+        stack[sp++] = { node: children[i], value: childVal };
+      }
+    }
+    return true;
+  };
 }
 
 // Compile validation paths for efficient nested validation (legacy fallback)
