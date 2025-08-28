@@ -315,7 +315,7 @@ var p1,p2,v;
 ");
 
         // Helper to emit a leaf check from a starting var and remaining path
-        let mut emit_leaf = |body: &mut String, start: &str, ff: &FlatField, start_idx: usize| {
+        let emit_leaf = |body: &mut String, start: &str, ff: &FlatField, start_idx: usize| {
             body.push_str("v="); body.push_str(start); body.push_str(";
 ");
             for key in ff.path.iter().skip(start_idx) {
