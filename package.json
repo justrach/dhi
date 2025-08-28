@@ -43,6 +43,9 @@
     "test:wasm": "cd rust && wasm-pack test --node",
     "test:jest": "node --experimental-vm-modules --no-warnings ./node_modules/jest/bin/jest.js",
     "benchmark": "bun run benchmarks/benchmark.ts",
+    "benchmark:comprehensive": "bun run benchmarks/comprehensive.ts",
+    "benchmark:real": "bun run benchmarks/realworld.ts",
+    "benchmark:parallel": "node --experimental-modules --no-warnings --loader ts-node/esm benchmarks/parallel_nested.ts",
     "example": "bun run examples/example.ts",
     "publish": "npm run build && npm publish"
   },

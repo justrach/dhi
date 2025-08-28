@@ -3,7 +3,11 @@ set -e
 
 # Build Rust WASM with ES module target
 cd rust
-wasm-pack build --target web
+# Enable WASM SIMD only for the wasm32 target; avoid leaking flags into host builds
+OLD_RUSTFLAGS="$RUSTFLAGS"
+export RUSTFLAGS="-C target-feature=+simd128"
+wasm-pack build --target web --release
+export RUSTFLAGS="$OLD_RUSTFLAGS"
 
 # Move WASM files to dist
 cd ..
@@ -16,6 +20,7 @@ npm run build:ts
 # Build Rust library
 echo "Building Rust core..."
 cd rust
+# Build native host library without WASM-specific flags
 cargo build --release
 cd ..
 

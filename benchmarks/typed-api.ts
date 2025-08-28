@@ -35,6 +35,10 @@ function measurePerformance(fn: () => void, iterations: number = 10): {
   return { mean, median, p95, p99, min, max, stdDev };
 }
 
+// Allow smaller, quicker runs via environment variables
+const ITERATIONS = Number.parseInt(process.env.DHI_BENCH_ITERATIONS || '', 10) || 3;
+const BENCH_SIZE = Number.parseInt(process.env.DHI_BENCH_SIZE || '', 10) || 10000;
+
 // Type-safe schema definitions
 interface User {
   name: string;
@@ -121,22 +125,22 @@ async function runTypedAPIBenchmarks() {
   const scenarios = [
     {
       name: 'Simple 4-Field Required Schema',
-      dataSize: 1000000,
-      data: generateUsers(1000000),
+      dataSize: BENCH_SIZE,
+      data: generateUsers(BENCH_SIZE),
       dhiSchema: userSchema,
       zodSchema: zodUserSchema
     },
     {
       name: 'Simple 4-Field with Optional',
-      dataSize: 1000000,
-      data: generateUsersOptional(1000000),
+      dataSize: BENCH_SIZE,
+      data: generateUsersOptional(BENCH_SIZE),
       dhiSchema: userOptionalSchema,
       zodSchema: zodUserOptionalSchema
     },
     {
       name: 'Mixed Valid/Invalid Data',
-      dataSize: 500000,
-      data: generateMixedValidInvalid(500000),
+      dataSize: BENCH_SIZE,
+      data: generateMixedValidInvalid(BENCH_SIZE),
       dhiSchema: userSchema,
       zodSchema: zodUserSchema
     }
@@ -156,12 +160,12 @@ async function runTypedAPIBenchmarks() {
     console.log('⚡ Running DHI TypeScript-First API benchmark...');
     const dhiStats = measurePerformance(() => {
       scenario.dhiSchema.validateBatch(scenario.data);
-    }, 10);
+    }, ITERATIONS);
     
     console.log('⚡ Running Zod benchmark...');
     const zodStats = measurePerformance(() => {
       scenario.data.map(item => scenario.zodSchema.safeParse(item));
-    }, 10);
+    }, ITERATIONS);
     
     const dhiThroughput = scenario.dataSize / (dhiStats.mean / 1000);
     const zodThroughput = scenario.dataSize / (zodStats.mean / 1000);

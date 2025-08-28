@@ -21,7 +21,8 @@ pub struct DhiCore {
     is_strict_primitive_schema: bool,
     // Flattened fast path data
     strict_fields: Vec<(JsValue, u8)>, // (key, type_tag)
-    fast_fields: Vec<(JsValue, FieldType)>, // for non-strict fast path
+    // For non-strict fast path include required flag to avoid extra lookups
+    fast_fields: Vec<(JsValue, FieldType, bool)>,
 }
 
 #[derive(Debug, Clone)]
@@ -206,7 +207,7 @@ impl DhiCore {
         
         if !self.has_complex_types {
             self.fast_fields = self.schema.iter()
-                .map(|(_k, v)| (v.key.clone(), v.field_type.clone()))
+                .map(|(_k, v)| (v.key.clone(), v.field_type.clone(), v.required))
                 .collect();
         } else {
             self.fast_fields.clear();
@@ -235,24 +236,95 @@ impl DhiCore {
     // SIMD-style primitive validation - processes multiple items with minimal overhead
     fn validate_batch_simd_primitives(&self, items: &Array, results: &Array, len: usize) {
         let field_count = self.strict_fields.len();
-        
-        // Process in SIMD-sized batches for better cache utilization
+        // Process in SIMD-sized batches for better cache/utilization without allocating
         for batch_start in (0..len).step_by(SIMD_BATCH_SIZE) {
             let batch_end = (batch_start + SIMD_BATCH_SIZE).min(len);
-            
-            // Pre-fetch objects to improve cache locality
-            let mut objects = Vec::with_capacity(SIMD_BATCH_SIZE);
-            for i in batch_start..batch_end {
-                objects.push(items.get(i as u32));
-            }
-            
-            // Validate batch with unrolled loops based on field count
             match field_count {
-                1 => self.validate_batch_1_field(&objects, results, batch_start),
-                2 => self.validate_batch_2_fields(&objects, results, batch_start),
-                3 => self.validate_batch_3_fields(&objects, results, batch_start),
-                4 => self.validate_batch_4_fields(&objects, results, batch_start),
-                _ => self.validate_batch_n_fields(&objects, results, batch_start),
+                1 => {
+                    let (key, tag) = &self.strict_fields[0];
+                    for i in batch_start..batch_end {
+                        let obj_val = items.get(i as u32);
+                        let valid = if let Some(obj) = obj_val.dyn_ref::<Object>() {
+                            if let Ok(value) = Reflect::get(obj, key) {
+                                !value.is_undefined() && self.validate_primitive_type(&value, *tag)
+                            } else { false }
+                        } else { false };
+                        results.set(i as u32, JsValue::from_bool(valid));
+                    }
+                }
+                2 => {
+                    let (k1, t1) = &self.strict_fields[0];
+                    let (k2, t2) = &self.strict_fields[1];
+                    for i in batch_start..batch_end {
+                        let obj_val = items.get(i as u32);
+                        let valid = if let Some(obj) = obj_val.dyn_ref::<Object>() {
+                            let v1 = Reflect::get(obj, k1).ok();
+                            let v2 = Reflect::get(obj, k2).ok();
+                            if let (Some(a), Some(b)) = (v1, v2) {
+                                !a.is_undefined() && !b.is_undefined() &&
+                                self.validate_primitive_type(&a, *t1) &&
+                                self.validate_primitive_type(&b, *t2)
+                            } else { false }
+                        } else { false };
+                        results.set(i as u32, JsValue::from_bool(valid));
+                    }
+                }
+                3 => {
+                    let (k1, t1) = &self.strict_fields[0];
+                    let (k2, t2) = &self.strict_fields[1];
+                    let (k3, t3) = &self.strict_fields[2];
+                    for i in batch_start..batch_end {
+                        let obj_val = items.get(i as u32);
+                        let valid = if let Some(obj) = obj_val.dyn_ref::<Object>() {
+                            let v1 = Reflect::get(obj, k1).ok();
+                            let v2 = Reflect::get(obj, k2).ok();
+                            let v3 = Reflect::get(obj, k3).ok();
+                            if let (Some(a), Some(b), Some(c)) = (v1, v2, v3) {
+                                !a.is_undefined() && !b.is_undefined() && !c.is_undefined() &&
+                                self.validate_primitive_type(&a, *t1) &&
+                                self.validate_primitive_type(&b, *t2) &&
+                                self.validate_primitive_type(&c, *t3)
+                            } else { false }
+                        } else { false };
+                        results.set(i as u32, JsValue::from_bool(valid));
+                    }
+                }
+                4 => {
+                    let (k1, t1) = &self.strict_fields[0];
+                    let (k2, t2) = &self.strict_fields[1];
+                    let (k3, t3) = &self.strict_fields[2];
+                    let (k4, t4) = &self.strict_fields[3];
+                    for i in batch_start..batch_end {
+                        let obj_val = items.get(i as u32);
+                        let valid = if let Some(obj) = obj_val.dyn_ref::<Object>() {
+                            let v1 = Reflect::get(obj, k1).ok();
+                            let v2 = Reflect::get(obj, k2).ok();
+                            let v3 = Reflect::get(obj, k3).ok();
+                            let v4 = Reflect::get(obj, k4).ok();
+                            if let (Some(a), Some(b), Some(c), Some(d)) = (v1, v2, v3, v4) {
+                                !a.is_undefined() && !b.is_undefined() && !c.is_undefined() && !d.is_undefined() &&
+                                self.validate_primitive_type(&a, *t1) &&
+                                self.validate_primitive_type(&b, *t2) &&
+                                self.validate_primitive_type(&c, *t3) &&
+                                self.validate_primitive_type(&d, *t4)
+                            } else { false }
+                        } else { false };
+                        results.set(i as u32, JsValue::from_bool(valid));
+                    }
+                }
+                _ => {
+                    for i in batch_start..batch_end {
+                        let obj_val = items.get(i as u32);
+                        let valid = if let Some(obj) = obj_val.dyn_ref::<Object>() {
+                            self.strict_fields.iter().all(|(field_key, tag)| {
+                                if let Ok(value) = Reflect::get(obj, field_key) {
+                                    !value.is_undefined() && self.validate_primitive_type(&value, *tag)
+                                } else { false }
+                            })
+                        } else { false };
+                        results.set(i as u32, JsValue::from_bool(valid));
+                    }
+                }
             }
         }
     }
@@ -380,11 +452,18 @@ impl DhiCore {
                     continue;
                 };
 
-                let valid = self.fast_fields.iter().all(|(field_name, field_type)| {
-                    if let Ok(value) = Reflect::get(obj, field_name) {
-                        self.validate_value_bool(&value, field_type)
-                    } else { false }
-                });
+                let mut valid = true;
+                for (field_name, field_type, required) in &self.fast_fields {
+                    let value = Reflect::get(obj, field_name);
+                    if value.is_err() {
+                        if *required { valid = false; break; } else { continue; }
+                    }
+                    let v = value.unwrap();
+                    if v.is_undefined() {
+                        if *required { valid = false; break; } else { continue; }
+                    }
+                    if !self.validate_value_bool(&v, field_type) { valid = false; break; }
+                }
                 
                 results.set(i as u32, JsValue::from_bool(valid));
             }

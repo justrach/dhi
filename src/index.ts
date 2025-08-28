@@ -10,7 +10,11 @@ export {
   array,
   model,
   union,
-  type Schema
+  discriminatedUnion,
+  optional,
+  nullable,
+  type Schema,
+  type ObjectSchema
 } from './typed';
 
 // Rename the Infer type to avoid conflicts

@@ -46,6 +46,7 @@ function validateBatch1Field<T extends Record<string, unknown>>(
 ): void {
   const key = keys[0];
   const validator = shape[key];
+  const isOptional = (validator as Schema<unknown>).__kind === 'optional';
   
   for (let i = start; i < end; i++) {
     const value = values[i];
@@ -54,7 +55,10 @@ function validateBatch1Field<T extends Record<string, unknown>>(
       continue;
     }
     const obj = value as Record<string, unknown>;
-    results[i] = validator.validateBatch([obj[key]])[0];
+    const v = obj[key];
+    results[i] = isOptional
+      ? (v === undefined || validator.validateBatch([v])[0])
+      : validator.validateBatch([v])[0];
   }
 }
 
@@ -66,6 +70,8 @@ function validateBatch2Fields<T extends Record<string, unknown>>(
   const [key1, key2] = keys;
   const validator1 = shape[key1];
   const validator2 = shape[key2];
+  const isOpt1 = (validator1 as Schema<unknown>).__kind === 'optional';
+  const isOpt2 = (validator2 as Schema<unknown>).__kind === 'optional';
   
   for (let i = start; i < end; i++) {
     const value = values[i];
@@ -74,8 +80,11 @@ function validateBatch2Fields<T extends Record<string, unknown>>(
       continue;
     }
     const obj = value as Record<string, unknown>;
-    results[i] = validator1.validateBatch([obj[key1]])[0] && 
-                 validator2.validateBatch([obj[key2]])[0];
+    const v1 = obj[key1];
+    const v2 = obj[key2];
+    const ok1 = isOpt1 ? (v1 === undefined || validator1.validateBatch([v1])[0]) : validator1.validateBatch([v1])[0];
+    const ok2 = isOpt2 ? (v2 === undefined || validator2.validateBatch([v2])[0]) : validator2.validateBatch([v2])[0];
+    results[i] = ok1 && ok2;
   }
 }
 
@@ -88,6 +97,9 @@ function validateBatch3Fields<T extends Record<string, unknown>>(
   const validator1 = shape[key1];
   const validator2 = shape[key2];
   const validator3 = shape[key3];
+  const isOpt1 = (validator1 as Schema<unknown>).__kind === 'optional';
+  const isOpt2 = (validator2 as Schema<unknown>).__kind === 'optional';
+  const isOpt3 = (validator3 as Schema<unknown>).__kind === 'optional';
   
   for (let i = start; i < end; i++) {
     const value = values[i];
@@ -96,9 +108,13 @@ function validateBatch3Fields<T extends Record<string, unknown>>(
       continue;
     }
     const obj = value as Record<string, unknown>;
-    results[i] = validator1.validateBatch([obj[key1]])[0] && 
-                 validator2.validateBatch([obj[key2]])[0] &&
-                 validator3.validateBatch([obj[key3]])[0];
+    const v1 = obj[key1];
+    const v2 = obj[key2];
+    const v3 = obj[key3];
+    const ok1 = isOpt1 ? (v1 === undefined || validator1.validateBatch([v1])[0]) : validator1.validateBatch([v1])[0];
+    const ok2 = isOpt2 ? (v2 === undefined || validator2.validateBatch([v2])[0]) : validator2.validateBatch([v2])[0];
+    const ok3 = isOpt3 ? (v3 === undefined || validator3.validateBatch([v3])[0]) : validator3.validateBatch([v3])[0];
+    results[i] = ok1 && ok2 && ok3;
   }
 }
 
@@ -112,6 +128,10 @@ function validateBatch4Fields<T extends Record<string, unknown>>(
   const validator2 = shape[key2];
   const validator3 = shape[key3];
   const validator4 = shape[key4];
+  const isOpt1 = (validator1 as Schema<unknown>).__kind === 'optional';
+  const isOpt2 = (validator2 as Schema<unknown>).__kind === 'optional';
+  const isOpt3 = (validator3 as Schema<unknown>).__kind === 'optional';
+  const isOpt4 = (validator4 as Schema<unknown>).__kind === 'optional';
   
   for (let i = start; i < end; i++) {
     const value = values[i];
@@ -120,10 +140,15 @@ function validateBatch4Fields<T extends Record<string, unknown>>(
       continue;
     }
     const obj = value as Record<string, unknown>;
-    results[i] = validator1.validateBatch([obj[key1]])[0] && 
-                 validator2.validateBatch([obj[key2]])[0] &&
-                 validator3.validateBatch([obj[key3]])[0] &&
-                 validator4.validateBatch([obj[key4]])[0];
+    const v1 = obj[key1];
+    const v2 = obj[key2];
+    const v3 = obj[key3];
+    const v4 = obj[key4];
+    const ok1 = isOpt1 ? (v1 === undefined || validator1.validateBatch([v1])[0]) : validator1.validateBatch([v1])[0];
+    const ok2 = isOpt2 ? (v2 === undefined || validator2.validateBatch([v2])[0]) : validator2.validateBatch([v2])[0];
+    const ok3 = isOpt3 ? (v3 === undefined || validator3.validateBatch([v3])[0]) : validator3.validateBatch([v3])[0];
+    const ok4 = isOpt4 ? (v4 === undefined || validator4.validateBatch([v4])[0]) : validator4.validateBatch([v4])[0];
+    results[i] = ok1 && ok2 && ok3 && ok4;
   }
 }
 
@@ -139,7 +164,14 @@ function validateBatchNFields<T extends Record<string, unknown>>(
       continue;
     }
     const obj = value as Record<string, unknown>;
-    results[i] = keys.every(key => shape[key].validateBatch([obj[key]])[0]);
+    results[i] = keys.every(key => {
+      const validator = shape[key];
+      const v = obj[key];
+      if ((validator as Schema<unknown>).__kind === 'optional') {
+        return v === undefined || validator.validateBatch([v])[0];
+      }
+      return validator.validateBatch([v])[0];
+    });
   }
 }
 
@@ -155,17 +187,29 @@ function analyzeSchema<T extends Record<string, unknown>>(shape: ObjectSchemaSha
   let maxDepth = 1;
   let hasNestedObjects = false;
   let allPrimitive = true;
-  
+
   for (const key of keys) {
-    const schema = shape[key];
-    if (schema && typeof schema === 'object' && 'shape' in schema) {
-      // This is a nested object schema
+    const s = shape[key] as Schema<any> | undefined;
+    if (!s || typeof s !== 'object') { allPrimitive = false; continue; }
+    let current: Schema<any> = s;
+    let kind = current.__kind;
+    // Unwrap optional for analysis
+    if (kind === 'optional' && (current as any).inner) {
+      current = (current as any).inner as Schema<any>;
+      kind = current.__kind;
+    }
+
+    if (kind === 'object' && 'shape' in (current as any)) {
       hasNestedObjects = true;
       allPrimitive = false;
-      const nestedAnalysis = analyzeSchema((schema as ObjectSchema<any>).shape);
+      const nestedAnalysis = analyzeSchema(((current as unknown) as ObjectSchema<any>).shape);
       maxDepth = Math.max(maxDepth, nestedAnalysis.maxDepth + 1);
-    } else if (schema && typeof schema === 'object' && schema.toString().includes('Array')) {
-      // This is an array schema
+    } else if (kind === 'array' || kind === 'union') {
+      allPrimitive = false;
+    } else if (kind === 'string' || kind === 'number' || kind === 'boolean') {
+      // still primitive
+    } else {
+      // Unknown/complex kinds are not primitive
       allPrimitive = false;
     }
   }
@@ -250,62 +294,106 @@ function generateValidationCode<T extends Record<string, unknown>>(keys: string[
 }
 
 // Compile validation paths for efficient nested validation (legacy fallback)
-function compileValidationPaths<T extends Record<string, unknown>>(keys: string[], shape: ObjectSchemaShape<T>): ValidationPath[] {
+function compileValidationPaths<T extends Record<string, unknown>>(keys: string[], shape: ObjectSchemaShape<T>, parentOptional: boolean = false): ValidationPath[] {
   const paths: ValidationPath[] = [];
-  
+
   for (const key of keys) {
-    const schema = shape[key];
-    if (schema && typeof schema === 'object' && 'shape' in schema) {
-      // Nested object - flatten the validation path
-      const objectSchema = schema as ObjectSchema<any>;
-      const nestedPaths = compileValidationPaths(Object.keys(objectSchema.shape), objectSchema.shape);
+    let schema = shape[key] as Schema<any>;
+    let isOptional = !!(schema && typeof schema === 'object' && schema.__kind === 'optional');
+    const inner = isOptional && (schema as any).inner ? (schema as any).inner as Schema<any> : schema;
+
+    if (inner && typeof inner === 'object' && 'shape' in (inner as any)) {
+      const objectSchema = (inner as unknown) as ObjectSchema<any>;
+      const nestedPaths = compileValidationPaths(Object.keys(objectSchema.shape), objectSchema.shape, parentOptional || isOptional);
       for (const nestedPath of nestedPaths) {
         paths.push({
           path: [key, ...nestedPath.path],
-          validator: nestedPath.validator
+          validator: nestedPath.validator,
+          optional: (parentOptional || isOptional || nestedPath.optional),
+          kind: nestedPath.kind
         });
       }
     } else {
-      // Direct field
+      const kind = (inner && (inner as any).__kind && ((inner as any).__kind === 'string' || (inner as any).__kind === 'number' || (inner as any).__kind === 'boolean'))
+        ? ((inner as any).__kind as 'string' | 'number' | 'boolean')
+        : undefined;
       paths.push({
         path: [key],
-        validator: schema
+        validator: inner,
+        optional: (parentOptional || isOptional),
+        kind
       });
     }
   }
-  
+
   return paths;
 }
 
 interface ValidationPath {
   path: string[];
   validator: Schema<unknown>;
+  optional: boolean;
+  kind?: 'string' | 'number' | 'boolean';
 }
 
 // Fast nested object validation using pre-compiled paths (legacy fallback)
 function validateObjectWithPaths(obj: unknown, paths: ValidationPath[]): boolean {
   const target = obj as Record<string, unknown>;
-  
-  for (const { path, validator } of paths) {
+
+  for (const p of paths) {
+    const { path, validator, optional, kind } = p;
     let current: any = target;
-    
+
     // Navigate to the nested value
     for (let i = 0; i < path.length - 1; i++) {
-      current = current[path[i]];
-      if (typeof current !== 'object' || current === null) {
+      if (current == null || typeof current !== 'object') {
+        if (optional) {
+          // Missing optional parent object -> path is valid by omission
+          current = undefined;
+          break;
+        }
+        return false;
+      }
+      current = (current as any)[path[i]];
+      if (current == null && optional) {
+        // Early exit for optional path
+        current = undefined;
+        break;
+      }
+    }
+
+    // If we short-circuited due to optional missing parent
+    if (current === undefined && optional) {
+      continue;
+    }
+
+    if (current == null || typeof current !== 'object') {
+      if (optional) continue;
+      return false;
+    }
+
+    // Validate the final value
+    const finalKey = path[path.length - 1];
+    const value = (current as any)[finalKey];
+
+    if (value === undefined && optional) {
+      continue;
+    }
+
+    // Primitive fast path via typeof; fallback to schema validation for complex types
+    if (kind === 'string') {
+      if (typeof value !== 'string') return false;
+    } else if (kind === 'number') {
+      if (typeof value !== 'number') return false;
+    } else if (kind === 'boolean') {
+      if (typeof value !== 'boolean') return false;
+    } else {
+      if (!validator.validateBatch([value])[0]) {
         return false;
       }
     }
-    
-    // Validate the final value
-    const finalKey = path[path.length - 1];
-    const value = current[finalKey];
-    
-    if (!validator.validateBatch([value])[0]) {
-      return false;
-    }
   }
-  
+
   return true;
 }
 
@@ -313,6 +401,10 @@ export interface Schema<T> {
   validate(value: unknown): T;
   validateBatch(values: unknown[]): boolean[];
   safeParse(value: unknown): { success: true; data: T } | { success: false; error: string };
+  // Internal discriminator for optimized paths
+  __kind?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'union' | 'optional';
+  // Optional: used by wrappers like optional() to expose the inner schema for analysis
+  inner?: Schema<any>;
 }
 
 export interface ArraySchema<T> extends Schema<T[]> {
@@ -329,8 +421,28 @@ export interface ObjectSchema<T> extends Schema<T> {
 
 // ... (rest of the code remains the same)
 
+// Nullable wrapper: accepts null in addition to the inner schema
+export function nullable<T>(inner: Schema<T>): Schema<T | null> {
+  return {
+    validate(value: unknown): T | null {
+      if (value === null) return null;
+      return inner.validate(value);
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      return values.map(v => (v === null) ? true : inner.validateBatch([v])[0]);
+    },
+    safeParse(value: unknown) {
+      if (value === null) {
+        return { success: true as const, data: null };
+      }
+      return inner.safeParse(value) as any;
+    }
+  };
+}
+
 export function array<T>(itemSchema: Schema<T>): ArraySchema<T> {
   return {
+    __kind: 'array',
     item: itemSchema,
     validate(value: unknown): T[] {
       if (!Array.isArray(value)) {
@@ -341,17 +453,53 @@ export function array<T>(itemSchema: Schema<T>): ArraySchema<T> {
     validateBatch(values: unknown[]): boolean[] {
       return values.map(value => {
         if (!Array.isArray(value)) return false;
-        
-        // Use optimized validation for primitive arrays
-        const itemTypeStr = itemSchema.toString();
-        if (itemTypeStr.includes('string')) {
-          return isArrayOfPrimitives(value, 'string');
-        } else if (itemTypeStr.includes('number')) {
-          return isArrayOfPrimitives(value, 'number');
-        } else if (itemTypeStr.includes('boolean')) {
-          return isArrayOfPrimitives(value, 'boolean');
+
+        // Primitive arrays fast path
+        const kind = (itemSchema as Schema<T>).__kind;
+        if (kind === 'string') return isArrayOfPrimitives(value, 'string');
+        if (kind === 'number') return isArrayOfPrimitives(value, 'number');
+        if (kind === 'boolean') return isArrayOfPrimitives(value, 'boolean');
+
+        // Array of object fast path: inner object with ≤4 primitive/optional-primitive fields
+        if ((itemSchema as any).__kind === 'object' && typeof (itemSchema as any).shape === 'object') {
+          const shape = (itemSchema as any).shape as Record<string, Schema<any>>;
+          const keys = Object.keys(shape);
+          if (keys.length > 0 && keys.length <= 4) {
+            let primitiveOnly = true;
+            const fields: { key: string; kind: 'string'|'number'|'boolean'|null; optional: boolean; inner?: Schema<any> }[] = [];
+            for (const k of keys) {
+              const s = shape[k] as any;
+              if (s && s.__kind === 'optional' && s.inner) {
+                const inner = s.inner as Schema<any> & { __kind?: string };
+                const ik = inner.__kind;
+                const prim = ik === 'string' || ik === 'number' || ik === 'boolean';
+                if (!prim) { primitiveOnly = false; break; }
+                fields.push({ key: k, kind: ik as any, optional: true, inner });
+              } else {
+                const ik = s && s.__kind;
+                const prim = ik === 'string' || ik === 'number' || ik === 'boolean';
+                if (!prim) { primitiveOnly = false; break; }
+                fields.push({ key: k, kind: ik as any, optional: false });
+              }
+            }
+            if (primitiveOnly) {
+              // Validate each element quickly using direct typeof checks
+              for (let i = 0; i < value.length; i++) {
+                const el = value[i];
+                if (typeof el !== 'object' || el === null) return false;
+                for (const f of fields) {
+                  const v = (el as any)[f.key];
+                  if (v === undefined) { if (f.optional) continue; else return false; }
+                  if (f.kind === 'string') { if (typeof v !== 'string') return false; }
+                  else if (f.kind === 'number') { if (typeof v !== 'number') return false; }
+                  else if (f.kind === 'boolean') { if (typeof v !== 'boolean') return false; }
+                }
+              }
+              return true;
+            }
+          }
         }
-        
+
         // Fallback to individual validation
         try {
           value.forEach(item => itemSchema.validate(item));
@@ -395,10 +543,8 @@ function validateArraySIMD<T>(arr: unknown[], itemSchema: Schema<T>): boolean {
 
 // Helper to detect primitive schemas for optimization
 function isPrimitiveSchema<T>(schema: Schema<T>): boolean {
-  // Simple heuristic - check if it's one of our primitive schemas
-  const schemaStr = schema.toString();
-  return schemaStr.includes('typeof') && 
-         (schemaStr.includes('string') || schemaStr.includes('number') || schemaStr.includes('boolean'));
+  // Check internal discriminator set by primitive schema constructors
+  return schema.__kind === 'string' || schema.__kind === 'number' || schema.__kind === 'boolean';
 }
 
 type ObjectSchemaShape<T> = {
@@ -436,6 +582,7 @@ export function object<T extends Record<string, unknown>>(
   const maxDepth = schemaAnalysis.maxDepth;
 
   return {
+    __kind: 'object',
     shape,
     validate(value: unknown): T {
       if (typeof value !== 'object' || value === null) {
@@ -489,6 +636,7 @@ export type Infer<T extends Schema<unknown>> = T extends Schema<infer U> ? U : n
 // Basic primitive schemas
 export function string(): Schema<string> {
   return {
+    __kind: 'string',
     validate(value: unknown): string {
       if (typeof value !== 'string') {
         throw new Error('Expected string');
@@ -511,6 +659,7 @@ export function string(): Schema<string> {
 
 export function number(): Schema<number> {
   return {
+    __kind: 'number',
     validate(value: unknown): number {
       if (typeof value !== 'number') {
         throw new Error('Expected number');
@@ -533,6 +682,7 @@ export function number(): Schema<number> {
 
 export function boolean(): Schema<boolean> {
   return {
+    __kind: 'boolean',
     validate(value: unknown): boolean {
       if (typeof value !== 'boolean') {
         throw new Error('Expected boolean');
@@ -553,11 +703,46 @@ export function boolean(): Schema<boolean> {
   };
 }
 
+// Optional wrapper schema
+export function optional<T>(schema: Schema<T>): Schema<T | undefined> {
+  return {
+    __kind: 'optional',
+    // Expose inner schema for analysis and nested path compilation
+    inner: schema as Schema<T>,
+    validate(value: unknown): T | undefined {
+      if (value === undefined) return undefined;
+      return schema.validate(value);
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      const len = values.length;
+      const results = new Array<boolean>(len);
+      for (let i = 0; i < len; i++) {
+        const v = values[i];
+        if (v === undefined) {
+          results[i] = true;
+        } else {
+          results[i] = schema.validateBatch([v])[0];
+        }
+      }
+      return results;
+    },
+    safeParse(value: unknown) {
+      try {
+        const data = this.validate(value);
+        return { success: true as const, data };
+      } catch (error) {
+        return { success: false as const, error: error instanceof Error ? error.message : 'Validation failed' };
+      }
+    }
+  };
+}
+
 // Union schema for multiple type validation
 export function union<T extends readonly Schema<any>[]>(
   schemas: T
 ): UnionSchema<T[number] extends Schema<infer U> ? U : never> {
   return {
+    __kind: 'union',
     options: [...schemas] as Schema<T[number] extends Schema<infer U> ? U : never>[],
     validate(value: unknown): T[number] extends Schema<infer U> ? U : never {
       for (const schema of schemas) {
@@ -589,6 +774,63 @@ export function union<T extends readonly Schema<any>[]>(
       return { success: false as const, error: 'No matching schema found' };
     }
   };
+}
+
+// Discriminated union with fast dispatch based on a key
+export function discriminatedUnion<K extends string, M extends Record<string, ObjectSchema<any>>>(
+  discriminator: K,
+  mapping: M
+): Schema<Infer<M[keyof M]>> {
+  const keys = Object.keys(mapping);
+  const schemasByKey = mapping as Record<string, ObjectSchema<any>>;
+
+  return {
+    validate(value: unknown) {
+      if (typeof value !== 'object' || value === null) {
+        throw new Error('Expected object for discriminated union');
+      }
+      const disc = (value as any)[discriminator];
+      const schema = schemasByKey[String(disc)];
+      if (!schema) throw new Error('Invalid discriminator value');
+      return schema.validate(value);
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      const indexBuckets: Record<string, number[]> = {};
+      const valueBuckets: Record<string, unknown[]> = {};
+
+      for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        if (typeof v !== 'object' || v === null) {
+          continue;
+        }
+        const disc = (v as any)[discriminator];
+        const key = String(disc);
+        if (!(key in schemasByKey)) continue;
+        (indexBuckets[key] ||= []).push(i);
+        (valueBuckets[key] ||= []).push(v);
+      }
+
+      const results = new Array<boolean>(values.length).fill(false);
+      for (const k of Object.keys(valueBuckets)) {
+        const schema = schemasByKey[k];
+        const bucket = valueBuckets[k];
+        const idxs = indexBuckets[k];
+        const batchRes = schema.validateBatch(bucket);
+        for (let j = 0; j < idxs.length; j++) {
+          results[idxs[j]] = batchRes[j];
+        }
+      }
+      return results;
+    },
+    safeParse(value: unknown) {
+      try {
+        const data = this.validate(value);
+        return { success: true as const, data };
+      } catch (error) {
+        return { success: false as const, error: error instanceof Error ? error.message : 'Validation failed' };
+      }
+    }
+  } as Schema<Infer<M[keyof M]>>;
 }
 
 // User-defined model creation API
