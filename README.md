@@ -199,6 +199,15 @@ bun add dhi
 
 ---
 
+## Fun Fact: Small Browser Payload
+
+For browsers, DHI ships a compact payload:
+
+- JS + WASM total: ~46 KB gzip (~158 KB raw)
+- Breakdown (gzip): `typed.js` ~6.9 KB, `zod-compat.js` ~2.2 KB, `core.js` ~2.0 KB, `wasm.js` ~1.8 KB, `index.js` ~0.6 KB, `dhi_core_bg.wasm` ~32.9 KB
+- Note: The `dhi_core.node` binary (~369 KB) is Node-only and not shipped to browsers.
+
+
 ## 🔨 Legacy WASM API (optional)
 
 ```typescript
