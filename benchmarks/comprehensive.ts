@@ -1,4 +1,4 @@
-import { createType } from '../src/index';
+import { object, string, number, boolean, array } from '../src/index';
 import { z } from 'zod';
 
 // Performance measurement utilities
@@ -94,17 +94,12 @@ async function runComprehensiveBenchmarks() {
       name: 'Simple 4-Field Schema (Current benchmark2.ts)',
       dataSize: 1000000,
       generator: generateSimpleUsers,
-      dhiSchema: await (async () => {
-        const tStr = await createType<string>(); tStr.string();
-        const tNum = await createType<number>(); tNum.number();
-        const tBool = await createType<boolean>(); tBool.boolean();
-        return (await createType<any>()).object({
-          name: tStr,
-          age: tNum,
-          email: tStr,
-          active: tBool
-        });
-      })(),
+      dhiSchema: object({
+        name: string(),
+        age: number(),
+        email: string(),
+        active: boolean()
+      }),
       zodSchema: z.object({
         name: z.string(),
         age: z.number(),
@@ -116,39 +111,23 @@ async function runComprehensiveBenchmarks() {
       name: 'Nested Object Schema',
       dataSize: 100000,
       generator: generateNestedData,
-      dhiSchema: await (async () => {
-        const tNum = await createType<number>(); tNum.number();
-        const tStr = await createType<string>(); tStr.string();
-        const tBool = await createType<boolean>(); tBool.boolean();
-
-        const tPreferences = (await createType<any>()).object({
-          theme: tStr,
-          notifications: tBool
-        });
-
-        const tProfile = (await createType<any>()).object({
-          age: tNum,
-          preferences: tPreferences
-        });
-
-        const tUser = (await createType<any>()).object({
-          name: tStr,
-          profile: tProfile
-        });
-
-        const tId = await createType<number>(); tId.number();
-        const tTags = (await createType<any>()).array(tStr);
-        const tMetadata = (await createType<any>()).object({
-          created: tStr,
-          tags: tTags
-        });
-
-        return (await createType<any>()).object({
-          id: tId,
-          user: tUser,
-          metadata: tMetadata
-        });
-      })(),
+      dhiSchema: object({
+        id: number(),
+        user: object({
+          name: string(),
+          profile: object({
+            age: number(),
+            preferences: object({
+              theme: string(),
+              notifications: boolean()
+            })
+          })
+        }),
+        metadata: object({
+          created: string(),
+          tags: array(string())
+        })
+      }),
       zodSchema: z.object({
         id: z.number(),
         user: z.object({
@@ -171,20 +150,12 @@ async function runComprehensiveBenchmarks() {
       name: 'Array-Heavy Schema',
       dataSize: 50000,
       generator: generateArrayHeavyData,
-      dhiSchema: await (async () => {
-        const tId = await createType<number>(); tId.number();
-        const tNum = await createType<number>(); tNum.number();
-        const tStr = await createType<string>(); tStr.string();
-        const tScores = (await createType<any>()).array(tNum);
-        const tTags = (await createType<any>()).array(tStr);
-        const tMatrix = (await createType<any>()).array((await createType<any>()).array(tNum));
-        return (await createType<any>()).object({
-          id: tId,
-          scores: tScores,
-          tags: tTags,
-          matrix: tMatrix
-        });
-      })(),
+      dhiSchema: object({
+        id: number(),
+        scores: array(number()),
+        tags: array(string()),
+        matrix: array(array(number()))
+      }),
       zodSchema: z.object({
         id: z.number(),
         scores: z.array(z.number()),
@@ -196,16 +167,11 @@ async function runComprehensiveBenchmarks() {
       name: 'Mixed Valid/Invalid Data',
       dataSize: 500000,
       generator: generateMixedInvalidData,
-      dhiSchema: await (async () => {
-        const tStr = await createType<string>(); tStr.string();
-        const tNum = await createType<number>(); tNum.number();
-        const tBool = await createType<boolean>(); tBool.boolean();
-        return (await createType<any>()).object({
-          name: tStr,
-          age: tNum,
-          active: tBool
-        });
-      })(),
+      dhiSchema: object({
+        name: string(),
+        age: number(),
+        active: boolean()
+      }),
       zodSchema: z.object({
         name: z.string(),
         age: z.number(),
@@ -224,12 +190,12 @@ async function runComprehensiveBenchmarks() {
     
     // Warmup
     console.log('🔥 Warming up...');
-    scenario.dhiSchema.validate_batch(testData.slice(0, 1000));
+    scenario.dhiSchema.validateBatch(testData.slice(0, 1000));
     testData.slice(0, 1000).map(item => scenario.zodSchema.safeParse(item));
     
     console.log('⚡ Running DHI benchmark...');
     const dhiStats = measurePerformance(() => {
-      scenario.dhiSchema.validate_batch(testData);
+      scenario.dhiSchema.validateBatch(testData);
     }, 10);
     
     console.log('⚡ Running Zod benchmark...');
