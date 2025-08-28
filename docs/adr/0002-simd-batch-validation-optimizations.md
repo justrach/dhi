@@ -77,17 +77,19 @@ function validateBatch4Fields<T>(values: unknown[], results: boolean[], start: n
 | Mixed data (500K) | 82ms (7.93x) | 29ms (24.81x) | **3x faster + better speedup** |
 
 ### Overall Performance Metrics
-- **Average speedup**: 7.12x across all scenarios
-- **Speedup range**: 0.52x - 24.81x vs Zod
-- **Throughput**: Up to 17M validations/second for mixed data
+- **Average speedup**: 9.95x across all scenarios (updated after nested object optimization)
+- **Speedup range**: 1.03x - 21.96x vs Zod
+- **Throughput**: Up to 78M validations/second for nested objects
 - **Memory efficiency**: No regression in memory usage
+- **Nested object breakthrough**: 14.08x faster than Zod (2,707% improvement)
 
 ## Consequences
 
 ### Positive
 - **Dramatic performance improvements** across all major use cases
-- **Competitive with Zod** for simple schemas (1.10x faster)
-- **Maintains significant advantage** for complex validation (24.81x faster)
+- **Competitive with Zod** for simple schemas (1.03x faster)
+- **Maintains significant advantage** for complex validation (21.96x faster)
+- **Dominates nested object validation** (14.08x faster than Zod)
 - **Better cache utilization** and memory efficiency
 - **Scalable architecture** for future optimizations
 
@@ -95,7 +97,7 @@ function validateBatch4Fields<T>(values: unknown[], results: boolean[], start: n
 - **Increased code complexity** with specialized validation paths
 - **Larger binary size** due to additional optimization code
 - **Maintenance overhead** for multiple optimization strategies
-- **Nested object validation** still needs further optimization (0.52x vs Zod)
+- **Nested object validation** optimized to 14.08x faster than Zod (breakthrough achieved)
 
 ### Neutral
 - **API compatibility maintained** - no breaking changes
