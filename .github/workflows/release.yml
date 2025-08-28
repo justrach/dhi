@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/rustwasm/wasm-pack/master/install.sh | sh -s -- -f
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: bash scripts/build.sh
+
+      - name: Test (optional wasm tests disabled by default)
+        run: |
+          echo "Skipping wasm tests on CI by default" 
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public
+

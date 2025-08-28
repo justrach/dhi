@@ -11,24 +11,23 @@
 
 </div>
 
-# 🚀 DHI - High-Performance TypeScript Validation Library
+# 🚀 DHI — High‑Performance TypeScript Validation
 
-DHI is a blazing-fast TypeScript validation library that combines the developer experience of Zod with the performance of pure JavaScript optimizations. Built for applications that need to validate large datasets efficiently while maintaining compile-time type safety.
+DHI is a blazing‑fast TypeScript validation library with two faces:
 
-## 🚀 Performance
+- A modern, typed‑first API (recommended)
+- A familiar Zod‑like facade for easy migration
+
+It’s built for applications that validate large datasets efficiently while preserving compile‑time type safety and a great DX.
+
+## 🚀 Performance at a glance
 
 DHI significantly outperforms other validation libraries through two complementary approaches:
 
-### TypeScript-First API (Recommended)
-- **1.43x faster** than Zod v4 for simple schemas
-- **3.14x faster** for mixed valid/invalid data
-- **24.6M validations/second** for simple 4-field schemas
-- Pure JavaScript with zero WASM overhead
+DHI outperforms general‑purpose validators by combining JS fast paths (iterative deep‑object validators, array‑of‑object fast path) with a fused per‑schema JS validator that collapses multiple property reads into a single monomorphic function.
 
-### WASM-Based API (Legacy)
-- **5.68x faster** than Zod v4 for mixed valid/invalid data
-- Rust-powered validation with aggressive optimizations
-- Better for complex nested schemas
+- Typed‑first API (recommended): fast, type‑safe, zero WASM overhead
+- WASM/Rust (optional): batch primitives and deep trees with cross‑language optimizations
 
 ### Comprehensive Benchmark Results
 
@@ -118,6 +117,13 @@ if (result.success) {
 // Batch validation (ultra-fast for simple schemas)
 const users = [userData, /* ... more users */];
 const validationResults = userSchema.validateBatch(users);
+
+// Discriminated unions (fast dispatch)
+const Event = discriminatedUnion('type', {
+  click: object({ type: string(), x: number(), y: number() }),
+  page_view: object({ type: string(), url: string() }),
+  purchase: object({ type: string(), orderId: string(), value: number() })
+});
 ```
 
 ### Performance Comparison with Yup
@@ -193,7 +199,7 @@ bun add dhi
 
 ---
 
-## 🔨 Basic Usage
+## 🔨 Legacy WASM API (optional)
 
 ```typescript
 import { dhi } from 'dhi';
@@ -239,16 +245,17 @@ console.log(result.success);
 
 ## 🎓 Advanced Features
 
-- **Optional Fields:** `dhi.optional(dhi.string())`
-- **Nullable Fields:** `dhi.nullable(dhi.number())`
-- **Record Types:** `dhi.record(dhi.string())`
-- **Batch Validation:** Use `UserSchema.validate_batch(items)` for validating multiple items at once.
+- **Optional Fields:** `optional(string())`
+- **Nullable Fields:** `nullable(number())`
+- **Discriminated unions:** `discriminatedUnion('type', { ... })`
+- **Array‑of‑object fast path:** inner object with ≤4 primitive fields
+- **Batch Validation:** `schema.validateBatch(items)`
 
 ---
 
-## Performance
+## 📈 Performance details
 
-### Latest Benchmark (2025-08-28)
+Recent real‑world suites (on a Mac Studio) show: (2025-08-28)
 
 - __Setup__
   - DHI: v0.1.4
@@ -275,7 +282,7 @@ console.log(result.success);
   - Cached JS keys with single Reflect.get per field
   - Increased chunk size (32k) and wasm-opt with -O3 + SIMD
 
-DHI is built with performance in mind. It uses WebAssembly to validate data at speeds significantly faster than traditional JavaScript validators. In our benchmarks on complex validations with new types:
+Benchmarks live in `benchmarks/` and include both comprehensive micro‑benchmarks and realistic datasets:
 
 - **Benchmark 1 (1,000,000 items):**
   - **DHI:** 2661.79ms
@@ -289,6 +296,11 @@ DHI is built with performance in mind. It uses WebAssembly to validate data at s
 These results showcase the performance edge DHI offers, especially for applications requiring massive data validations.
 
 ---
+
+## 🧪 Build & Release
+
+- Build everything locally: `bash scripts/build.sh`
+- CI/CD: publishing to npm is handled by a GitHub workflow on release (requires `NPM_TOKEN`).
 
 ## License
 
@@ -308,13 +320,13 @@ For more information, bug reports, or contributions, please visit the [GitHub re
 
 
 ---
-🌟 DHI: Where Sanskrit wisdom meets modern TypeScript validation - delivering unmatched speed, precision, and reliability for your applications.
+🌟 DHI: Where Sanskrit wisdom meets modern TypeScript validation — delivering unmatched speed, precision, and reliability for your applications.
 
 ---
 
-## 🧰 Zod-like DX (Preview)
+## 🧰 Zod‑like DX (migration aid)
 
-To reduce friction for teams familiar with Zod v4, DHI now ships a small Zod-like facade that mirrors common ergonomics.
+For teams familiar with Zod v4, DHI ships a small facade that mirrors common ergonomics. Use it to migrate gradually; for the best performance and type‑safety, prefer the typed‑first API above.
 
 - Import the facade and wait for initialization once:
 

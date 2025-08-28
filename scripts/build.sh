@@ -3,10 +3,12 @@ set -e
 
 # Build Rust WASM with ES module target
 cd rust
-# Enable WASM SIMD only for the wasm32 target; avoid leaking flags into host builds
+# Enable key WASM features (SIMD, bulk-memory, atomics/threads, tail-calls)
+# Keep flags scoped to wasm build only
 OLD_RUSTFLAGS="$RUSTFLAGS"
-export RUSTFLAGS="-C opt-level=3 -C codegen-units=1 -C panic=abort -C embed-bitcode=yes -C target-feature=+simd128,+bulk-memory"
-wasm-pack build --target web --release
+export RUSTFLAGS="-C opt-level=3 -C codegen-units=1 -C panic=abort -C embed-bitcode=yes -C target-feature=+simd128,+bulk-memory,+atomics,+mutable-globals,+tail-call"
+WASM_PACK_FLAGS=(--target web --release)
+wasm-pack build "${WASM_PACK_FLAGS[@]}"
 export RUSTFLAGS="$OLD_RUSTFLAGS"
 
 # Move WASM files to dist

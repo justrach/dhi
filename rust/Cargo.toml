@@ -23,4 +23,12 @@ panic = "abort"
 wasm-bindgen-test = "0.3"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O3", "--enable-simd", "--enable-bulk-memory", "--enable-reference-types"]
+# Enable additional WebAssembly features at wasm-opt time
+wasm-opt = [
+  "-O3",
+  "--enable-simd",
+  "--enable-bulk-memory",
+  "--enable-reference-types",
+  "--enable-threads",
+  "--enable-tail-call"
+]
