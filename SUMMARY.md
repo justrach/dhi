@@ -52,6 +52,9 @@ Notes
 - docs/adr/0004-benchmarking-methodology.md: ADR defining benchmarking methodology.
 - docs/adr/0005-migration-and-deprecation.md: ADR covering migration and deprecation policies.
 - docs/adr/0006-validation-core-and-type-encoding.md: ADR on validation core and type representation.
+- docs/adr/0007-deeply-nested-fast-path.md: ADR on path DAG, type-grouping, and early subtree skips for nested objects.
+- docs/adr/0008-reduce-property-access-cost.md: ADR on hidden-class/shape stability, key atoms, and fused record validation.
+- docs/adr/0009-bundler-sideeffects-normalization.md: ADR on normalizing dist/package.json sideEffects for Bun/Vite compatibility.
 
 ## examples/
 - examples/advanced.ts: Advanced usage patterns and schemas.
@@ -120,4 +123,3 @@ Notes
 ---
 
 If you want deeper drill-downs (e.g., function-by-function summaries for `src/typed.ts` or `rust/src/lib.rs`) or auto-generated API docs, I can expand this document or generate a separate API reference.
-
