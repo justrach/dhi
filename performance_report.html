@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DHI vs Zod Performance Comparison</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #FDFDFB 0%, #f8f9fa 100%);
+            color: #1B1B1B;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1B1B1B 0%, #333333 100%);
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+        
+        .dhi-brand {
+            color: #FF6B00;
+            text-shadow: 0 0 10px rgba(255, 107, 0, 0.3);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border-left: 4px solid #FF6B00;
+            transition: transform 0.2s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #FF6B00;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #333333;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .chart-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            margin: 2rem 0;
+        }
+        
+        .chart-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #1B1B1B;
+        }
+        
+        .section-title {
+            font-size: 2rem;
+            font-weight: 600;
+            margin: 3rem 0 1rem 0;
+            color: #1B1B1B;
+            border-bottom: 3px solid #FF6B00;
+            padding-bottom: 0.5rem;
+        }
+        
+        .performance-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+        }
+        
+        .faster {
+            background: #FF6B00;
+            color: white;
+        }
+        
+        .slower {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin: 1rem 0;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+        
+        .dhi-color { background: #FF6B00; }
+        .zod-color { background: #3B82F6; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span class="dhi-brand">DHI</span> vs Zod Performance</h1>
+        <p class="subtitle">🔥 Blazing Fast TypeScript Validation</p>
+    </div>
+    
+    <div class="container">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">10.56x</div>
+                <div class="stat-label">Average Speedup</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">22.04x</div>
+                <div class="stat-label">Max Speedup</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">92M</div>
+                <div class="stat-label">Peak Throughput/sec</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">9/9</div>
+                <div class="stat-label">Tests Completed</div>
+            </div>
+        </div>
+        
+        <h2 class="section-title">⚡ Performance Comparison</h2>
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color dhi-color"></div>
+                <span>DHI (Electric Orange)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color zod-color"></div>
+                <span>Zod (Blue)</span>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <h3 class="chart-title">Execution Time Comparison (Lower is Better)</h3>
+            <canvas id="timeChart" width="400" height="200"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <h3 class="chart-title">Throughput Comparison (Higher is Better)</h3>
+            <canvas id="throughputChart" width="400" height="200"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <h3 class="chart-title">Speedup Factor (Higher is Better)</h3>
+            <canvas id="speedupChart" width="400" height="200"></canvas>
+        </div>
+        
+        <h2 class="section-title">🧪 Generalization Test Results</h2>
+        <div class="chart-container">
+            <h3 class="chart-title">Generalization Performance</h3>
+            <canvas id="generalizationChart" width="400" height="200"></canvas>
+        </div>
+    </div>
+    
+    <script>
+        const dhiColor = '#FF6B00';
+        const zodColor = '#3B82F6';
+        const accentColor = '#FFD93B';
+        
+        const benchmarkData = [{"scenario":"Simple 4-Field Schema","dhiTime":55.75,"zodTime":61.56,"dhiThroughput":17936019,"zodThroughput":16245030,"speedup":1.1,"dataSize":1000000},{"scenario":"Nested Object Schema","dhiTime":1.09,"zodTime":18.3,"dhiThroughput":92107187,"zodThroughput":5463472,"speedup":16.86,"dataSize":100000},{"scenario":"Array-Heavy Schema","dhiTime":15.39,"zodTime":34.43,"dhiThroughput":3247904,"zodThroughput":1452292,"speedup":2.24,"dataSize":50000},{"scenario":"Mixed Valid/Invalid Data","dhiTime":29.53,"zodTime":650.65,"dhiThroughput":16934703,"zodThroughput":768459,"speedup":22.04,"dataSize":500000}];
+        const generalizationData = [{"scenario":"Deep Nested (5 levels)","dhiTime":9.07,"zodTime":11.29,"dhiThroughput":5509869,"zodThroughput":4427603,"speedup":1.24,"dataSize":50000},{"scenario":"Wide Objects (20 fields)","dhiTime":12.06,"zodTime":15.68,"dhiThroughput":4146825,"zodThroughput":3188724,"speedup":1.3,"dataSize":50000},{"scenario":"Mixed Arrays & Objects","dhiTime":82.22,"zodTime":15.76,"dhiThroughput":304048,"zodThroughput":1586026,"speedup":0.19,"dataSize":25000},{"scenario":"Asymmetric Structure","dhiTime":35.67,"zodTime":8.73,"dhiThroughput":700779,"zodThroughput":2862690,"speedup":0.24,"dataSize":25000},{"scenario":"Union-Heavy Schema","dhiTime":15.2,"zodTime":9.88,"dhiThroughput":1644727,"zodThroughput":2530855,"speedup":0.65,"dataSize":25000}];
+        const allData = [...benchmarkData, ...generalizationData];
+        
+        // Time Comparison Chart
+        new Chart(document.getElementById('timeChart'), {
+            type: 'bar',
+            data: {
+                labels: benchmarkData.map(r => r.scenario),
+                datasets: [{
+                    label: 'DHI',
+                    data: benchmarkData.map(r => r.dhiTime),
+                    backgroundColor: dhiColor,
+                    borderColor: dhiColor,
+                    borderWidth: 1
+                }, {
+                    label: 'Zod',
+                    data: benchmarkData.map(r => r.zodTime),
+                    backgroundColor: zodColor,
+                    borderColor: zodColor,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Time (ms)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                }
+            }
+        });
+        
+        // Throughput Chart
+        new Chart(document.getElementById('throughputChart'), {
+            type: 'bar',
+            data: {
+                labels: benchmarkData.map(r => r.scenario),
+                datasets: [{
+                    label: 'DHI',
+                    data: benchmarkData.map(r => r.dhiThroughput),
+                    backgroundColor: dhiColor,
+                    borderColor: dhiColor,
+                    borderWidth: 1
+                }, {
+                    label: 'Zod',
+                    data: benchmarkData.map(r => r.zodThroughput),
+                    backgroundColor: zodColor,
+                    borderColor: zodColor,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Operations per Second'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                }
+            }
+        });
+        
+        // Speedup Chart
+        new Chart(document.getElementById('speedupChart'), {
+            type: 'bar',
+            data: {
+                labels: benchmarkData.map(r => r.scenario),
+                datasets: [{
+                    label: 'Speedup Factor',
+                    data: benchmarkData.map(r => r.speedup),
+                    backgroundColor: benchmarkData.map(r => r.speedup >= 1 ? dhiColor : '#ef4444'),
+                    borderColor: benchmarkData.map(r => r.speedup >= 1 ? dhiColor : '#ef4444'),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Speedup Factor (x times faster)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+        
+        // Generalization Chart
+        new Chart(document.getElementById('generalizationChart'), {
+            type: 'bar',
+            data: {
+                labels: generalizationData.map(r => r.scenario),
+                datasets: [{
+                    label: 'Speedup Factor',
+                    data: generalizationData.map(r => r.speedup),
+                    backgroundColor: generalizationData.map(r => r.speedup >= 1 ? dhiColor : '#ef4444'),
+                    borderColor: generalizationData.map(r => r.speedup >= 1 ? dhiColor : '#ef4444'),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Speedup Factor (x times faster)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

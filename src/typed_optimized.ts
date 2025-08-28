@@ -1,13 +1,6 @@
 // TypeScript-first schema definition with compile-time type checking
 // Hyper-optimized for performance with specialized validation paths
 
-import { 
-  validateDeepNestedSIMD, 
-  validateMixedArraysSIMD,
-  compileDeepNestedSchema,
-  compileMixedArraysSchema
-} from './hyper_optimizations';
-
 // Core schema interface
 export interface Schema<T> {
   validate(value: unknown): T;
@@ -249,7 +242,6 @@ interface SchemaAnalysis {
   maxDepth: number;
   fieldCount: number;
   hasAsymmetricStructure: boolean;
-  hasArrayFields: boolean;
   primitiveFields: string[];
   complexFields: string[];
 }
@@ -262,7 +254,6 @@ function analyzeSchema<T extends Record<string, unknown>>(
   let maxDepth = 1;
   let hasComplexFields = false;
   let hasPrimitiveFields = false;
-  let hasArrayFields = false;
   const primitiveFields: string[] = [];
   const complexFields: string[] = [];
   
@@ -276,10 +267,6 @@ function analyzeSchema<T extends Record<string, unknown>>(
     } else {
       hasComplexFields = true;
       complexFields.push(key);
-      // Check for array fields
-      if (schemaStr.includes('Array') || schemaStr.includes('array')) {
-        hasArrayFields = true;
-      }
       // Estimate depth for nested objects
       const nestedMatches = schemaStr.match(/object\(/g);
       if (nestedMatches) {
@@ -294,7 +281,6 @@ function analyzeSchema<T extends Record<string, unknown>>(
     maxDepth,
     fieldCount,
     hasAsymmetricStructure: hasPrimitiveFields && hasComplexFields,
-    hasArrayFields,
     primitiveFields,
     complexFields
   };
@@ -569,37 +555,23 @@ export function object<T extends Record<string, unknown>>(
     },
     
     validateBatch(values: unknown[]): boolean[] {
-      const len = values.length;
-      
-      // HYPER-OPTIMIZED SIMD routing for specific bottlenecks
-      if (schemaAnalysis.maxDepth >= 4) {
-        // Deep nested objects - use SIMD path flattening
-        const compiled = compileDeepNestedSchema(shape);
-        return validateDeepNestedSIMD(values, compiled.nestedPaths, compiled.leafValidators);
-      } else if (schemaAnalysis.hasArrayFields) {
-        // Mixed arrays and objects - use SIMD array processing
-        const compiled = compileMixedArraysSchema(shape);
-        return validateMixedArraysSIMD(values, compiled.arrayFieldSpecs, compiled.objectFieldSpecs);
-      } else if (keys.length === 1) {
-        const results = new Array(len);
-        const compiled = precompileValidators(keys, shape);
-        validateBatch1FieldHyperOptimized(values, results, 0, len, compiled);
-        return results;
-      } else if (keys.length === 2) {
-        const results = new Array(len);
-        const compiled = precompileValidators(keys, shape);
-        validateBatch2FieldsHyperOptimized(values, results, 0, len, compiled);
-        return results;
-      } else if (schemaAnalysis.isSimplePrimitive && keys.length <= 20) {
+      if (isSimplePrimitive && keys.length <= 4) {
         return validateBatchSIMD(values, keys, shape);
       } else if (schemaAnalysis.hasAsymmetricStructure) {
+        // PRIORITY: Use hyper-optimized asymmetric validation
         return validateHyperOptimizedAsymmetricBatch(values, keys, shape, schemaAnalysis);
-      } else if (schemaAnalysis.isNestedObject) {
-        return validateNestedObjectsBatch(values, keys, shape, schemaAnalysis.maxDepth);
+      } else if (isNestedObject && maxDepth <= 4) {
+        return validateNestedObjectsBatch(values, keys, shape, maxDepth);
       }
-
-      // Fallback to standard validation
-      return validateBatchSIMD(values, keys, shape);
+      
+      return values.map(value => {
+        try {
+          this.validate(value);
+          return true;
+        } catch {
+          return false;
+        }
+      });
     },
     
     safeParse(value: unknown) {
