@@ -5,7 +5,7 @@ set -e
 cd rust
 # Enable WASM SIMD only for the wasm32 target; avoid leaking flags into host builds
 OLD_RUSTFLAGS="$RUSTFLAGS"
-export RUSTFLAGS="-C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort -C target-feature=+simd128,+bulk-memory"
+export RUSTFLAGS="-C opt-level=3 -C codegen-units=1 -C panic=abort -C embed-bitcode=yes -C target-feature=+simd128,+bulk-memory"
 wasm-pack build --target web --release
 export RUSTFLAGS="$OLD_RUSTFLAGS"
 
@@ -14,15 +14,20 @@ cd ..
 mkdir -p dist
 cp rust/pkg/* dist/
 
+# Normalize dist/package.json for bundlers (avoid wildcard sideEffects)
+if [ -f dist/package.json ]; then
+  node -e "const fs=require('fs');const p='dist/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));if(Array.isArray(j.sideEffects))j.sideEffects=false;fs.writeFileSync(p,JSON.stringify(j,null,2));"
+fi
+
 # Build TypeScript wrapper
 npm run build:ts
 
 # Build Rust library
 echo "Building Rust core..."
 cd rust
-# Build native host library with native CPU tuning and aggressive LTO
+# Build native host library with native CPU tuning (no LTO to avoid proc-macro errors)
 OLD_RUSTFLAGS="$RUSTFLAGS"
-export RUSTFLAGS="-C target-cpu=native -C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort"
+export RUSTFLAGS="-C target-cpu=native -C opt-level=3 -C codegen-units=1 -C panic=abort -C embed-bitcode=yes"
 cargo build --release
 export RUSTFLAGS="$OLD_RUSTFLAGS"
 cd ..
