@@ -4,8 +4,7 @@
  */
 
 import { z } from 'zod';
-import { object, array } from '../src/typed';
-import { string, number, boolean } from '../src/index';
+import { object, string, number, boolean, array, model, union } from '../src/index';
 
 // Benchmark configuration
 const ITERATIONS = {
@@ -145,7 +144,7 @@ const zodStringValidationResult = benchmark('Zod String Validation', () => {
   }
 }, ITERATIONS.EMAIL_VALIDATION / 4);
 
-const stringValidationSpeedup = comparePerformance(dhiStringValidationResult, zodStringValidationResult, 'String Validation');
+const emailSpeedup = comparePerformance(dhiStringValidationResult, zodStringValidationResult, 'String Validation');
 
 // 5. Complex Nested Objects (Our specialty!)
 console.log('📈 Test 5: Complex Nested Objects Performance');
