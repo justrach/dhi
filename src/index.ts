@@ -8,6 +8,7 @@ export {
   number,
   boolean,
   array,
+  record,
   model,
   union,
   discriminatedUnion,

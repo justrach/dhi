@@ -524,7 +524,7 @@ export interface Schema<T> {
   validateBatch(values: unknown[]): boolean[];
   safeParse(value: unknown): { success: true; data: T } | { success: false; error: string };
   // Internal discriminator for optimized paths
-  __kind?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'union' | 'optional';
+  __kind?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'union' | 'optional' | 'record';
   // Optional: used by wrappers like optional() to expose the inner schema for analysis
   inner?: Schema<any>;
 }
@@ -539,6 +539,66 @@ export interface UnionSchema<T> extends Schema<T> {
 
 export interface ObjectSchema<T> extends Schema<T> {
   shape: { [K in keyof T]: Schema<T[K]> };
+}
+
+// Record schema: validates a dictionary of string keys to values of a schema
+export function record<T>(valueSchema: Schema<T>): Schema<Record<string, T>> {
+  return {
+    __kind: 'record',
+    validate(value: unknown): Record<string, T> {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Expected record (object with string keys)');
+      }
+      const input = value as Record<string, unknown>;
+      const out: Record<string, T> = {} as any;
+      // Validate without allocating Object.values() / entries arrays
+      for (const k in input) {
+        if (!Object.prototype.hasOwnProperty.call(input, k)) continue;
+        out[k] = valueSchema.validate(input[k]);
+      }
+      return out;
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      const kind = (valueSchema as Schema<T>).__kind;
+      // Fast primitive path: avoid calling into schema per element
+      if (kind === 'string' || kind === 'number' || kind === 'boolean') {
+        return values.map((value) => {
+          if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+          const obj = value as Record<string, unknown>;
+          for (const k in obj) {
+            if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+            const v = obj[k];
+            if (kind === 'string') { if (typeof v !== 'string') return false; }
+            else if (kind === 'number') { if (typeof v !== 'number') return false; }
+            else /* boolean */ { if (typeof v !== 'boolean') return false; }
+          }
+          return true;
+        });
+      }
+      // Generic fused path
+      return values.map((value) => {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+        const obj = value as Record<string, unknown>;
+        try {
+          for (const k in obj) {
+            if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+            valueSchema.validate(obj[k]);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    },
+    safeParse(value: unknown) {
+      try {
+        const data = this.validate(value);
+        return { success: true as const, data };
+      } catch (error) {
+        return { success: false as const, error: error instanceof Error ? error.message : 'Validation failed' };
+      }
+    }
+  };
 }
 
 // ... (rest of the code remains the same)
