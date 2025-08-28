@@ -9,6 +9,7 @@ export {
   boolean,
   optional,
   nullable,
+  array,
   model,
   type Schema,
   type ObjectSchema
