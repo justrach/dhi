@@ -38,6 +38,7 @@ pub struct DhiCore {
     flat_fields: SmallVec<[FlatField; 32]>,
     has_nested_paths: bool,
     flat_all_primitives: bool,
+    fused_validator: Option<Function>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +86,7 @@ impl DhiCore {
             flat_fields: SmallVec::new(),
             has_nested_paths: false,
             flat_all_primitives: false,
+            fused_validator: None,
         }
     }
 
@@ -264,6 +266,10 @@ impl DhiCore {
         self.flat_fields = flat;
         self.has_nested_paths = has_nested;
         self.flat_all_primitives = all_primitives;
+        // Compile fused validator when eligible
+        self.fused_validator = if self.has_nested_paths && self.flat_all_primitives {
+            self.compile_fused_js_validator()
+        } else { None };
     }
 
     fn compile_js_getter(path: &SmallVec<[JsValue; MAX_DEPTH_HINT]>) -> Function {
@@ -279,6 +285,89 @@ impl DhiCore {
             .unchecked_into::<Function>()
     }
 
+    // Compile a single JS validator function for the whole schema (primitive leaves only)
+    fn compile_fused_js_validator(&self) -> Option<Function> {
+        use std::collections::BTreeMap;
+        if !self.flat_all_primitives || self.flat_fields.is_empty() { return None; }
+
+        // Collect paths as Vec<String> for codegen
+        let mut first_map: BTreeMap<String, BTreeMap<String, Vec<usize>>> = BTreeMap::new();
+        let mut direct_first: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (idx, ff) in self.flat_fields.iter().enumerate() {
+            let mut segs: Vec<String> = Vec::new();
+            for k in ff.path.iter() {
+                segs.push(k.as_string().unwrap_or_default());
+            }
+            if segs.is_empty() { continue; }
+            let k1 = segs[0].clone();
+            if segs.len() == 1 {
+                direct_first.entry(k1).or_default().push(idx);
+            } else {
+                let k2 = segs[1].clone();
+                first_map.entry(k1).or_default().entry(k2).or_default().push(idx);
+            }
+        }
+
+        // Build function body with prefix hoisting for first and second segments.
+        let mut body = String::from("return function(o){
+if(o==null||typeof o!==\"object\") return false;
+var p1,p2,v;
+");
+
+        // Helper to emit a leaf check from a starting var and remaining path
+        let mut emit_leaf = |body: &mut String, start: &str, ff: &FlatField, start_idx: usize| {
+            body.push_str("v="); body.push_str(start); body.push_str(";
+");
+            for key in ff.path.iter().skip(start_idx) {
+                let k = key.as_string().unwrap_or_default().replace("'", "\'");
+                body.push_str(&format!("v=(v==null)?undefined:v['{}'];
+", k));
+            }
+            if ff.required { body.push_str("if(v===undefined) return false;
+"); }
+            else { body.push_str("if(v===undefined) { } else {
+"); }
+            match ff.ty {
+                FieldType::String => body.push_str("if(typeof v!==\"string\") return false;
+"),
+                FieldType::Number => body.push_str("if(typeof v!==\"number\"||Number.isNaN(v)) return false;
+"),
+                FieldType::Boolean => body.push_str("if(typeof v!==\"boolean\") return false;
+"),
+                _ => {}
+            }
+            if !ff.required { body.push_str("}
+"); }
+        };
+
+        // Direct first-level leaves
+        for (k1, idxs) in &direct_first {
+            let k1s = k1.replace("'", "\'");
+            body.push_str(&format!("p1=(o==null)?undefined:o['{}'];
+", k1s));
+            for &idx in idxs { emit_leaf(&mut body, "p1", &self.flat_fields[idx], 1); }
+        }
+
+        // First->Second level hoisting
+        for (k1, second) in &first_map {
+            let k1s = k1.replace("'", "\'");
+            body.push_str(&format!("p1=(o==null)?undefined:o['{}'];
+", k1s));
+            for (k2, idxs) in second {
+                let k2s = k2.replace("'", "\'");
+                body.push_str(&format!("p2=(p1==null)?undefined:p1['{}'];
+", k2s));
+                for &idx in idxs { emit_leaf(&mut body, "p2", &self.flat_fields[idx], 2); }
+            }
+        }
+
+        body.push_str("return true;}
+");
+        let ctor = Function::new_with_args("body", "return (new Function(body))();");
+        let f = ctor.call1(&JsValue::NULL, &JsValue::from_str(&body)).ok()?.unchecked_into::<Function>();
+        Some(f)
+    }
+
     #[wasm_bindgen]
     pub fn validate_batch(&self, items: Array) -> Result<Array, JsValue> {
         let len = items.length() as usize;
@@ -291,8 +380,17 @@ impl DhiCore {
             // OPTIMIZED PATH: Vectorized simple object validation
             self.validate_batch_vectorized(&items, &results, len);
         } else if self.has_nested_paths && self.flat_all_primitives {
-            // OPTIMIZED DEEP PATH: Flattened nested paths with compiled JS getters
-            self.validate_batch_flat_deep(&items, &results, len);
+            if let Some(fused) = &self.fused_validator {
+                // OPTIMIZED DEEP PATH: Fused JS validator, 1 call per item
+                for i in 0..len {
+                    let item = items.get(i as u32);
+                    let ok = fused.call1(&JsValue::NULL, &item).ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                    results.set(i as u32, JsValue::from_bool(ok));
+                }
+            } else {
+                // Flattened nested paths with compiled JS getters
+                self.validate_batch_flat_deep(&items, &results, len);
+            }
         } else {
             // OPTIMIZED COMPLEX PATH: Chunked processing with better memory patterns
             self.validate_batch_complex_optimized(&items, &results, len);

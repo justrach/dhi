@@ -336,6 +336,31 @@ function createIterativeObjectValidator<T extends Record<string, unknown>>(shape
         if (!node) return null; // unsupported type in this fast path
         children[i] = node;
       }
+      // Group direct leaves by type to reduce polymorphism: string -> number -> boolean -> object
+      const idxString: number[] = [];
+      const idxNumber: number[] = [];
+      const idxBoolean: number[] = [];
+      const idxObject: number[] = [];
+      for (let i = 0; i < keys.length; i++) {
+        const n = children[i]!;
+        if (n.kind === 'string') idxString.push(i);
+        else if (n.kind === 'number') idxNumber.push(i);
+        else if (n.kind === 'boolean') idxBoolean.push(i);
+        else idxObject.push(i);
+      }
+      const order = idxString.concat(idxNumber, idxBoolean, idxObject);
+      if (order.length === keys.length) {
+        const newKeys = new Array<string>(keys.length);
+        const newChildren = new Array<IterNode | null>(keys.length);
+        const newOptional = new Array<boolean>(keys.length);
+        for (let i = 0; i < order.length; i++) {
+          const from = order[i];
+          newKeys[i] = keys[from];
+          newChildren[i] = children[from];
+          newOptional[i] = optional[from];
+        }
+        return { kind: 'object', keys: newKeys, children: newChildren, optional: newOptional };
+      }
       return { kind: 'object', keys, children, optional };
     }
     // Unsupported (arrays, unions, etc.)
@@ -700,8 +725,8 @@ export function object<T extends Record<string, unknown>>(
       if (isSimplePrimitive && keys.length <= 4) {
         // ULTRA-FAST PATH: SIMD-style batch processing for primitives
         return validateBatchSIMD(values, keys, shape);
-      } else if (isNestedObject && maxDepth <= 4) {
-        // OPTIMIZED PATH: Specialized nested object validation
+      } else if (isNestedObject) {
+        // OPTIMIZED PATH: Specialized nested object validation (no depth cap)
         return validateNestedObjectsBatch(values, keys, shape, maxDepth);
       }
       

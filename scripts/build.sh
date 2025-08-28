@@ -5,7 +5,7 @@ set -e
 cd rust
 # Enable WASM SIMD only for the wasm32 target; avoid leaking flags into host builds
 OLD_RUSTFLAGS="$RUSTFLAGS"
-export RUSTFLAGS="-C target-feature=+simd128"
+export RUSTFLAGS="-C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort -C target-feature=+simd128,+bulk-memory"
 wasm-pack build --target web --release
 export RUSTFLAGS="$OLD_RUSTFLAGS"
 
@@ -20,8 +20,11 @@ npm run build:ts
 # Build Rust library
 echo "Building Rust core..."
 cd rust
-# Build native host library without WASM-specific flags
+# Build native host library with native CPU tuning and aggressive LTO
+OLD_RUSTFLAGS="$RUSTFLAGS"
+export RUSTFLAGS="-C target-cpu=native -C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort"
 cargo build --release
+export RUSTFLAGS="$OLD_RUSTFLAGS"
 cd ..
 
 # Copy the built library to the right location
