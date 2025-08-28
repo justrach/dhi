@@ -7,12 +7,10 @@ export {
   string,
   number,
   boolean,
-  optional,
-  nullable,
   array,
   model,
-  type Schema,
-  type ObjectSchema
+  union,
+  type Schema
 } from './typed';
 
 // Rename the Infer type to avoid conflicts

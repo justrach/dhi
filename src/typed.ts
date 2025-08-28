@@ -2,7 +2,7 @@
 // Similar to Yup's approach but with DHI performance
 
 // SIMD-style batch validation for ultra-fast primitive schema processing
-function validateBatchSIMD<T extends Record<string, any>>(
+function validateBatchSIMD<T extends Record<string, unknown>>(
   values: unknown[], 
   keys: string[], 
   shape: { [K in keyof T]: Schema<T[K]> }
@@ -40,9 +40,9 @@ function validateBatchSIMD<T extends Record<string, any>>(
 }
 
 // Optimized validation for 1-field schemas
-function validateBatch1Field<T>(
+function validateBatch1Field<T extends Record<string, unknown>>(
   values: unknown[], results: boolean[], start: number, end: number,
-  keys: string[], shape: any
+  keys: string[], shape: ObjectSchemaShape<T>
 ): void {
   const key = keys[0];
   const validator = shape[key];
@@ -59,9 +59,9 @@ function validateBatch1Field<T>(
 }
 
 // Optimized validation for 2-field schemas
-function validateBatch2Fields<T>(
+function validateBatch2Fields<T extends Record<string, unknown>>(
   values: unknown[], results: boolean[], start: number, end: number,
-  keys: string[], shape: any
+  keys: string[], shape: ObjectSchemaShape<T>
 ): void {
   const [key1, key2] = keys;
   const validator1 = shape[key1];
@@ -80,9 +80,9 @@ function validateBatch2Fields<T>(
 }
 
 // Optimized validation for 3-field schemas
-function validateBatch3Fields<T>(
+function validateBatch3Fields<T extends Record<string, unknown>>(
   values: unknown[], results: boolean[], start: number, end: number,
-  keys: string[], shape: any
+  keys: string[], shape: ObjectSchemaShape<T>
 ): void {
   const [key1, key2, key3] = keys;
   const validator1 = shape[key1];
@@ -103,9 +103,9 @@ function validateBatch3Fields<T>(
 }
 
 // Optimized validation for 4-field schemas (benchmark2.ts case)
-function validateBatch4Fields<T>(
+function validateBatch4Fields<T extends Record<string, unknown>>(
   values: unknown[], results: boolean[], start: number, end: number,
-  keys: string[], shape: any
+  keys: string[], shape: ObjectSchemaShape<T>
 ): void {
   const [key1, key2, key3, key4] = keys;
   const validator1 = shape[key1];
@@ -128,9 +128,9 @@ function validateBatch4Fields<T>(
 }
 
 // Generic validation for N-field schemas
-function validateBatchNFields<T>(
+function validateBatchNFields<T extends Record<string, unknown>>(
   values: unknown[], results: boolean[], start: number, end: number,
-  keys: string[], shape: any
+  keys: string[], shape: ObjectSchemaShape<T>
 ): void {
   for (let i = start; i < end; i++) {
     const value = values[i];
@@ -144,7 +144,7 @@ function validateBatchNFields<T>(
 }
 
 // Schema analysis for optimization decisions
-function analyzeSchema(shape: any): {
+function analyzeSchema<T extends Record<string, unknown>>(shape: ObjectSchemaShape<T>): {
   isSimplePrimitive: boolean;
   isNestedObject: boolean;
   maxDepth: number;
@@ -162,7 +162,7 @@ function analyzeSchema(shape: any): {
       // This is a nested object schema
       hasNestedObjects = true;
       allPrimitive = false;
-      const nestedAnalysis = analyzeSchema(schema.shape);
+      const nestedAnalysis = analyzeSchema((schema as ObjectSchema<any>).shape);
       maxDepth = Math.max(maxDepth, nestedAnalysis.maxDepth + 1);
     } else if (schema && typeof schema === 'object' && schema.toString().includes('Array')) {
       // This is an array schema
@@ -179,10 +179,10 @@ function analyzeSchema(shape: any): {
 }
 
 // Optimized nested object batch validation with aggressive optimizations
-function validateNestedObjectsBatch(
+function validateNestedObjectsBatch<T extends Record<string, unknown>>(
   values: unknown[],
   keys: string[],
-  shape: any,
+  shape: ObjectSchemaShape<T>,
   maxDepth: number
 ): boolean[] {
   const len = values.length;
@@ -223,64 +223,20 @@ function validateNestedObjectsBatch(
   return results;
 }
 
-// Create highly optimized nested validator with inline validation
-function createOptimizedNestedValidator(keys: string[], shape: any): (obj: unknown) => boolean {
-  // Analyze the schema structure for maximum optimization
-  const validationCode = generateValidationCode(keys, shape);
+// Create optimized nested validator using general schema-based approach
+function createOptimizedNestedValidator<T extends Record<string, unknown>>(keys: string[], shape: ObjectSchemaShape<T>): (obj: unknown) => boolean {
+  // Pre-compile validation paths for better performance
+  const validationPaths = compileValidationPaths(keys, shape);
   
-  // Return a specialized validator function
+  // Return a specialized validator function that uses the general approach
   return function(obj: unknown): boolean {
     if (typeof obj !== 'object' || obj === null) return false;
     
-    const target = obj as Record<string, any>;
+    const target = obj as Record<string, unknown>;
     
-    // Inline validation for maximum performance - no function calls
+    // General validation using schema definitions instead of hardcoded checks
     try {
-      // Validate 'id' field
-      const id = target.id;
-      if (typeof id !== 'number') return false;
-      
-      // Validate 'user' nested object
-      const user = target.user;
-      if (typeof user !== 'object' || user === null) return false;
-      
-      // Validate 'user.name'
-      if (typeof user.name !== 'string') return false;
-      
-      // Validate 'user.profile' nested object
-      const profile = user.profile;
-      if (typeof profile !== 'object' || profile === null) return false;
-      
-      // Validate 'user.profile.age'
-      if (typeof profile.age !== 'number') return false;
-      
-      // Validate 'user.profile.preferences' nested object
-      const preferences = profile.preferences;
-      if (typeof preferences !== 'object' || preferences === null) return false;
-      
-      // Validate 'user.profile.preferences.theme'
-      if (typeof preferences.theme !== 'string') return false;
-      
-      // Validate 'user.profile.preferences.notifications'
-      if (typeof preferences.notifications !== 'boolean') return false;
-      
-      // Validate 'metadata' nested object
-      const metadata = target.metadata;
-      if (typeof metadata !== 'object' || metadata === null) return false;
-      
-      // Validate 'metadata.created'
-      if (typeof metadata.created !== 'string') return false;
-      
-      // Validate 'metadata.tags' array
-      const tags = metadata.tags;
-      if (!Array.isArray(tags)) return false;
-      
-      // Fast array validation - unrolled for small arrays
-      for (let i = 0; i < tags.length; i++) {
-        if (typeof tags[i] !== 'string') return false;
-      }
-      
-      return true;
+      return validateObjectWithPaths(target, validationPaths);
     } catch {
       return false;
     }
@@ -288,20 +244,21 @@ function createOptimizedNestedValidator(keys: string[], shape: any): (obj: unkno
 }
 
 // Generate optimized validation code (placeholder for future JIT compilation)
-function generateValidationCode(keys: string[], shape: any): string {
+function generateValidationCode<T extends Record<string, unknown>>(keys: string[], shape: ObjectSchemaShape<T>): string {
   // This could be extended to generate actual optimized code
   return 'optimized';
 }
 
 // Compile validation paths for efficient nested validation (legacy fallback)
-function compileValidationPaths(keys: string[], shape: any): ValidationPath[] {
+function compileValidationPaths<T extends Record<string, unknown>>(keys: string[], shape: ObjectSchemaShape<T>): ValidationPath[] {
   const paths: ValidationPath[] = [];
   
   for (const key of keys) {
     const schema = shape[key];
     if (schema && typeof schema === 'object' && 'shape' in schema) {
       // Nested object - flatten the validation path
-      const nestedPaths = compileValidationPaths(Object.keys(schema.shape), schema.shape);
+      const objectSchema = schema as ObjectSchema<any>;
+      const nestedPaths = compileValidationPaths(Object.keys(objectSchema.shape), objectSchema.shape);
       for (const nestedPath of nestedPaths) {
         paths.push({
           path: [key, ...nestedPath.path],
@@ -322,15 +279,15 @@ function compileValidationPaths(keys: string[], shape: any): ValidationPath[] {
 
 interface ValidationPath {
   path: string[];
-  validator: any;
+  validator: Schema<unknown>;
 }
 
 // Fast nested object validation using pre-compiled paths (legacy fallback)
 function validateObjectWithPaths(obj: unknown, paths: ValidationPath[]): boolean {
-  const target = obj as Record<string, any>;
+  const target = obj as Record<string, unknown>;
   
   for (const { path, validator } of paths) {
-    let current = target;
+    let current: any = target;
     
     // Navigate to the nested value
     for (let i = 0; i < path.length - 1; i++) {
@@ -363,7 +320,11 @@ export interface ArraySchema<T> extends Schema<T[]> {
 }
 
 export interface UnionSchema<T> extends Schema<T> {
-  options: Schema<any>[];
+  options: Schema<T>[];
+}
+
+export interface ObjectSchema<T> extends Schema<T> {
+  shape: { [K in keyof T]: Schema<T[K]> };
 }
 
 // ... (rest of the code remains the same)
@@ -462,7 +423,7 @@ function isArrayOfPrimitives(arr: unknown[], itemType: 'string' | 'number' | 'bo
 }
 
 // Optimized object validation - detects simple primitive schemas and uses fast JS path
-export function object<T extends Record<string, any>>(
+export function object<T extends Record<string, unknown>>(
   shape: ObjectSchemaShape<T>
 ): ObjectSchema<T> {
   const keys = Object.keys(shape);
@@ -485,7 +446,7 @@ export function object<T extends Record<string, any>>(
       const result = {} as T;
       
       for (const key of keys) {
-        (result as any)[key] = shape[key as keyof T].validate(obj[key]);
+        (result as Record<string, unknown>)[key] = shape[key as keyof T].validate(obj[key]);
       }
       
       return result;
@@ -523,10 +484,115 @@ export function object<T extends Record<string, any>>(
 }
 
 // Type inference helper
-export type Infer<T extends Schema<any>> = T extends Schema<infer U> ? U : never;
+export type Infer<T extends Schema<unknown>> = T extends Schema<infer U> ? U : never;
+
+// Basic primitive schemas
+export function string(): Schema<string> {
+  return {
+    validate(value: unknown): string {
+      if (typeof value !== 'string') {
+        throw new Error('Expected string');
+      }
+      return value;
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      return values.map(value => typeof value === 'string');
+    },
+    safeParse(value: unknown) {
+      try {
+        const data = this.validate(value);
+        return { success: true as const, data };
+      } catch (error) {
+        return { success: false as const, error: error instanceof Error ? error.message : 'Validation failed' };
+      }
+    }
+  };
+}
+
+export function number(): Schema<number> {
+  return {
+    validate(value: unknown): number {
+      if (typeof value !== 'number') {
+        throw new Error('Expected number');
+      }
+      return value;
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      return values.map(value => typeof value === 'number');
+    },
+    safeParse(value: unknown) {
+      try {
+        const data = this.validate(value);
+        return { success: true as const, data };
+      } catch (error) {
+        return { success: false as const, error: error instanceof Error ? error.message : 'Validation failed' };
+      }
+    }
+  };
+}
+
+export function boolean(): Schema<boolean> {
+  return {
+    validate(value: unknown): boolean {
+      if (typeof value !== 'boolean') {
+        throw new Error('Expected boolean');
+      }
+      return value;
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      return values.map(value => typeof value === 'boolean');
+    },
+    safeParse(value: unknown) {
+      try {
+        const data = this.validate(value);
+        return { success: true as const, data };
+      } catch (error) {
+        return { success: false as const, error: error instanceof Error ? error.message : 'Validation failed' };
+      }
+    }
+  };
+}
+
+// Union schema for multiple type validation
+export function union<T extends readonly Schema<any>[]>(
+  schemas: T
+): UnionSchema<T[number] extends Schema<infer U> ? U : never> {
+  return {
+    options: [...schemas] as Schema<T[number] extends Schema<infer U> ? U : never>[],
+    validate(value: unknown): T[number] extends Schema<infer U> ? U : never {
+      for (const schema of schemas) {
+        try {
+          return schema.validate(value) as T[number] extends Schema<infer U> ? U : never;
+        } catch {
+          // Try the next schema
+        }
+      }
+      throw new Error('No matching schema found');
+    },
+    validateBatch(values: unknown[]): boolean[] {
+      return values.map(value => {
+        for (const schema of schemas) {
+          if (schema.validateBatch([value])[0]) {
+            return true;
+          }
+        }
+        return false;
+      });
+    },
+    safeParse(value: unknown) {
+      for (const schema of schemas) {
+        const result = schema.safeParse(value);
+        if (result.success) {
+          return result as { success: true; data: T[number] extends Schema<infer U> ? U : never };
+        }
+      }
+      return { success: false as const, error: 'No matching schema found' };
+    }
+  };
+}
 
 // User-defined model creation API
-export function model<T extends Record<string, any>>(
+export function model<T extends Record<string, unknown>>(
   name: string,
   shape: ObjectSchemaShape<T>
 ): ObjectSchema<T> & { modelName: string } {
