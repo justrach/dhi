@@ -8,7 +8,7 @@ function makeDeepSchema() {
     a: object({ b: object({ c: object({ d: object({ e: object({ name: string(), score: number() }) }) }) }) })
   });
 }
-
+// Deeply nested data generator
 function genDeep(count: number) {
   return Array.from({ length: count }, (_, i) => ({
     a: { b: { c: { d: { e: { name: `n${i}`, score: i % 100 } } } } }
