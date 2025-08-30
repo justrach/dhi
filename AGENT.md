@@ -1,74 +1,102 @@
-# AGENT.md
+# Agent Documentation
 
-This repository contains DHI, a high‑performance TypeScript validation library with both a typed‑first API and a Zod‑like facade. This document captures the conventions and guardrails for automated agents and contributors when changing code, optimizing performance, and shipping releases.
+Last updated: 2025-08-30
 
-## Repository map
+## Overview
 
-- `src/` — TypeScript APIs and fast paths
-  - `typed.ts` — Typed‑first API (recommended). Houses object/array primitives, `optional/nullable`, `union`, `discriminatedUnion`, deep‑nested fast paths, and array‑of‑object fast path.
-  - `index.ts` — Public exports (typed‑first API, Zod compatibility layer, and types).
-  - `zod-compat.ts` — Lightweight Zod‑like facade (migration aid).
-- `rust/` — WASM core and optional native host library
-  - `src/lib.rs` — Rust runtime with batch validators, JS interop, flattened path cache, and fused per‑schema JS validator.
-  - `Cargo.toml` — Crate settings; profile tuned for perf.
-- `scripts/build.sh` — Single entrypoint to build wasm + TS + native host.
-- `benchmarks/` — Bench suites, including real‑world scenarios and Zod comparisons.
-- `docs/adr/` — Architecture decision records.
+This is an AI-powered coding assistant agent built with TypeScript and Node.js. The agent provides intelligent code generation, file manipulation, shell command execution, and development assistance through a conversational interface.
 
-## Build and test
+## Core Principles
 
-- Install prerequisites: Node 18+/Bun, Rust stable, `wasm-pack`.
-- Build everything: `bash scripts/build.sh`
-- Run real‑world bench: `bun run benchmarks/realworld.ts`
+The agent operates on the following core principles:
+- **Safety First**: Never execute harmful commands or assist with malicious intent
+- **Minimal Action**: Prefer the least destructive approach to achieve goals
+- **Verification**: Always verify actions before execution
+- **Transparency**: Provide clear explanations of what actions are being taken
 
-Notes:
-- The script applies aggressive RUSTFLAGS for both wasm and native builds, while avoiding LTO headaches in toolchains with proc‑macros.
-- GitHub Actions workflow will run the same steps on release.
+## Core Files
 
-## Performance guardrails
+- `src/index.ts` - Main entry point and CLI setup with yargs for command parsing
+- `src/core.ts` - Core agent logic including safety checks and session management
+- `src/planner.ts` - Planning functionality with AI-powered task breakdown
+- `src/tools.ts` - Tool management system for dynamic tool loading
+- `src/utils.ts` - Utility functions for file operations, environment setup, and logging
+- `src/types.ts` - TypeScript type definitions for agents, tools, and configurations
 
-When making changes in hot paths:
+## Available Tools
 
-1) Prefer monomorphic property access
-   - Avoid `Reflect.get` in loops when a fused validator can inline property access.
-   - Keep key strings out of hot loops; precompute `JsValue`/strings once.
+- `parallel` - Execute multiple tools concurrently for improved performance
+- `read_file` - Read file contents
+- `write_file` - Create new files
+- `apply_patch` - Apply patches to existing files
+- `search_replace` - Simple text replacement
+- `run_shell` - Execute shell commands
+- `smart_run_shell` - Shell with auto-fix capabilities
+- `get_system_info` - System diagnostics
+- `update_plan` - Update development plans
+- `talk` - Conversational responses
+- `planner` - Task planning and breakdown
+- `quick_check` - Quick project validation
+- `websearch` - Web search capabilities
+- `deepwiki` - DeepWiki integration
+- `interactive_shell` - Interactive CLI commands with expect/send capabilities
 
-2) Collapse JS↔WASM boundary cost
-   - Use the fused per‑schema JS validator for deep/compact objects (1 call per item).
-   - Fall back to flattened‑getter path only when fusion is ineligible.
+## Usage Examples
 
-3) Use SmallVec and stack‑allocated scratch
-   - For small collections (≤8 fields, ≤32 leaves), favor `SmallVec`.
-   - Reuse scratch buffers/bitmaps in loops to avoid GC pressure.
+```bash
+# Interactive mode
+npm start
 
-4) Typed‑first API remains the recommendation
-   - Keep fast paths in `typed.ts` (iterative deep‑object validator, array‑of‑object fast path).
-   - The Zod‑like facade is for migration; do not regress typed‑first perf.
+# Direct command
+node dist/index.js "Create a new React component"
 
-5) Build flags
-   - WASM: SIMD, bulk‑memory, `wasm-opt -O3`.
-   - Native: `-C target-cpu=native -C opt-level=3 -C codegen-units=1 -C panic=abort`.
+# With specific tools
+node dist/index.js "Read and analyze package.json"
+```
 
-## Commit style
+## Recent Changes
 
-Use conventional messages with scope and summary, e.g.:
+### 2025-08-30
+- Added parallel tool execution for concurrent operations
+- Enhanced TypeScript configuration with strict mode
+- Added comprehensive test suite with Jest
+- Implemented automated release process with semantic versioning
+- Added migration system for database changes
+- Enhanced frontend with React and Vite setup
+- Added benchmarking suite for performance testing
+- Implemented comprehensive logging system
+- Added support for interactive CLI operations
 
-- `core(rust): fused per-schema validator + prefix hoisting`
-- `typed(api): add discriminatedUnion + optional/nullable`
-- `build(native,wasm): tune compiler flags for speed`
-- `docs(ADR): add ADR 0009 native build flags`
+### 2025-01-28
+- Initial agent setup
+- Core tool implementation
+- Basic file operations
+- Shell command integration
 
-Prefer small, focused commits; include rationale when changing hot code.
+## Development Setup
 
-## Release
+```bash
+npm install
+npm run dev
+npm run build
+npm test
+```
 
-- On GitHub release (published), CI builds the package and publishes to npm using `NPM_TOKEN`.
-- Local: `npm version <patch|minor|major>` followed by pushing tags triggers the release workflow.
+## Configuration
 
-## Safety checklist for agents
+Configuration is managed through:
+- Environment variables (see `.env.example`)
+- `package.json` configuration
+- `tsconfig.json` for TypeScript settings
+- `jest.config.ts` for testing configuration
+- Migration files in `/migrations` directory
 
-- Do not introduce allocations inside tight loops unnecessarily.
-- Preserve existing fast‑path branching conditions and heuristics.
-- Keep TS public API stable; any breaking changes must be documented in README and CHANGELOG.
-- Run `scripts/build.sh` before opening a PR and sanity‑check real‑world benchmarks.
+## Architecture Overview
 
+The system follows a modular architecture with:
+- Core agent runtime in `/src`
+- Frontend applications in `/frontend` and `/frontend2`
+- Benchmarking tools in `/benchmarks`
+- Documentation in `/docs`
+- Migration system in `/migrations`
+- Build outputs in `/dist`
