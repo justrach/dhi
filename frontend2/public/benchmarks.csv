@@ -1,0 +1,5 @@
+Scenario,Data Size,DHI (ms),DHI (ops/sec),Zod (ms),Zod (ops/sec),Speedup
+Simple 4-Field (benchmark2.ts),1,000,000,58.02,17235938.549,61.80,16182176.902,1.07
+Nested Object,100,000,9.11,10979509.37,17.32,5773027.723,1.90
+Array-Heavy,50,000,9.07,5511430.978,28.97,1725761.289,3.19
+Mixed Valid/Invalid,500,000,30.41,16441838.23,661.28,756110.688,21.75

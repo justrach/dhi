@@ -1,0 +1,35 @@
+export const metadata = {
+  title: "Get Started · DHI",
+  description: "Install DHI and validate your first schema.",
+}
+
+# Get Started
+
+Install DHI and validate your first schema.
+
+## Install
+
+```bash
+npm i dhi
+```
+
+## First schema
+
+```ts
+import { object, string, number } from 'dhi'
+
+const User = object({
+  id: number().int().positive(),
+  email: string().email(),
+})
+
+User.parse({ id: 1, email: 'a@b.com' })
+```
+
+## Safe parse
+
+```ts
+const res = User.safeParse(input)
+if (!res.success) console.log(res.error.issues)
+```
+
