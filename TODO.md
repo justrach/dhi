@@ -153,5 +153,33 @@ Based on current benchmark results, target improvements:
 
 ---
 
-*Last updated: 2025-08-28*
-*Status: Active development with SIMD optimizations completed*
+## 🌐 Website & SEO
+
+- [ ] Split client pages into server page + client component to enable per-route metadata
+  - Benchmarks: move UI into `BenchmarksClient.tsx`; export `metadata` from server `page.tsx`
+  - Playground: move UI into `PlaygroundClient.tsx`; export `metadata` from server `page.tsx`
+- [ ] Add canonical links and JSON-LD (structured data) for key routes (`/`, `/benchmarks`, `/compare`)
+- [ ] Wire SpeedPanel to `public/speed.json` so numbers can be updated without code changes
+- [ ] Pin Next build to webpack as fallback if Turbopack sandbox causes port-bind errors in CI/dev
+- [ ] Finalize `frontend2/components.json` (set `rsc: false`, `tailwind.config.ts`) if needed
+
+## 📦 Release & Packaging
+
+- [x] GitHub Action to publish to npm (Bun install/build/test; npm publish with provenance)
+- [x] Add dry-run input; build before tests; artifact and `npm pack --json` verifiers
+- [x] Fork protection; tag/version alignment check; concurrency by ref
+- [x] Remove package.json `publish` script to prevent double publish lifecycle
+- [x] Add ESM build (`dist/esm`) + exports map for Next/Turbopack named imports
+- [ ] Consider pinning Node/Bun versions in CI for reproducibility (e.g., Node 20.19.x, Bun 1.2.x)
+
+## 🧪 Tests & Benchmarks
+
+- [x] Add typed API Jest tests (object/array/record/union/DU/nullable/model, type inference)
+- [x] Add Bun quick benchmark (`benchmarks/quick_invalid_bench.ts`) with invalid ratio flag
+- [ ] Integrate quick bench into `package.json` scripts (e.g., `bun run bench:quick -- --size 50000 --invalid 0.2`)
+- [ ] Add mixed valid/invalid toggle to SpeedPanel via data file (see Website & SEO)
+
+---
+
+*Last updated: 2025-09-01*
+*Status: SIMD/array optimizations completed; CI publish + ESM build in place; website metadata improvements in progress*
