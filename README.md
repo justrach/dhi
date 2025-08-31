@@ -249,6 +249,11 @@ const result = UserSchema.validate({
 console.log(result.success);
 ```
 
+Notes
+- Initialization: The legacy WASM wrapper handles async initialization internally (via `ensureWasmInitialized()`); callers usually don’t need to invoke it directly. If you want to pre-warm on startup, you can `import { ensureWasmInitialized } from 'dhi/dist/wasm'` and `await ensureWasmInitialized()`.
+- Shipped assets: The npm package includes `dist/dhi_core.js` (wasm-bindgen glue) and `dist/dhi_core_bg.wasm`. A native Node binding (`dist/dhi_core.node`) may be present for host builds but is not used in browsers.
+- No postinstall build: Artifacts are prebuilt in `dist/`; installs work out of the box.
+
 ---
 
 ## 🏗️ Supported Types (Typed API)
