@@ -24,10 +24,17 @@ function H3(props: React.HTMLAttributes<HTMLHeadingElement>) {
   );
 }
 
-function Pre(props: any) {
-  const child = props?.children as any;
-  const code = child?.props?.children ?? "";
-  const className: string = child?.props?.className ?? "";
+function Pre(props: React.HTMLAttributes<HTMLPreElement>) {
+  const child = props?.children as React.ReactNode;
+  let code = "";
+  let className = "";
+  if (React.isValidElement(child)) {
+    const childProps = child.props as { children?: unknown; className?: string };
+    code = String(childProps?.children ?? "");
+    className = childProps?.className ?? "";
+  } else if (typeof child === "string") {
+    code = child;
+  }
   const lang = className.match(/language-([a-z0-9]+)/)?.[1] ?? "ts";
   return <CodeBlock code={String(code)} language={lang} />;
 }
@@ -40,4 +47,3 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     ...components,
   };
 }
-

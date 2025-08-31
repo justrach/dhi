@@ -24,7 +24,7 @@ export default function PlaygroundPage() {
             <BarChart data={data}>
               <XAxis dataKey="label" />
               <YAxis unit="ms" />
-              <Tooltip formatter={(v: any) => `${Number(v).toFixed(2)} ms`} />
+              <Tooltip formatter={(v: unknown) => `${(typeof v === 'number' ? v : Number(v)).toFixed(2)} ms`} />
               <Legend />
               <Bar dataKey="dhi" name="DHI (ms)" fill="var(--orange)" radius={[4,4,0,0]} />
               <Bar dataKey="zod" name="Zod (ms)" fill="#9CA3AF" radius={[4,4,0,0]} />

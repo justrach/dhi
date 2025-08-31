@@ -62,8 +62,8 @@ const rows: Row[] = [
 
 export default function BenchmarksPage() {
   const [unit, setUnit] = useState<"ms" | "ops">("ms");
-  const maxMs = useMemo(() => Math.max(...rows.map((r) => r.zodMs)), []);
-  const maxOps = useMemo(() => Math.max(...rows.map((r) => r.dhiOps)), []);
+  // const maxMs = useMemo(() => Math.max(...rows.map((r) => r.zodMs)), []);
+  // const maxOps = useMemo(() => Math.max(...rows.map((r) => r.dhiOps)), []);
 
   return (
     <div className="py-10">
@@ -132,7 +132,10 @@ export default function BenchmarksPage() {
               <BarChart data={rows} margin={{ left: 10, right: 10 }}>
                 <XAxis dataKey="scenario" tick={{ fontSize: 12 }} interval={0} angle={-12} height={60} textAnchor="end" />
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => unit === "ms" ? `${v}ms` : `${shortOps(v)}`} />
-                <Tooltip formatter={(val: any) => unit === "ms" ? `${val.toFixed(2)} ms` : `${Number(val).toLocaleString()} ops/s`} />
+                <Tooltip formatter={(val: unknown) => {
+                  const n = typeof val === "number" ? val : Number(val);
+                  return unit === "ms" ? `${n.toFixed(2)} ms` : `${n.toLocaleString()} ops/s`;
+                }} />
                 <Legend />
                 {unit === "ms" ? (
                   <>
@@ -176,7 +179,7 @@ export default function BenchmarksPage() {
 function Metric({ unit, ms, ops, color }: { unit: "ms" | "ops"; ms: number; ops: number; color: string }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="tabular-nums">
+      <span className="tabular-nums" style={{ color }}>
         {unit === "ms" ? `${ms.toFixed(2)}ms` : `${formatOps(ops)} ops/sec`}
       </span>
       <span className="text-ink-2/70">± stdev</span>
@@ -188,4 +191,12 @@ function shortOps(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return `${n}`;
+}
+
+function formatOps(n: number) {
+  // Human-friendly formatting for ops/sec in table cells
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}k`;
+  return Math.round(n).toString();
 }

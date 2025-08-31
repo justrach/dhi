@@ -1,3 +1,5 @@
+"use client";
+
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="py-10 grid gap-8 md:grid-cols-[1fr_260px]">
@@ -20,7 +22,6 @@ function TOC() {
   );
 }
 
-"use client";
 import { useEffect, useState } from "react";
 
 function TOCClient() {
