@@ -2,6 +2,7 @@ import Link from "next/link";
 import { InstallBlock } from "@/components/site/InstallBlock";
 import { CodeBlock } from "@/components/site/CodeBlock";
 import { Button } from "@/components/ui/button";
+import { Hero } from "@/components/site/Hero";
 
 export default function Home() {
   const quickstart = `import { d, object, string, number } from 'dhi'
@@ -26,9 +27,7 @@ if (!res.success) {
       {/* Hero */}
       <section className="grid md:grid-cols-2 gap-8 items-center min-h-[560px] md:min-h-[620px]">
         <div className="flex flex-col gap-5 pt-4">
-          <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-ink">
-            Validation at escape velocity.
-          </h1>
+          <Hero />
           <p className="text-lg text-ink-2">
             Type-safe validation that won’t slow your hot paths. Transparent
             benchmarks and a tiny, intuitive API.
