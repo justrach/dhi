@@ -11,7 +11,7 @@ export function Nav() {
         </Link>
         <nav className="hidden md:flex items-center gap-6 text-sm">
           <Link className="text-ink/80 hover:text-ink" href="/">Home</Link>
-          <Link className="text-ink/80 hover:text-ink" href="/docs">Docs</Link>
+          {/** Docs temporarily hidden */}
           <Link className="text-ink/80 hover:text-ink" href="/benchmarks">Benchmarks</Link>
           <Link className="text-ink/80 hover:text-ink" href="/compare">Compare</Link>
           <Link className="text-ink/80 hover:text-ink" href="/playground">Playground</Link>
@@ -28,4 +28,3 @@ export function Nav() {
     </header>
   );
 }
-
