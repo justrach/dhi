@@ -110,6 +110,13 @@ export class DhiType<T> {
     validate(value: unknown): ValidationResult<T> {
         if (!this.initialized) throw new Error("DhiType not initialized");
         try {
+            // Fast-path empty root kinds that may not require WASM
+            if (this.typeString === 'undefined' || this.typeString === 'void') {
+                const ok = (value === undefined);
+                return ok
+                    ? { success: true, data: value as T }
+                    : { success: false, errors: [{ path: "", message: "Expected undefined" }] };
+            }
             // For object-root schemas, validate the object directly.
             // For all other root schemas (primitives, arrays, record, enum, etc.),
             // we register a single field named "value" in WASM, so wrap the input.
@@ -162,6 +169,12 @@ export class DhiType<T> {
     validate_batch(values: unknown[]): ValidationResult<T>[] {
         if (!this.initialized) throw new Error("DhiType not initialized");
         try {
+            if (this.typeString === 'undefined' || this.typeString === 'void') {
+                return values.map(v => v === undefined
+                    ? { success: true, data: v as T }
+                    : { success: false, errors: [{ path: "", message: "Expected undefined" }] }
+                );
+            }
             const inputs = this.typeString === 'object'
                 ? (values as Record<string, any> [])
                 : values.map(v => ({ value: v }));
@@ -280,7 +293,37 @@ export class DhiType<T> {
 
 // Export the main API
 export const dhi = {
-    create: DhiType.create
+    create: DhiType.create,
+    // Primitive creators
+    async string(): Promise<DhiType<string>> { return (await DhiType.create<string>()).string(); },
+    async number(): Promise<DhiType<number>> { return (await DhiType.create<number>()).number(); },
+    async boolean(): Promise<DhiType<boolean>> { return (await DhiType.create<boolean>()).boolean(); },
+    async date(): Promise<DhiType<Date>> { return (await DhiType.create<Date>()).date(); },
+    async bigint(): Promise<DhiType<bigint>> { return (await DhiType.create<bigint>()).bigint(); },
+    async symbol(): Promise<DhiType<symbol>> { return (await DhiType.create<symbol>()).symbol(); },
+    async undefined(): Promise<DhiType<undefined>> { return (await DhiType.create<undefined>()).undefined(); },
+    async null(): Promise<DhiType<null>> { return (await DhiType.create<null>()).null(); },
+    async void(): Promise<DhiType<void>> { return (await DhiType.create<void>()).void(); },
+    async any(): Promise<DhiType<any>> { return (await DhiType.create<any>()).any(); },
+    async unknown(): Promise<DhiType<unknown>> { return (await DhiType.create<unknown>()).unknown(); },
+    async never(): Promise<DhiType<never>> { return (await DhiType.create<never>()).never(); },
+
+    // Combinators/containers
+    async array<T>(itemType: DhiType<T>): Promise<DhiType<T[]>> {
+        return (await DhiType.create<T[]>()).array(itemType);
+    },
+    async object<U extends Record<string, any>>(shape: { [K in keyof U]: DhiType<U[K]> }): Promise<DhiType<U>> {
+        return (await DhiType.create<U>()).object(shape);
+    },
+    async record<K extends string, V>(valueType: DhiType<V>): Promise<DhiType<Record<K, V>>> {
+        return (await DhiType.create<Record<K, V>>()).record<K, V>(valueType);
+    },
+    async optional<T>(inner: DhiType<T>): Promise<DhiType<T | undefined>> {
+        return inner.optional();
+    },
+    async nullable<T>(inner: DhiType<T>): Promise<DhiType<T | null>> {
+        return inner.nullable();
+    },
 };
 
 export function createType<T>(): Promise<DhiType<T>> {
