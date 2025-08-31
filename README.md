@@ -406,3 +406,46 @@ Notes:
 - This preview covers core constructors: `string`, `number`, `boolean`, `date`, `bigint`, `symbol`, `any`, `unknown`, `never`, `undefined`, `null`, `void`, plus `object`, `array`, `record`, and `enum`.
 - Modifiers: `.optional()`, `.nullable()` are supported.
 - Roadmap: `union`, `discriminatedUnion`, `literal`, `tuple`, `map`, `set`, `refine/superRefine`, `transform/pipe`, `coerce`, `default/catch/nullish/readonly/brand`, and richer error codes.
+## ⚡ Quick Benchmark (DHI vs Zod)
+
+Run a quick, local benchmark with Bun comparing DHI’s typed API against Zod.
+
+```bash
+# From repo root (build once for local fallback)
+bun run build:ts
+
+# Then run the benchmark (defaults: size=50000, runs=5, invalid=0)
+bun run benchmarks/quick_invalid_bench.ts --size 50000 --invalid 0.2 --runs 5
+```
+
+Flags:
+- `--size <n>`: number of items (e.g., 50000)
+- `--invalid <ratio>`: fraction of invalid rows (e.g., 0.2 for 20%)
+- `--runs <n>`: number of timed iterations to median
+
+Example output (JSON):
+
+```json
+{
+  "size": 50000,
+  "invalid": 0.2,
+  "runs": 5,
+  "dhi": { "ms": 1.324 },
+  "zod": { "ms": 39.686 },
+  "speedup": 30.0
+}
+```
+
+Notes:
+- Invalid-heavy datasets highlight DHI’s fast-path short-circuits; Zod incurs per-item parse/throw cost.
+- For apples-to-apples, compare on the same machine/runtime at moderate sizes (50k–500k) for stable medians.
+
+## ESM/CJS Usage Notes
+
+- DHI publishes both CJS and ESM builds. In modern bundlers (Next.js, Vite), prefer named ESM imports:
+
+```ts
+import { object, string, number, boolean } from 'dhi';
+```
+
+- In pure CJS contexts (older Node), use `require('dhi')` or default-import shims if needed.
