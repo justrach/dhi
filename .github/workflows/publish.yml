@@ -65,13 +65,14 @@ jobs:
 
       - name: Verify npm pack includes dist entries
         run: |
-          npm pack --dry-run > pack.txt
-          cat pack.txt | sed -n '1,200p'
-          grep -E "dist/index\\.js" pack.txt
-          grep -E "dist/index\\.d\\.ts" pack.txt
+          # Capture pack output reliably even if npm prints notices
+          npm pack --dry-run | tee pack.txt
+          sed -n '1,200p' pack.txt
+          grep -F "dist/index.js" pack.txt
+          grep -F "dist/index.d.ts" pack.txt
           # Ensure WASM files are included in the package tarball
-          grep -E "dist/dhi_core\\.js" pack.txt
-          grep -E "dist/dhi_core_bg\\.wasm" pack.txt
+          grep -F "dist/dhi_core.js" pack.txt
+          grep -F "dist/dhi_core_bg.wasm" pack.txt
 
       - name: Run Jest unit tests (Bun)
         run: bun run test:jest
