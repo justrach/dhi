@@ -60,7 +60,21 @@ Average speedup: 1.88x
 DHI provides compile-time type safety similar to Yup's approach:
 
 ```typescript
-import { object, string, number, boolean, optional, model, type ObjectSchema, type TypedInfer } from 'dhi';
+import {
+  object,
+  string,
+  number,
+  boolean,
+  array,
+  record,
+  union,
+  discriminatedUnion,
+  optional,
+  nullable,
+  model,
+  type ObjectSchema,
+  type TypedInfer
+} from 'dhi';
 
 // Define your TypeScript interface
 interface User {
@@ -124,6 +138,11 @@ const Event = discriminatedUnion('type', {
   page_view: object({ type: string(), url: string() }),
   purchase: object({ type: string(), orderId: string(), value: number() })
 });
+
+// Record/dictionary validation (fused loop, no allocations)
+const StringMap = record(string()); // Schema<Record<string, string>>
+const ok = StringMap.validate({ a: 'x', b: 'y' });
+```
 ```
 
 ### Performance Comparison with Yup
@@ -232,23 +251,26 @@ console.log(result.success);
 
 ---
 
-## 🏗️ Supported Types
-- `string`
-- `number`
-- `boolean`
-- `date`
-- `bigint`
-- `symbol`
-- `array`
-- `object`
-- `record`
-- `enum`
-- `undefined`
-- `null`
-- `void`
-- `any`
-- `unknown`
-- `never`
+## 🏗️ Supported Types (Typed API)
+- `string`, `number`, `boolean`
+- `object({...})`
+- `array(schema)`
+- `record(valueSchema)`
+- `union([...])`, `discriminatedUnion(key, mapping)`
+- Modifiers: `optional(schema)`, `nullable(schema)`
+- Helpers: `model(name, shape)`, `TypedInfer`
+
+Note: The temporary Zod‑compat layer exposes a limited subset of Zod APIs (e.g., `z.object`, `z.string`, `z.array`, `z.record`, `z.enum`, basic `.optional()`/`.nullable()`, `.parse`/`.safeParse`). It exists to ease migration and may be removed in a future major release.
+
+### Zod‑Compat (Migration Aid)
+
+```ts
+// One‑liner migration: replace your zod import
+import { z } from 'dhi';
+
+const User = z.object({ id: z.string(), name: z.string() });
+const r = User.safeParse({ id: '1', name: 'A' });
+```
 
 ---
 
