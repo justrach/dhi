@@ -18,7 +18,7 @@ export default function PlaygroundPage() {
   const [runs, setRuns] = useState(5);
   const [data, setData] = useState<BenchRow[]>([]);
   const [running, setRunning] = useState(false);
-  const [invalidRatio, setInvalidRatio] = useState(0);
+  const [invalidRatio, setInvalidRatio] = useState(0.2);
 
   const sample = useMemo(() => makeSample(count, invalidRatio), [count, invalidRatio]);
 

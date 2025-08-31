@@ -9,7 +9,7 @@ export function SpeedPanel() {
   const stats = useMemo(() => {
     // Preset example numbers; toggle shows a realistic mixed-data advantage
     return withInvalids
-      ? { label: "50k items • ~20% invalid", dhiMs: 9.8, zodMs: 52.9, speedup: 5.4 }
+      ? { label: "50k items • ~20% invalid", dhiMs: 1.324, zodMs: 39.686, speedup: 30.0 }
       : { label: "50k items • all valid", dhiMs: 12.4, zodMs: 41.3, speedup: 3.3 };
   }, [withInvalids]);
 
@@ -68,4 +68,3 @@ function BarRow({ label, valueMs, pct, color }: { label: string; valueMs: number
     </div>
   );
 }
-
