@@ -7,6 +7,7 @@
     "url": "https://github.com/justrach/dhi.git"
   },
   "main": "dist/index.js",
+  "module": "dist/esm/index.js",
   "devDependencies": {
     "@types/jest": "^29.5.14",
     "@types/node": "^18.15.11",
@@ -22,6 +23,13 @@
     "README.md",
     "LICENSE"
   ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js"
+    }
+  },
   "keywords": [
     "typescript",
     "validation",
@@ -37,7 +45,7 @@
   },
   "scripts": {
     "build": "bash scripts/build.sh",
-    "build:ts": "tsc",
+    "build:ts": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json",
     "prepublishOnly": "npm run build",
     "test": "npm run test:wasm && npm run test:jest",
     "test:wasm": "cd rust && wasm-pack test --node",
