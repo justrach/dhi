@@ -12,4 +12,24 @@ export default function ComparePage() {
     </div>
   );
 }
+import type { Metadata } from "next";
 
+export const metadata: Metadata = {
+  title: "Compare DHI vs Zod · DHI",
+  description: "API overlap, migration tips, and tradeoffs: see how DHI's typed API compares to Zod and how to switch smoothly.",
+  openGraph: {
+    title: "Compare DHI vs Zod",
+    description: "API overlap and migration guidance from Zod to DHI.",
+    type: "article",
+    url: "/compare",
+    siteName: "DHI",
+    images: [{ url: "/og.png", width: 1200, height: 630 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Compare DHI vs Zod",
+    description: "API overlap and migration guidance.",
+    images: ["/og.png"],
+  },
+  keywords: ["DHI", "Zod", "migration", "schema", "TypeScript validation"],
+};
