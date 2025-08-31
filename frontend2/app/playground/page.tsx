@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from "recharts";
-import DHI from "dhi";
+import { object, string, number, boolean as bool } from "dhi";
 import { z } from "zod";
 
 type BenchRow = { label: string; dhi: number; zod: number };
@@ -18,32 +18,38 @@ export default function PlaygroundPage() {
   const [runs, setRuns] = useState(5);
   const [data, setData] = useState<BenchRow[]>([]);
   const [running, setRunning] = useState(false);
+  const [invalidRatio, setInvalidRatio] = useState(0);
 
-  const sample = useMemo(() => makeSample(count), [count]);
+  const sample = useMemo(() => makeSample(count, invalidRatio), [count, invalidRatio]);
 
   async function run() {
     setRunning(true);
     try {
       // Schemas (similar surface)
-      const DhiUser = DHI.object({ id: DHI.number(), name: DHI.string(), active: DHI.boolean() });
+      const DhiUser = object({ id: number(), name: string(), active: bool() });
       const ZodUser = z.object({ id: z.number(), name: z.string(), active: z.boolean() });
 
-      // Warm-up
-      DhiUser.validateBatch(sample.valid);
-      ZodUser.parse(sample.valid[0]);
+      // Warm-up (avoid throwing on intentionally invalid first item)
+      DhiUser.validateBatch(sample.items);
+      const firstValid = sample.items.find(
+        (v) => typeof v.id === 'number' && typeof v.name === 'string' && typeof v.active === 'boolean'
+      ) ?? sample.items[0];
+      try { ZodUser.parse(firstValid); } catch { /* ignore warm-up errors */ }
 
       // Timed runs
       const dhiTimes: number[] = [];
       const zodTimes: number[] = [];
       for (let i = 0; i < runs; i++) {
         const t0 = performance.now();
-        const res = DhiUser.validateBatch(sample.valid);
+        const res = DhiUser.validateBatch(sample.items);
         void res; // ensure not optimized out
         const t1 = performance.now();
         dhiTimes.push(t1 - t0);
 
         const z0 = performance.now();
-        for (let j = 0; j < sample.valid.length; j++) ZodUser.parse(sample.valid[j]);
+        for (let j = 0; j < sample.items.length; j++) {
+          try { ZodUser.parse(sample.items[j]); } catch { /* ignore */ }
+        }
         const z1 = performance.now();
         zodTimes.push(z1 - z0);
       }
@@ -74,6 +80,19 @@ export default function PlaygroundPage() {
             step={1000}
             onChange={(e) => setCount(parseInt(e.target.value || "0", 10))}
           />
+        </label>
+        <label className="text-sm">
+          Invalids
+          <select
+            className="ml-2 border rounded px-2 py-1"
+            value={invalidRatio}
+            onChange={(e) => setInvalidRatio(parseFloat(e.target.value))}
+          >
+            <option value={0}>0%</option>
+            <option value={0.1}>10%</option>
+            <option value={0.2}>20%</option>
+            <option value={0.3}>30%</option>
+          </select>
         </label>
         <label className="text-sm">
           Runs
@@ -112,8 +131,19 @@ export default function PlaygroundPage() {
   );
 }
 
-function makeSample(n: number) {
-  const valid: { id: number; name: string; active: boolean }[] = new Array(n);
-  for (let i = 0; i < n; i++) valid[i] = { id: i, name: `user-${i}`, active: (i & 1) === 0 };
-  return { valid };
+type SampleItem = { id: number | string; name: string | number; active: boolean | string };
+
+function makeSample(n: number, invalidRatio: number) {
+  const items: SampleItem[] = new Array(n);
+  const invalidEvery = invalidRatio > 0 ? Math.max(2, Math.round(1 / invalidRatio)) : 0;
+  for (let i = 0; i < n; i++) {
+    const isInvalid = invalidEvery !== 0 && i % invalidEvery === 0;
+    if (isInvalid) {
+      // Corrupt one or more fields to simulate realistic invalids
+      items[i] = { id: String(i), name: i, active: "yes" };
+    } else {
+      items[i] = { id: i, name: `user-${i}`, active: (i & 1) === 0 };
+    }
+  }
+  return { items };
 }

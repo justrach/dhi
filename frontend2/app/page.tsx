@@ -3,6 +3,7 @@ import { InstallBlock } from "@/components/site/InstallBlock";
 import { CodeBlock } from "@/components/site/CodeBlock";
 import { Button } from "@/components/ui/button";
 import { Hero } from "@/components/site/Hero";
+import { SpeedPanel } from "@/components/site/SpeedPanel";
 
 export default function Home() {
   const quickstart = `import { d, object, string, number } from 'dhi'
@@ -42,7 +43,9 @@ if (!res.success) {
             </Button>
           </div>
         </div>
-        <div className="rounded-2xl hero-plastic h-[360px] md:h-[420px] shadow-[0_10px_40px_-10px_rgba(255,107,0,0.35)]" />
+        <div>
+          <SpeedPanel />
+        </div>
       </section>
 
       {/* Quickstart */}

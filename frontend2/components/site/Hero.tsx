@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type HeroProps = {
   variants?: string[];
@@ -13,20 +13,27 @@ export function Hero({
     "Schemas that keep up with prod.",
     "Fast where it matters: hot paths.",
   ],
-  intervalMs = 2400,
 }: HeroProps) {
-  const [i, setI] = useState(0);
-  const current = useMemo(() => variants[i % variants.length], [i, variants]);
+  const [idx, setIdx] = useState<number | null>(null);
 
+  // Pick a stable variant per session (until refresh)
   useEffect(() => {
-    const t = setInterval(() => setI((x) => x + 1), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs]);
+    const key = "dhi_hero_idx";
+    const stored = typeof window !== 'undefined' ? window.sessionStorage.getItem(key) : null;
+    if (stored !== null) {
+      setIdx(parseInt(stored, 10) || 0);
+    } else {
+      const i = Math.floor(Math.random() * variants.length);
+      setIdx(i);
+      try { window.sessionStorage.setItem(key, String(i)); } catch {}
+    }
+  }, [variants.length]);
+
+  const text = idx === null ? variants[0] : variants[idx % variants.length];
 
   return (
-    <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-ink transition-opacity duration-300">
-      {current}
+    <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-ink">
+      {text}
     </h1>
   );
 }
-
