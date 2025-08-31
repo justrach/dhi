@@ -1,0 +1,94 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run build + verifiers only; skip publish"
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, test, and publish
+    runs-on: ubuntu-latest
+    if: github.repository == 'justrach/dhi'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest unit tests
+        run: npm run test:jest
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify built artifacts exist
+        run: |
+          test -f dist/index.js
+          test -f dist/index.d.ts
+          # WASM glue and binary expected by src/wasm.ts
+          test -f dist/dhi_core.js
+          test -f dist/dhi_core_bg.wasm
+          ls -la dist | sed -n '1,200p'
+
+      - name: Verify npm pack includes dist entries
+        run: |
+          npm pack --dry-run > pack.txt
+          cat pack.txt | sed -n '1,200p'
+          grep -E "dist/index\\.js" pack.txt
+          grep -E "dist/index\\.d\\.ts" pack.txt
+          # Ensure WASM files are included in the package tarball
+          grep -E "dist/dhi_core\\.js" pack.txt
+          grep -E "dist/dhi_core_bg\\.wasm" pack.txt
+
+      - name: Dry-run publish (manual)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
+        run: npm publish --dry-run
+
+      - name: Check version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm
+        if: (github.event_name != 'workflow_dispatch' || inputs.dry_run != true) && startsWith(github.ref, 'refs/tags/')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public --provenance

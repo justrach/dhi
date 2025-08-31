@@ -72,3 +72,40 @@ Notes:
 
 - Code: `src/typed.ts` (nested fast path, record validator), `src/index.ts` (export updates)
 - ADRs: `docs/adr/0007-deeply-nested-fast-path.md`, `docs/adr/0008-reduce-property-access-cost.md`
+
+## Publishing to npm
+
+- Workflow: `.github/workflows/publish.yml` builds, tests, verifies, and publishes with provenance.
+- Triggers: tag pushes matching `v*.*.*` and manual runs (`workflow_dispatch`).
+- Fork protection: job runs only on `justrach/dhi` (`if: github.repository == 'justrach/dhi'`).
+
+Prerequisites (what you need to add)
+- `NPM_TOKEN` secret: Create an npm “Automation” token and add it to the repo secrets as `NPM_TOKEN`.
+  - Ensure the npm account owning the token has publish rights to the `dhi` package (or the scope if scoped).
+- Package metadata: `package.json` should point to built files and include them in the tarball.
+  - `main: dist/index.js`, `types: dist/index.d.ts`, and `files` includes `dist` (already set).
+- Build artifacts: `scripts/build.sh` must produce all runtime artifacts into `dist/` (JS, d.ts, and any `.wasm`/native glue files).
+- GitHub permissions: default is fine; the workflow requests `id-token: write` for npm provenance.
+
+Release steps (tagged publish)
+- Bump version: `npm version patch|minor|major` (updates `package.json` and creates a tag `vX.Y.Z`).
+- Push: `git push && git push --tags`.
+- CI runs: `npm ci` → `npm run test:jest` → `npm run build` → verifiers → publish to npm with `--provenance`.
+
+CI verifiers
+- Version check: ensures `package.json` version equals the tag (e.g., `v1.2.3`).
+- Artifact checks: asserts `dist/index.js`, `dist/index.d.ts`, `dist/dhi_core.js`, and `dist/dhi_core_bg.wasm` exist after build.
+- Pack check: runs `npm pack --dry-run` and confirms these files are in the tarball.
+
+Manual dry-run (no publish)
+- From the Actions tab, run “Publish to npm” with the default `dry_run: true`.
+- CI runs the full build and verifications, plus an `npm publish --dry-run`, but does NOT publish.
+- Use this to validate a release before tagging.
+
+Manual publish via dispatch
+- You can run the workflow on a tag ref and set `dry_run: false` to publish from a manual dispatch.
+- Publishing still requires the ref to be a tag (`vX.Y.Z`); otherwise the publish step is skipped.
+
+Notes
+- The build uses Rust + `wasm-pack` to produce WASM and native artifacts into `dist/`.
+- Installs “just work”: consumers receive prebuilt files; no postinstall build is required.
