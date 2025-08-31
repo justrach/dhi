@@ -65,14 +65,26 @@ jobs:
 
       - name: Verify npm pack includes dist entries
         run: |
-          # Capture pack output reliably even if npm prints notices
-          npm pack --dry-run | tee pack.txt
-          sed -n '1,200p' pack.txt
-          grep -F "dist/index.js" pack.txt
-          grep -F "dist/index.d.ts" pack.txt
-          # Ensure WASM files are included in the package tarball
-          grep -F "dist/dhi_core.js" pack.txt
-          grep -F "dist/dhi_core_bg.wasm" pack.txt
+          node -e "\
+            const { spawnSync } = require('child_process');\
+            const out = spawnSync('npm', ['pack', '--dry-run', '--json'], { encoding: 'utf8' });\
+            if (out.status !== 0) {\
+              console.error(out.stdout);\
+              console.error(out.stderr);\
+              process.exit(out.status || 1);\
+            }\
+            console.log(out.stdout);\
+            const arr = JSON.parse(out.stdout);\
+            const files = new Set(arr[0].files.map(f => f.path));\
+            const required = ['dist/index.js','dist/index.d.ts','dist/dhi_core.js','dist/dhi_core_bg.wasm'];\
+            const missing = required.filter(p => !files.has(p));\
+            if (missing.length) {\
+              console.error('Missing from npm pack:', missing);\
+              process.exit(1);\
+            } else {\
+              console.log('Pack includes required files');\
+            }\
+          "
 
       - name: Run Jest unit tests (Bun)
         run: bun run test:jest
