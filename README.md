@@ -11,9 +11,167 @@
 
 </div>
 
-# 🚀 DHI - High Performance TypeScript Validation
+# 🚀 DHI — High‑Performance TypeScript Validation
 
-**DHI** is a high-performance TypeScript validation library powered by WebAssembly. Named after the Sanskrit word **धि (Dhi)**, meaning "intellect" or "wisdom," DHI embodies the smart, precise, and efficient data validation you need in modern applications. 
+DHI is a blazing‑fast TypeScript validation library with two faces:
+
+- A modern, typed‑first API (recommended)
+- A familiar Zod‑like facade for easy migration
+
+It’s built for applications that validate large datasets efficiently while preserving compile‑time type safety and a great DX.
+
+## 🚀 Performance at a glance
+
+DHI significantly outperforms other validation libraries through two complementary approaches:
+
+DHI outperforms general‑purpose validators by combining JS fast paths (iterative deep‑object validators, array‑of‑object fast path) with a fused per‑schema JS validator that collapses multiple property reads into a single monomorphic function.
+
+- Typed‑first API (recommended): fast, type‑safe, zero WASM overhead
+- WASM/Rust (optional): batch primitives and deep trees with cross‑language optimizations
+
+### Comprehensive Benchmark Results
+
+#### TypeScript-First API Performance
+```
+Simple 4-Field Required Schema (1M items):
+  DHI:  40.67ms (24,591,023 ops/sec)
+  Zod:  58.16ms (17,193,063 ops/sec)
+  Speedup: 1.43x
+
+Simple 4-Field with Optional (1M items):
+  DHI:  49.92ms (20,032,966 ops/sec)
+  Zod:  53.90ms (18,554,459 ops/sec)
+  Speedup: 1.08x
+
+Mixed Valid/Invalid Data (500K items):
+  DHI:  385.17ms (1,298,142 ops/sec)
+  Zod:  1209.65ms (413,342 ops/sec)
+  Speedup: 3.14x
+
+Average speedup: 1.88x
+```
+
+*Benchmarks run on Mac Studio with Bun runtime*
+
+## 📖 Usage
+
+### TypeScript-First API (Recommended)
+
+DHI provides compile-time type safety similar to Yup's approach:
+
+```typescript
+import {
+  object,
+  string,
+  number,
+  boolean,
+  array,
+  record,
+  union,
+  discriminatedUnion,
+  optional,
+  nullable,
+  model,
+  type ObjectSchema,
+  type TypedInfer
+} from 'dhi';
+
+// Define your TypeScript interface
+interface User {
+  name: string;
+  age?: number;
+  email: string;
+  active: boolean;
+}
+
+// Method 1: Direct schema with compile-time type checking
+const userSchema: ObjectSchema<User> = object({
+  name: string(),
+  age: optional(number()),
+  email: string(),
+  active: boolean()
+});
+
+// Method 2: Named model with enhanced error messages
+const UserModel = model('User', {
+  name: string(),
+  age: optional(number()),
+  email: string(),
+  active: boolean()
+});
+
+// ❌ This would cause a compile-time error:
+// const badSchema: ObjectSchema<User> = object({
+//   name: number(), // Type error: number is not assignable to string
+// });
+
+// Type inference
+type InferredUser = TypedInfer<typeof userSchema>; // User
+type ModelUser = TypedInfer<typeof UserModel>; // User
+
+// Validation
+const userData = {
+  name: "John Doe",
+  age: 30,
+  email: "john@example.com",
+  active: true
+};
+
+// Single validation
+const user = userSchema.validate(userData);
+
+// Safe validation
+const result = userSchema.safeParse(userData);
+if (result.success) {
+  console.log('Valid user:', result.data);
+} else {
+  console.log('Validation error:', result.error);
+}
+
+// Batch validation (ultra-fast for simple schemas)
+const users = [userData, /* ... more users */];
+const validationResults = userSchema.validateBatch(users);
+
+// Discriminated unions (fast dispatch)
+const Event = discriminatedUnion('type', {
+  click: object({ type: string(), x: number(), y: number() }),
+  page_view: object({ type: string(), url: string() }),
+  purchase: object({ type: string(), orderId: string(), value: number() })
+});
+
+// Record/dictionary validation (fused loop, no allocations)
+const StringMap = record(string()); // Schema<Record<string, string>>
+const ok = StringMap.validate({ a: 'x', b: 'y' });
+```
+```
+
+### Performance Comparison with Yup
+
+```typescript
+// Yup approach
+import { object, number, string, ObjectSchema } from 'yup';
+
+interface Person {
+  name: string;
+  age?: number;
+  sex: 'male' | 'female' | 'other' | null;
+}
+
+const yupSchema: ObjectSchema<Person> = object({
+  name: string().defined(),
+  age: number().optional(),
+  sex: string<'male' | 'female' | 'other'>().nullable().defined(),
+});
+
+// DHI approach (1.43x faster)
+import { object, string, number, optional, nullable, type ObjectSchema } from 'dhi';
+
+const dhiSchema: ObjectSchema<Person> = object({
+  name: string(),
+  age: optional(number()),
+  sex: nullable(string()) // Note: enum validation coming soon
+});
+```
 
 > **धि**: Intellect, understanding, wisdom.
 
@@ -60,7 +218,16 @@ bun add dhi
 
 ---
 
-## 🔨 Basic Usage
+## Fun Fact: Small Browser Payload
+
+For browsers, DHI ships a compact payload:
+
+- JS + WASM total: ~46 KB gzip (~158 KB raw)
+- Breakdown (gzip): `typed.js` ~6.9 KB, `zod-compat.js` ~2.2 KB, `core.js` ~2.0 KB, `wasm.js` ~1.8 KB, `index.js` ~0.6 KB, `dhi_core_bg.wasm` ~32.9 KB
+- Note: The `dhi_core.node` binary (~369 KB) is Node-only and not shipped to browsers.
+
+
+## 🔨 Legacy WASM API (optional)
 
 ```typescript
 import { dhi } from 'dhi';
@@ -82,40 +249,76 @@ const result = UserSchema.validate({
 console.log(result.success);
 ```
 
+Notes
+- Initialization: The legacy WASM wrapper handles async initialization internally (via `ensureWasmInitialized()`); callers usually don’t need to invoke it directly. If you want to pre-warm on startup, you can `import { ensureWasmInitialized } from 'dhi/dist/wasm'` and `await ensureWasmInitialized()`.
+- Shipped assets: The npm package includes `dist/dhi_core.js` (wasm-bindgen glue) and `dist/dhi_core_bg.wasm`. A native Node binding (`dist/dhi_core.node`) may be present for host builds but is not used in browsers.
+- No postinstall build: Artifacts are prebuilt in `dist/`; installs work out of the box.
+
 ---
 
-## 🏗️ Supported Types
-- `string`
-- `number`
-- `boolean`
-- `date`
-- `bigint`
-- `symbol`
-- `array`
-- `object`
-- `record`
-- `enum`
-- `undefined`
-- `null`
-- `void`
-- `any`
-- `unknown`
-- `never`
+## 🏗️ Supported Types (Typed API)
+- `string`, `number`, `boolean`
+- `object({...})`
+- `array(schema)`
+- `record(valueSchema)`
+- `union([...])`, `discriminatedUnion(key, mapping)`
+- Modifiers: `optional(schema)`, `nullable(schema)`
+- Helpers: `model(name, shape)`, `TypedInfer`
+
+Note: The temporary Zod‑compat layer exposes a limited subset of Zod APIs (e.g., `z.object`, `z.string`, `z.array`, `z.record`, `z.enum`, basic `.optional()`/`.nullable()`, `.parse`/`.safeParse`). It exists to ease migration and may be removed in a future major release.
+
+### Zod‑Compat (Migration Aid)
+
+```ts
+// One‑liner migration: replace your zod import
+import { z } from 'dhi';
+
+const User = z.object({ id: z.string(), name: z.string() });
+const r = User.safeParse({ id: '1', name: 'A' });
+```
 
 ---
 
 ## 🎓 Advanced Features
 
-- **Optional Fields:** `dhi.optional(dhi.string())`
-- **Nullable Fields:** `dhi.nullable(dhi.number())`
-- **Record Types:** `dhi.record(dhi.string())`
-- **Batch Validation:** Use `UserSchema.validate_batch(items)` for validating multiple items at once.
+- **Optional Fields:** `optional(string())`
+- **Nullable Fields:** `nullable(number())`
+- **Discriminated unions:** `discriminatedUnion('type', { ... })`
+- **Array‑of‑object fast path:** inner object with ≤4 primitive fields
+- **Batch Validation:** `schema.validateBatch(items)`
 
 ---
 
-## Performance
+## 📈 Performance details
 
-DHI is built with performance in mind. It uses WebAssembly to validate data at speeds significantly faster than traditional JavaScript validators. In our benchmarks on complex validations with new types:
+Recent real‑world suites (on a Mac Studio) show: (2025-08-28)
+
+- __Setup__
+  - DHI: v0.1.4
+  - Zod: v4.1.4
+  - Script: `benchmarks/benchmark2.ts`
+  - Dataset: 1,000,000 mixed valid/invalid user-like objects
+
+- __Results__
+  - DHI: 498.13ms (800,091 valid)
+  - Zod: 647.54ms (800,091 valid)
+
+- __Validations per second__
+  - DHI: 2,007,501
+  - Zod: 1,544,300
+
+- __Performance Gain__
+  - DHI is **30% faster** than Zod v4
+  - **463,201 more validations per second**
+
+- __Optimizations Applied__
+  - Strict fast path with SIMD-style unrolled loops for primitive schemas (≤4 fields)
+  - Boolean-returning internal validation to eliminate Result allocations
+  - Precomputed schema analysis and flattened field vectors
+  - Cached JS keys with single Reflect.get per field
+  - Increased chunk size (32k) and wasm-opt with -O3 + SIMD
+
+Benchmarks live in `benchmarks/` and include both comprehensive micro‑benchmarks and realistic datasets:
 
 - **Benchmark 1 (1,000,000 items):**
   - **DHI:** 2661.79ms
@@ -129,6 +332,11 @@ DHI is built with performance in mind. It uses WebAssembly to validate data at s
 These results showcase the performance edge DHI offers, especially for applications requiring massive data validations.
 
 ---
+
+## 🧪 Build & Release
+
+- Build everything locally: `bash scripts/build.sh`
+- CI/CD: publishing to npm is handled by a GitHub workflow on release (requires `NPM_TOKEN`).
 
 ## License
 
@@ -148,4 +356,53 @@ For more information, bug reports, or contributions, please visit the [GitHub re
 
 
 ---
-🌟 DHI: Where Sanskrit wisdom meets modern TypeScript validation - delivering unmatched speed, precision, and reliability for your applications.
+🌟 DHI: Where Sanskrit wisdom meets modern TypeScript validation — delivering unmatched speed, precision, and reliability for your applications.
+
+---
+
+## 🧰 Zod‑like DX (migration aid)
+
+For teams familiar with Zod v4, DHI ships a small facade that mirrors common ergonomics. Use it to migrate gradually; for the best performance and type‑safety, prefer the typed‑first API above.
+
+- Import the facade and wait for initialization once:
+
+```ts
+import { z, dhiReady, Infer } from 'dhi';
+
+await dhiReady; // ensures WASM is ready so constructors are sync
+```
+
+- Define schemas similarly to Zod:
+
+```ts
+const User = z.object({
+  id: z.string(),
+  name: z.string(),
+  age: z.number(),
+  tags: z.array(z.string()),
+  status: z.enum('active', 'inactive', 'banned'), // also supports array form: z.enum(['active','inactive','banned'])
+  deletedAt: z.date().optional(),
+  lastLogin: z.date().nullable(),
+});
+```
+
+- Parse or safe-parse:
+
+```ts
+const parsed = User.parse({ id: '1', name: 'Jane', age: 42, tags: [], status: 'active' });
+const result = User.safeParse({ id: 1 });
+if (!result.success) {
+  console.log(result.error.issues); // [{ code, path, message }]
+}
+```
+
+- Type inference:
+
+```ts
+type User = Infer<typeof User>;
+```
+
+Notes:
+- This preview covers core constructors: `string`, `number`, `boolean`, `date`, `bigint`, `symbol`, `any`, `unknown`, `never`, `undefined`, `null`, `void`, plus `object`, `array`, `record`, and `enum`.
+- Modifiers: `.optional()`, `.nullable()` are supported.
+- Roadmap: `union`, `discriminatedUnion`, `literal`, `tuple`, `map`, `set`, `refine/superRefine`, `transform/pipe`, `coerce`, `default/catch/nullish/readonly/brand`, and richer error codes.

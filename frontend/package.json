@@ -29,7 +29,7 @@
     "tailwindcss-animate": "^1.0.7",
     "undici": "^7.3.0",
     "wasm-loader": "^1.3.0",
-    "zod": "^3.24.1"
+    "zod": "^4.1.3"
   },
   "devDependencies": {
     "typescript": "^5",

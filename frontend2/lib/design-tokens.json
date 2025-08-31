@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.codium.ai/design-tokens.schema.json",
+  "color": {
+    "orange": { "value": "#FF6B00" },
+    "white": { "value": "#FFFFFF" },
+    "ink": { "value": "#1F2328" },
+    "ink-2": { "value": "#2A2A2A" },
+    "glow": { "value": "#FF8C42" },
+    "bg-weak": { "value": "#F7F7F7" },
+    "border": { "value": "#E5E5E5" }
+  },
+  "radius": {
+    "xl": { "value": "12px" }
+  },
+  "typography": {
+    "sans": { "value": "var(--font-geist-sans)" },
+    "mono": { "value": "var(--font-geist-mono)" }
+  }
+}

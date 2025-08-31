@@ -1,4 +1,4 @@
-import init, { DhiCore } from '../dist/dhi_core.js';
+import { ensureWasmInitialized, isWasmReady, getWasmModuleSync } from './wasm';
 
 export type ValidationResult<T> = {
     success: boolean;
@@ -14,21 +14,36 @@ export type ValidationError = {
 let wasmInitialized = false;
 
 export class DhiType<T> {
-    private core!: DhiCore;
+    private core!: any;
     private initialized: boolean = false;
     private typeString: string = '';
+    private _isOptional: boolean = false;
+    private _isNullable: boolean = false;
+    private _fieldMeta?: Record<string, { optional: boolean; nullable: boolean }>;
 
     private constructor() {
         this.initialized = false;
     }
 
     static async create<T>(): Promise<DhiType<T>> {
-        if (!wasmInitialized) {
-            await init();
+        if (!wasmInitialized || !isWasmReady()) {
+            await ensureWasmInitialized();
             wasmInitialized = true;
         }
         const type = new DhiType<T>();
-        type.core = new DhiCore();
+        const mod = getWasmModuleSync();
+        type.core = new mod.DhiCore();
+        type.initialized = true;
+        return type;
+    }
+
+    static createSync<T>(): DhiType<T> {
+        if (!wasmInitialized || !isWasmReady()) {
+            throw new Error("Dhi WASM not initialized. Await dhiReady before using sync APIs.");
+        }
+        const type = new DhiType<T>();
+        const mod = getWasmModuleSync();
+        type.core = new mod.DhiCore();
         type.initialized = true;
         return type;
     }
@@ -63,12 +78,15 @@ export class DhiType<T> {
 
     object<U extends Record<string, any>>(shape: { [K in keyof U]: DhiType<U[K]> }): DhiType<U> {
         if (!this.initialized) throw new Error("DhiType not initialized");
-        
+        this._fieldMeta = {};
         for (const [key, type] of Object.entries(shape)) {
             if (!(type instanceof DhiType)) {
                 throw new Error(`Invalid type for field ${key}`);
             }
-            this.core.add_field(key, type.typeString, true);
+            const t = type as DhiType<any>;
+            const required = !(t._isOptional || t._isNullable);
+            this.core.add_field(key, t.typeString, required);
+            this._fieldMeta[key] = { optional: !!t._isOptional, nullable: !!t._isNullable };
         }
         
         this.typeString = "object";
@@ -77,48 +95,59 @@ export class DhiType<T> {
 
     optional(): DhiType<T | undefined> {
         if (!this.initialized) throw new Error("DhiType not initialized");
-        this.core.set_optional(true);
+        // Do not call into WASM here; object() will set required=false when adding this field
+        this._isOptional = true;
         return this as unknown as DhiType<T | undefined>;
     }
 
     nullable(): DhiType<T | null> {
         if (!this.initialized) throw new Error("DhiType not initialized");
-        this.core.set_nullable(true);
+        // Do not call into WASM here; object() will set required=false when adding this field
+        this._isNullable = true;
         return this as unknown as DhiType<T | null>;
     }
 
     validate(value: unknown): ValidationResult<T> {
         if (!this.initialized) throw new Error("DhiType not initialized");
-        
         try {
-            const flattenedValue = this.flattenObject(value as Record<string, any>);
-            const isValid = this.core.validate(flattenedValue);
-            if (isValid) {
-                return {
-                    success: true,
-                    data: value as T
-                };
+            // For object-root schemas, validate the object directly.
+            // For all other root schemas (primitives, arrays, record, enum, etc.),
+            // we register a single field named "value" in WASM, so wrap the input.
+            let input: any;
+            if (this.typeString === 'object') {
+                const obj = (value as Record<string, any>) || {};
+                if (this._fieldMeta) {
+                    const clone: Record<string, any> = { ...obj };
+                    for (const [k, meta] of Object.entries(this._fieldMeta)) {
+                        if (meta.nullable && clone.hasOwnProperty(k) && clone[k] === null) {
+                            delete clone[k];
+                        }
+                    }
+                    input = clone;
+                } else {
+                    input = obj;
+                }
             } else {
-                return {
-                    success: false,
-                    errors: [{
-                        path: "",
-                        message: "Validation failed"
-                    }]
-                };
+                input = { value };
             }
+            const isValid = this.core.validate(input);
+            if (isValid) {
+                return { success: true, data: value as T };
+            }
+            return {
+                success: false,
+                errors: [{ path: "", message: "Validation failed" }]
+            };
         } catch (error) {
             return {
                 success: false,
-                errors: [{
-                    path: "",
-                    message: error instanceof Error ? error.message : "Unknown error"
-                }]
+                errors: [{ path: "", message: error instanceof Error ? error.message : "Unknown error" }]
             };
         }
     }
 
     private flattenObject(obj: Record<string, any>, prefix = ''): Record<string, any> {
+        // Not used for root validation anymore, but keep for potential future nested utilities
         return Object.keys(obj).reduce((acc: Record<string, any>, k: string) => {
             const pre = prefix.length ? prefix + '.' : '';
             if (typeof obj[k] === 'object' && obj[k] !== null && !Array.isArray(obj[k])) {
@@ -132,37 +161,24 @@ export class DhiType<T> {
 
     validate_batch(values: unknown[]): ValidationResult<T>[] {
         if (!this.initialized) throw new Error("DhiType not initialized");
-        
         try {
-            // Flatten all objects in the batch
-            const flattenedValues = values.map(v => 
-                this.flattenObject(v as Record<string, any>)
-            );
-            const results = this.core.validate_batch(flattenedValues as any);
-            
+            const inputs = this.typeString === 'object'
+                ? (values as Record<string, any> [])
+                : values.map(v => ({ value: v }));
+            const results = this.core.validate_batch(inputs as any);
             return Array.from(results).map((isValid, i) => {
                 if (isValid) {
-                    return {
-                        success: true,
-                        data: values[i] as T
-                    };
-                } else {
-                    return {
-                        success: false,
-                        errors: [{
-                            path: "",
-                            message: "Validation failed"
-                        }]
-                    };
+                    return { success: true, data: values[i] as T };
                 }
+                return {
+                    success: false,
+                    errors: [{ path: "", message: "Validation failed" }]
+                };
             });
         } catch (error) {
             return values.map(() => ({
                 success: false,
-                errors: [{
-                    path: "",
-                    message: error instanceof Error ? error.message : "Unknown error"
-                }]
+                errors: [{ path: "", message: error instanceof Error ? error.message : "Unknown error" }]
             }));
         }
     }
@@ -175,32 +191,44 @@ export class DhiType<T> {
 
     // Primitive types
     date(): DhiType<Date> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "date", true);
         this.typeString = 'date';
         return this as unknown as DhiType<Date>;
     }
 
     bigint(): DhiType<bigint> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "bigint", true);
         this.typeString = 'bigint';
         return this as unknown as DhiType<bigint>;
     }
 
     symbol(): DhiType<symbol> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "symbol", true);
         this.typeString = 'symbol';
         return this as unknown as DhiType<symbol>;
     }
 
     // Empty types
     undefined(): DhiType<undefined> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "undefined", true);
         this.typeString = 'undefined';
         return this as unknown as DhiType<undefined>;
     }
 
     null(): DhiType<null> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "null", true);
         this.typeString = 'null';
         return this as unknown as DhiType<null>;
     }
 
     void(): DhiType<void> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "void", true);
         this.typeString = 'void';
         return this as unknown as DhiType<void>;
     }
@@ -218,27 +246,43 @@ export class DhiType<T> {
     }
 
     unknown(): DhiType<unknown> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "unknown", true);
         this.typeString = 'unknown';
         return this as unknown as DhiType<unknown>;
     }
 
     // Never type
     never(): DhiType<never> {
+        if (!this.initialized) throw new Error("DhiType not initialized");
+        this.core.add_field("value", "never", true);
         this.typeString = 'never';
         return this as unknown as DhiType<never>;
     }
 
     record<K extends string, V>(valueType: DhiType<V>): DhiType<Record<K, V>> {
         if (!this.initialized) throw new Error("DhiType not initialized");
-        this.typeString = 'record';
-        this.core.set_value_type(valueType.typeString);
+        // Use parser-friendly 'Record<inner>' so Rust builds FieldType::Record(inner)
+        this.core.add_field("value", `Record<${valueType.typeString}>`, true);
+        this.typeString = `Record<${valueType.typeString}>`;
         return this as unknown as DhiType<Record<K, V>>;
     }
 
     // Add method to set type string
     setTypeString(type: string): this {
         if (!this.initialized) throw new Error("DhiType not initialized");
+        // Ensure a field exists for non-object roots
+        this.core.add_field("value", type, true);
         this.typeString = type;
         return this;
     }
+}
+
+// Export the main API
+export const dhi = {
+    create: DhiType.create
+};
+
+export function createType<T>(): Promise<DhiType<T>> {
+    return DhiType.create<T>();
 }

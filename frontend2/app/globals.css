@@ -1,0 +1,163 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  /* Brand core */
+  --orange: #FF6B00;
+  --white: #FFFFFF;
+  --ink: #1F2328;     /* body text / headings */
+  --ink-2: #2A2A2A;   /* code / borders */
+  --glow: #FF8C42;    /* hover / highlight */
+  --bg-weak: #F7F7F7; /* code blocks / sections */
+
+  /* Radii */
+  --radius: 0.75rem; /* rounded-xl */
+
+  /* System tokens mapped to brand */
+  --background: var(--white);
+  --foreground: var(--ink);
+
+  --card: var(--white);
+  --card-foreground: var(--ink);
+
+  --popover: var(--white);
+  --popover-foreground: var(--ink);
+
+  --primary: var(--orange);
+  --primary-foreground: var(--white);
+
+  --secondary: var(--bg-weak);
+  --secondary-foreground: var(--ink);
+
+  --muted: var(--bg-weak);
+  --muted-foreground: var(--ink-2);
+
+  --accent: var(--bg-weak);
+  --accent-foreground: var(--ink);
+
+  --destructive: #DC2626; /* red-600 */
+
+  --border: #E5E5E5; /* subtle divider on white */
+  --input: #E5E5E5;
+  --ring: var(--glow);
+
+  /* Chart palette: DHI=orange, Zod=gray */
+  --chart-1: var(--orange);
+  --chart-2: #9CA3AF; /* gray-400 */
+  --chart-3: #D1D5DB; /* gray-300 */
+  --chart-4: #6B7280; /* gray-500 */
+  --chart-5: #374151; /* gray-700 */
+
+  /* Sidebar (if used) */
+  --sidebar: var(--white);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--orange);
+  --sidebar-primary-foreground: var(--white);
+  --sidebar-accent: var(--bg-weak);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: #E5E5E5;
+  --sidebar-ring: var(--glow);
+}
+
+.dark {
+  --background: #0F1113;
+  --foreground: #F5F6F7;
+
+  --card: #15181B;
+  --card-foreground: #F5F6F7;
+
+  --popover: #15181B;
+  --popover-foreground: #F5F6F7;
+
+  --primary: #FF8C42; /* brighter on dark */
+  --primary-foreground: #0F1113;
+
+  --secondary: #1B1F24;
+  --secondary-foreground: #E7EAEE;
+
+  --muted: #1B1F24;
+  --muted-foreground: #AEB6BF;
+
+  --accent: #1B1F24;
+  --accent-foreground: #E7EAEE;
+
+  --destructive: #F87171;
+
+  --border: #262B31;
+  --input: #2A3036;
+  --ring: #FF8C42;
+
+  --chart-1: #FF8C42;
+  --chart-2: #9CA3AF;
+  --chart-3: #6B7280;
+  --chart-4: #D1D5DB;
+  --chart-5: #374151;
+
+  --sidebar: #0F1113;
+  --sidebar-foreground: #F5F6F7;
+  --sidebar-primary: #FF8C42;
+  --sidebar-primary-foreground: #0F1113;
+  --sidebar-accent: #1B1F24;
+  --sidebar-accent-foreground: #E7EAEE;
+  --sidebar-border: #262B31;
+  --sidebar-ring: #FF8C42;
+}
+
+/* Utility: gradient hero background (orange plastic) */
+.hero-plastic {
+  background: radial-gradient(1200px 600px at 80% -10%, rgba(255, 140, 66, 0.5), rgba(255, 140, 66, 0) 60%),
+              radial-gradient(800px 400px at 20% 110%, rgba(255, 107, 0, 0.5), rgba(255, 107, 0, 0) 60%),
+              linear-gradient(135deg, rgba(255, 107, 0, 0.25), rgba(255, 140, 66, 0.15)),
+              linear-gradient(#FFF, #FFF);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
