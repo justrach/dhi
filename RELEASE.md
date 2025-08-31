@@ -85,6 +85,7 @@ Prerequisites (what you need to add)
 - Package metadata: `package.json` should point to built files and include them in the tarball.
   - `main: dist/index.js`, `types: dist/index.d.ts`, and `files` includes `dist` (already set).
 - Build artifacts: `scripts/build.sh` must produce all runtime artifacts into `dist/` (JS, d.ts, and any `.wasm`/native glue files).
+- Toolchains in CI: Bun is used for install/tests/build; Node/npm is still used for publishing and registry auth.
 - GitHub permissions: default is fine; the workflow requests `id-token: write` for npm provenance.
 
 Release steps (tagged publish)
