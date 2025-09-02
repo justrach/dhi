@@ -24,3 +24,6 @@ export { type Infer as TypedInfer } from './typed';
 // 🚨 TEMPORARY: Zod compatibility layer (will be removed in future versions)
 // For migration purposes only - use native DHI API above for best performance
 export { z, ZodError } from './zod-compat';
+
+// Optional hybrid validator that auto-picks typed vs WASM for batches
+export { createHybridValidator } from './hybrid';
