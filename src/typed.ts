@@ -81,10 +81,11 @@ function validateBatch2Fields<T extends Record<string, unknown>>(
     }
     const obj = value as Record<string, unknown>;
     const v1 = obj[key1];
-    const v2 = obj[key2];
     const ok1 = isOpt1 ? (v1 === undefined || validator1.validateBatch([v1])[0]) : validator1.validateBatch([v1])[0];
+    if (!ok1) { results[i] = false; continue; }
+    const v2 = obj[key2];
     const ok2 = isOpt2 ? (v2 === undefined || validator2.validateBatch([v2])[0]) : validator2.validateBatch([v2])[0];
-    results[i] = ok1 && ok2;
+    results[i] = ok2;
   }
 }
 
@@ -109,12 +110,14 @@ function validateBatch3Fields<T extends Record<string, unknown>>(
     }
     const obj = value as Record<string, unknown>;
     const v1 = obj[key1];
-    const v2 = obj[key2];
-    const v3 = obj[key3];
     const ok1 = isOpt1 ? (v1 === undefined || validator1.validateBatch([v1])[0]) : validator1.validateBatch([v1])[0];
+    if (!ok1) { results[i] = false; continue; }
+    const v2 = obj[key2];
     const ok2 = isOpt2 ? (v2 === undefined || validator2.validateBatch([v2])[0]) : validator2.validateBatch([v2])[0];
+    if (!ok2) { results[i] = false; continue; }
+    const v3 = obj[key3];
     const ok3 = isOpt3 ? (v3 === undefined || validator3.validateBatch([v3])[0]) : validator3.validateBatch([v3])[0];
-    results[i] = ok1 && ok2 && ok3;
+    results[i] = ok3;
   }
 }
 
@@ -141,14 +144,17 @@ function validateBatch4Fields<T extends Record<string, unknown>>(
     }
     const obj = value as Record<string, unknown>;
     const v1 = obj[key1];
-    const v2 = obj[key2];
-    const v3 = obj[key3];
-    const v4 = obj[key4];
     const ok1 = isOpt1 ? (v1 === undefined || validator1.validateBatch([v1])[0]) : validator1.validateBatch([v1])[0];
+    if (!ok1) { results[i] = false; continue; }
+    const v2 = obj[key2];
     const ok2 = isOpt2 ? (v2 === undefined || validator2.validateBatch([v2])[0]) : validator2.validateBatch([v2])[0];
+    if (!ok2) { results[i] = false; continue; }
+    const v3 = obj[key3];
     const ok3 = isOpt3 ? (v3 === undefined || validator3.validateBatch([v3])[0]) : validator3.validateBatch([v3])[0];
+    if (!ok3) { results[i] = false; continue; }
+    const v4 = obj[key4];
     const ok4 = isOpt4 ? (v4 === undefined || validator4.validateBatch([v4])[0]) : validator4.validateBatch([v4])[0];
-    results[i] = ok1 && ok2 && ok3 && ok4;
+    results[i] = ok4;
   }
 }
 
@@ -164,14 +170,18 @@ function validateBatchNFields<T extends Record<string, unknown>>(
       continue;
     }
     const obj = value as Record<string, unknown>;
-    results[i] = keys.every(key => {
+    let ok = true;
+    for (let k = 0; k < keys.length; k++) {
+      const key = keys[k];
       const validator = shape[key];
-      const v = obj[key];
+      const v = (obj as any)[key];
       if ((validator as Schema<unknown>).__kind === 'optional') {
-        return v === undefined || validator.validateBatch([v])[0];
+        if (!(v === undefined || validator.validateBatch([v])[0])) { ok = false; break; }
+      } else {
+        if (!validator.validateBatch([v])[0]) { ok = false; break; }
       }
-      return validator.validateBatch([v])[0];
-    });
+    }
+    results[i] = ok;
   }
 }
 
