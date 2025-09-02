@@ -254,6 +254,137 @@ Notes
 - Shipped assets: The npm package includes `dist/dhi_core.js` (wasm-bindgen glue) and `dist/dhi_core_bg.wasm`. A native Node binding (`dist/dhi_core.node`) may be present for host builds but is not used in browsers.
 - No postinstall build: Artifacts are prebuilt in `dist/`; installs work out of the box.
 
+## ⚖️ Hybrid (Typed + WASM) Usage
+
+Use the typed API for single validations and valid‑heavy batches, and automatically switch to WASM for invalid‑heavy batches. This keeps DX and browser payloads lean while unlocking invalid‑path speed when you need it on the server.
+
+Node/server example
+```ts
+import { object, string, number, boolean as bool, array, createHybridValidator } from 'dhi';
+import { dhi } from 'dhi';
+
+type User = { name: string; age: number; active: boolean; tags: string[] };
+
+// Typed schema (no WASM at call-site)
+const TypedUser = object({
+  name: string(),
+  age: number(),
+  active: bool(),
+  tags: array(string())
+});
+
+// WASM schema (legacy engine), build once at startup
+const WasmUser = await (async () => {
+  const s = await dhi.string();
+  const n = await dhi.number();
+  const b = await dhi.boolean();
+  const arrS = await dhi.array(await dhi.string());
+  return await dhi.object<User>({ name: s, age: n, active: b, tags: arrS });
+})();
+
+// Hybrid wrapper
+const User = createHybridValidator(TypedUser, WasmUser, { threshold: 0.3, sample: 200 });
+
+// Single-object calls use typed
+const ok = User.validate({ name: 'A', age: 1, active: true, tags: ['x'] });
+
+// Batch calls auto-pick: typed for valid‑heavy, WASM for invalid‑heavy
+const batch = [{ name: 'A', age: 1, active: true, tags: ['x'] }];
+const mask = User.validateBatch(batch); // boolean[]
+```
+
+Example timings (one run; your results may vary)
+- [Typed] valid: ~3.00 ms
+- [Typed] invalid: ~22.52 ms
+- [WASM] valid: ~13.34 ms
+- [WASM] invalid: ~3.19 ms
+- [Hybrid] valid: ~1.57 ms
+- [Hybrid] invalid: ~3.80 ms
+
+These numbers illustrate the strategy: typed excels on valid data; WASM excels on invalid. Hybrid picks the faster path while keeping single‑object DX simple.
+
+> Tip: Use the hybrid only in Node/server contexts. Keep browser code on the typed API for the smallest payloads.
+
+### Comprehensive Benchmark Snapshot (Hybrid vs Typed vs WASM vs Zod)
+
+Results from `benchmarks/comprehensive.ts` (sample run):
+
+```
+Simple 4-Field Schema (Current benchmark2.ts):
+  Data Size: 1,000,000
+  DHI (typed): 55.17ms ± 9.98ms (18,126,981.328 ops/sec)
+  DHI (WASM): 281.82ms ± 8.62ms (3,548,328.791 ops/sec)
+  Hybrid:     52.74ms ± 1.90ms (18,962,069.989 ops/sec)
+  Zod:        64.99ms ± 7.20ms (15,386,086.91 ops/sec)
+  Speedup: 1.18x
+
+Nested Object Schema:
+  Data Size: 100,000
+  DHI (typed): 9.42ms ± 1.44ms (10,610,262.173 ops/sec)
+  DHI (WASM): 7.40ms ± 0.60ms (13,516,375.332 ops/sec)
+  Hybrid:     8.72ms ± 0.54ms (11,462,763.476 ops/sec)
+  Zod:        17.70ms ± 1.42ms (5,648,827.935 ops/sec)
+  Speedup: 1.88x
+
+Array-Heavy Schema:
+  Data Size: 50,000
+  DHI (typed): 8.52ms ± 0.86ms (5,866,762.813 ops/sec)
+  DHI (WASM): 102.16ms ± 6.09ms (489,435.873 ops/sec)
+  Hybrid:     8.18ms ± 0.14ms (6,111,576.012 ops/sec)
+  Zod:        30.34ms ± 2.90ms (1,647,855.256 ops/sec)
+  Speedup: 3.56x
+
+Mixed Valid/Invalid Data:
+  Data Size: 500,000
+  DHI (typed): 23.96ms ± 4.05ms (20,870,820.893 ops/sec)
+  DHI (WASM): 103.03ms ± 2.65ms (4,853,077.721 ops/sec)
+  Hybrid:     101.33ms ± 1.62ms (4,934,573.112 ops/sec)
+  Zod:        639.68ms ± 49.01ms (781,642.414 ops/sec)
+  Speedup: 26.70x
+
+🏆 Average speedup across all scenarios: 8.33x
+📊 Speedup range: 1.18x - 26.70x
+```
+
+## ❓ FAQ: Does DHI always load WASM in the browser?
+
+No. DHI’s typed‑first API does not require WASM, and modern bundlers will tree‑shake out the legacy WASM layer if you only use the typed or zod‑compat surfaces.
+
+- Typed‑only usage (recommended for browsers): import from `dhi` the typed constructors (`object`, `string`, etc.). The `core`/`wasm` modules are not referenced and are dropped by tree‑shaking.
+- Legacy WASM or Hybrid usage: importing `dhi`’s legacy API (`dhi.*`) or constructing hybrid validators will reference the WASM loader. Use these in Node/server, not in browser bundles, unless you intentionally want WASM there.
+- Distribution: the npm package ships both JS and `dhi_core_bg.wasm`, but bundlers include assets only when referenced.
+
+### How “reference” pulls WASM into a bundle (and how to avoid it)
+
+Bundlers build a module graph from your imports. Only modules that are reachable from your code are included. DHI’s exports are tree‑shakeable and side‑effect‑free, so unused exports are dropped.
+
+- Good (typed‑only, browser‑safe):
+  ```ts
+  import { object, string, number } from 'dhi';            // OK: typed only
+  import { z } from 'dhi';                                 // OK: zod-compat only
+  import type { ObjectSchema, TypedInfer } from 'dhi';     // OK: types only
+  ```
+- Avoid (prevents tree‑shaking or references WASM):
+  ```ts
+  import * as DHI from 'dhi';               // Avoid: can keep all exports reachable
+  import { dhi } from 'dhi';                // Pulls in legacy WASM path
+  import { createHybridValidator } from 'dhi'; // OK by itself, but you must also build a WASM schema via `dhi.*` to use it
+  ```
+
+Tips
+- Keep legacy/hybrid usage in server‑only files (e.g., Next.js `app/api/*`, Node workers). Do not import `dhi` (legacy) from client routes/components.
+- If you need conditional usage, split files by environment instead of runtime `if` checks—static analysis works at build time, not runtime.
+- Ensure bundler tree‑shaking is on (Vite/Rollup by default; Webpack: `optimization.usedExports: true`).
+
+Explicitly including WASM (Node/server)
+- Use the legacy API to construct schemas:
+  ```ts
+  import { dhi } from 'dhi';
+  const Num = await dhi.number();
+  const Obj = await dhi.object({ n: Num });
+  ```
+- Or pair the legacy API with the hybrid helper to auto‑pick typed vs WASM for batches.
+
 ---
 
 ## 🏗️ Supported Types (Typed API)
