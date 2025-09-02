@@ -47,14 +47,18 @@
     "build": "bash scripts/build.sh",
     "build:ts": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:wasm && npm run test:jest",
+    "test": "npm run test:jest",
     "test:wasm": "cd rust && wasm-pack test --node",
     "test:jest": "node --experimental-vm-modules --no-warnings ./node_modules/jest/bin/jest.js",
     "benchmark": "bun run benchmarks/benchmark.ts",
     "benchmark:comprehensive": "bun run benchmarks/comprehensive.ts",
     "benchmark:real": "bun run benchmarks/realworld.ts",
     "benchmark:parallel": "node --experimental-modules --no-warnings --loader ts-node/esm benchmarks/parallel_nested.ts",
-    "example": "bun run examples/example.ts"
+    "benchmark:node": "node --experimental-modules --no-warnings --loader ts-node/esm benchmarks/typed_vs_wasm.ts",
+    "benchmark:node:dist": "node --no-warnings benchmarks/typed_vs_wasm.mjs",
+    "example": "bun run examples/example.ts",
+    "example:hybrid": "node --experimental-modules --no-warnings --loader ts-node/esm examples/hybrid.ts",
+    "example:hybrid:dist": "npm run build && node --no-warnings examples/hybrid.mjs"
   },
   "types": "dist/index.d.ts",
   "dependencies": {

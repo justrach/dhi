@@ -70,9 +70,9 @@ Prerequisites (for full toolchain):
 Scripts (from `package.json`):
 - Build: `npm run build` (runs `bash scripts/build.sh`)
 - TypeScript only: `npm run build:ts`
-- Tests: `npm test` (runs `test:wasm` and `test:jest`)
-  - WASM tests: `npm run test:wasm` (requires Rust/wasm-pack)
+- Tests: `npm test` (Jest unit tests only)
   - Jest tests: `npm run test:jest`
+  - Optional WASM tests: `npm run test:wasm` (requires Rust/wasm-pack; not run by default)
 - Benchmarks:
   - `npm run benchmark` → `bun run benchmarks/benchmark.ts`
   - `npm run benchmark:comprehensive`
