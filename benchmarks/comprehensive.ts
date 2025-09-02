@@ -1,4 +1,4 @@
-import { object, string, number, boolean, array } from '../src/index';
+import { object, string, number, boolean, array, createHybridValidator, dhi } from '../src/index';
 import { z } from 'zod';
 
 // Performance measurement utilities
@@ -100,6 +100,13 @@ async function runComprehensiveBenchmarks() {
         email: string(),
         active: boolean()
       }),
+      buildWasm: async () => {
+        const s = await dhi.string();
+        const n = await dhi.number();
+        const b = await dhi.boolean();
+        const e = await dhi.string();
+        return await dhi.object({ name: s, age: n, email: e, active: b });
+      },
       zodSchema: z.object({
         name: z.string(),
         age: z.number(),
@@ -128,6 +135,21 @@ async function runComprehensiveBenchmarks() {
           tags: array(string())
         })
       }),
+      buildWasm: async () => {
+        const id = await dhi.number();
+        const name = await dhi.string();
+        const age = await dhi.number();
+        const theme = await dhi.string();
+        const notifications = await dhi.boolean();
+        const created = await dhi.string();
+        const tag = await dhi.string();
+        const tags = await dhi.array(tag);
+        const prefs = await dhi.object({ theme, notifications });
+        const profile = await dhi.object({ age, preferences: prefs });
+        const user = await dhi.object({ name, profile });
+        const metadata = await dhi.object({ created, tags });
+        return await dhi.object({ id, user, metadata });
+      },
       zodSchema: z.object({
         id: z.number(),
         user: z.object({
@@ -156,6 +178,15 @@ async function runComprehensiveBenchmarks() {
         tags: array(string()),
         matrix: array(array(number()))
       }),
+      buildWasm: async () => {
+        const id = await dhi.number();
+        const num = await dhi.number();
+        const str = await dhi.string();
+        const arrNum = await dhi.array(num);
+        const arrStr = await dhi.array(str);
+        const arrArrNum = await dhi.array(arrNum);
+        return await dhi.object({ id, scores: arrNum, tags: arrStr, matrix: arrArrNum });
+      },
       zodSchema: z.object({
         id: z.number(),
         scores: z.array(z.number()),
@@ -172,6 +203,12 @@ async function runComprehensiveBenchmarks() {
         age: number(),
         active: boolean()
       }),
+      buildWasm: async () => {
+        const name = await dhi.string();
+        const age = await dhi.number();
+        const active = await dhi.boolean();
+        return await dhi.object({ name, age, active });
+      },
       zodSchema: z.object({
         name: z.string(),
         age: z.number(),
@@ -193,11 +230,28 @@ async function runComprehensiveBenchmarks() {
     scenario.dhiSchema.validateBatch(testData.slice(0, 1000));
     testData.slice(0, 1000).map(item => scenario.zodSchema.safeParse(item));
     
-    console.log('⚡ Running DHI benchmark...');
+    const wasmSchema = await scenario.buildWasm?.();
+
+    console.log('⚡ Running DHI (typed) benchmark...');
     const dhiStats = measurePerformance(() => {
       scenario.dhiSchema.validateBatch(testData);
     }, 10);
-    
+
+    let wasmStats: any | null = null;
+    let hybridStats: any | null = null;
+    if (wasmSchema) {
+      console.log('⚡ Running DHI (WASM) benchmark...');
+      wasmStats = measurePerformance(() => {
+        wasmSchema.validate_batch(testData);
+      }, 10);
+
+      console.log('⚡ Running Hybrid benchmark...');
+      const hybrid = createHybridValidator(scenario.dhiSchema as any, wasmSchema as any, { threshold: 0.3, sample: 200 });
+      hybridStats = measurePerformance(() => {
+        hybrid.validateBatch(testData);
+      }, 10);
+    }
+
     console.log('⚡ Running Zod benchmark...');
     const zodStats = measurePerformance(() => {
       testData.map(item => scenario.zodSchema.safeParse(item));
@@ -206,6 +260,8 @@ async function runComprehensiveBenchmarks() {
     const dhiThroughput = scenario.dataSize / (dhiStats.mean / 1000);
     const zodThroughput = scenario.dataSize / (zodStats.mean / 1000);
     const speedupFactor = dhiThroughput / zodThroughput;
+    const wasmThroughput = wasmStats ? scenario.dataSize / (wasmStats.mean / 1000) : null;
+    const hybridThroughput = hybridStats ? scenario.dataSize / (hybridStats.mean / 1000) : null;
     
     const result = {
       scenario: scenario.name,
@@ -230,15 +286,39 @@ async function runComprehensiveBenchmarks() {
         stdDev: zodStats.stdDev,
         throughput: zodThroughput
       },
+      wasm: wasmStats && {
+        mean: wasmStats.mean,
+        median: wasmStats.median,
+        p95: wasmStats.p95,
+        p99: wasmStats.p99,
+        min: wasmStats.min,
+        max: wasmStats.max,
+        stdDev: wasmStats.stdDev,
+        throughput: wasmThroughput
+      },
+      hybrid: hybridStats && {
+        mean: hybridStats.mean,
+        median: hybridStats.median,
+        p95: hybridStats.p95,
+        p99: hybridStats.p99,
+        min: hybridStats.min,
+        max: hybridStats.max,
+        stdDev: hybridStats.stdDev,
+        throughput: hybridThroughput
+      },
       speedup: speedupFactor
     };
     
     results.push(result);
     
     console.log(`\n📈 Results for ${scenario.name}:`);
-    console.log(`DHI  - Mean: ${dhiStats.mean.toFixed(2)}ms, P95: ${dhiStats.p95.toFixed(2)}ms, P99: ${dhiStats.p99.toFixed(2)}ms`);
+    console.log(`DHI (typed)  - Mean: ${dhiStats.mean.toFixed(2)}ms, P95: ${dhiStats.p95.toFixed(2)}ms, P99: ${dhiStats.p99.toFixed(2)}ms`);
+    if (wasmStats) console.log(`DHI (WASM)   - Mean: ${wasmStats.mean.toFixed(2)}ms, P95: ${wasmStats.p95.toFixed(2)}ms, P99: ${wasmStats.p99.toFixed(2)}ms`);
+    if (hybridStats) console.log(`Hybrid       - Mean: ${hybridStats.mean.toFixed(2)}ms, P95: ${hybridStats.p95.toFixed(2)}ms, P99: ${hybridStats.p99.toFixed(2)}ms`);
     console.log(`Zod  - Mean: ${zodStats.mean.toFixed(2)}ms, P95: ${zodStats.p95.toFixed(2)}ms, P99: ${zodStats.p99.toFixed(2)}ms`);
-    console.log(`DHI Throughput: ${dhiThroughput.toLocaleString()} validations/sec`);
+    console.log(`DHI (typed) Throughput: ${dhiThroughput.toLocaleString()} validations/sec`);
+    if (wasmStats) console.log(`DHI (WASM)  Throughput: ${wasmThroughput!.toLocaleString()} validations/sec`);
+    if (hybridStats) console.log(`Hybrid      Throughput: ${hybridThroughput!.toLocaleString()} validations/sec`);
     console.log(`Zod Throughput: ${zodThroughput.toLocaleString()} validations/sec`);
     console.log(`🚀 DHI is ${speedupFactor.toFixed(2)}x faster than Zod`);
   }
@@ -250,8 +330,10 @@ async function runComprehensiveBenchmarks() {
   results.forEach(result => {
     console.log(`\n${result.scenario}:`);
     console.log(`  Data Size: ${result.dataSize.toLocaleString()}`);
-    console.log(`  DHI:  ${result.dhi.mean.toFixed(2)}ms ± ${result.dhi.stdDev.toFixed(2)}ms (${result.dhi.throughput.toLocaleString()} ops/sec)`);
-    console.log(`  Zod:  ${result.zod.mean.toFixed(2)}ms ± ${result.zod.stdDev.toFixed(2)}ms (${result.zod.throughput.toLocaleString()} ops/sec)`);
+    console.log(`  DHI (typed): ${result.dhi.mean.toFixed(2)}ms ± ${result.dhi.stdDev.toFixed(2)}ms (${result.dhi.throughput.toLocaleString()} ops/sec)`);
+    if (result.wasm) console.log(`  DHI (WASM): ${result.wasm.mean.toFixed(2)}ms ± ${result.wasm.stdDev.toFixed(2)}ms (${result.wasm.throughput.toLocaleString()} ops/sec)`);
+    if (result.hybrid) console.log(`  Hybrid:     ${result.hybrid.mean.toFixed(2)}ms ± ${result.hybrid.stdDev.toFixed(2)}ms (${result.hybrid.throughput.toLocaleString()} ops/sec)`);
+    console.log(`  Zod:        ${result.zod.mean.toFixed(2)}ms ± ${result.zod.stdDev.toFixed(2)}ms (${result.zod.throughput.toLocaleString()} ops/sec)`);
     console.log(`  Speedup: ${result.speedup.toFixed(2)}x`);
   });
   
