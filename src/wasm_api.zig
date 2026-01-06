@@ -1,5 +1,7 @@
 const std = @import("std");
 const validators = @import("validators_comprehensive.zig");
+const simd = @import("simd_validators.zig");
+const ultra = @import("ultra_validator.zig");
 
 // WASM exports for JavaScript
 // All functions use simple types that work across WASM boundary
@@ -63,9 +65,52 @@ export fn validate_contains(str_ptr: [*]const u8, str_len: usize, substring_ptr:
     return validators.validateContains(str, substring);
 }
 
-// Number validators
+// Number validators (i64 - requires BigInt in JS)
 export fn validate_int(value: i64, min: i64, max: i64) bool {
     return value >= min and value <= max;
+}
+
+// 🚀 FAST i32 variant - works with regular JS numbers (no BigInt needed!)
+export fn validate_int_i32(value: i32, min: i32, max: i32) bool {
+    return value >= min and value <= max;
+}
+
+// 🚀 FAST i32 comparison variants (no BigInt needed!)
+export fn validate_int_gt_i32(value: i32, min: i32) bool {
+    return value > min;
+}
+
+export fn validate_int_gte_i32(value: i32, min: i32) bool {
+    return value >= min;
+}
+
+export fn validate_int_lt_i32(value: i32, max: i32) bool {
+    return value < max;
+}
+
+export fn validate_int_lte_i32(value: i32, max: i32) bool {
+    return value <= max;
+}
+
+export fn validate_int_positive_i32(value: i32) bool {
+    return value > 0;
+}
+
+export fn validate_int_negative_i32(value: i32) bool {
+    return value < 0;
+}
+
+export fn validate_int_nonnegative_i32(value: i32) bool {
+    return value >= 0;
+}
+
+export fn validate_int_nonpositive_i32(value: i32) bool {
+    return value <= 0;
+}
+
+export fn validate_int_multiple_of_i32(value: i32, divisor: i32) bool {
+    if (divisor == 0) return false;
+    return @mod(value, divisor) == 0;
 }
 
 export fn validate_int_gt(value: i64, min: i64) bool {
@@ -335,4 +380,265 @@ export fn alloc(size: usize) ?[*]u8 {
 export fn dealloc(ptr: [*]u8, size: usize) void {
     const slice = ptr[0..size];
     std.heap.wasm_allocator.free(slice);
+}
+
+// 🚀 ULTRA-FAST EXPORTS: Maximum performance SIMD validations
+
+/// Ultra-fast email validation using SIMD
+export fn validate_email_ultra(ptr: [*]const u8, len: usize) bool {
+    const email = ptr[0..len];
+    return simd.validateEmailFast(email);
+}
+
+/// SIMD batch string length validation (8x parallelism)
+export fn validate_string_lengths_simd(
+    strings_ptr: [*]const [*]const u8,
+    lengths_ptr: [*]const usize,
+    count: usize,
+    min: usize,
+    max: usize,
+    results_ptr: [*]bool
+) void {
+    const strings = strings_ptr[0..count];
+    const lengths = lengths_ptr[0..count];
+    const results = results_ptr[0..count];
+    
+    // Create string slices from pointers and lengths
+    var string_slices = std.heap.wasm_allocator.alloc([]const u8, count) catch return;
+    defer std.heap.wasm_allocator.free(string_slices);
+    
+    for (0..count) |i| {
+        string_slices[i] = strings[i][0..lengths[i]];
+    }
+    
+    simd.validateLengthBatch(string_slices, min, max, results);
+}
+
+/// MEGA-SIMD integer range validation (4x parallelism) - requires BigInt
+export fn validate_int_range_simd(
+    values_ptr: [*]const i64,
+    count: usize,
+    min: i64,
+    max: i64,
+    results_ptr: [*]u8
+) void {
+    const values = values_ptr[0..count];
+    const results = results_ptr[0..count];
+    simd.validateIntRangeBatch(values, min, max, results);
+}
+
+/// 🚀 FAST i32 SIMD batch validation - works with regular JS numbers!
+export fn validate_int_range_simd_i32(
+    values_ptr: [*]const i32,
+    count: usize,
+    min: i32,
+    max: i32,
+    results_ptr: [*]u8
+) void {
+    const values = values_ptr[0..count];
+    const results = results_ptr[0..count];
+
+    var i: usize = 0;
+    // SIMD processing - 8 ints at once (i32 allows 8-wide SIMD)
+    while (i + 8 <= count) : (i += 8) {
+        const vals: @Vector(8, i32) = values[i..][0..8].*;
+        const min_vec = @as(@Vector(8, i32), @splat(min));
+        const max_vec = @as(@Vector(8, i32), @splat(max));
+
+        const min_valid = vals >= min_vec;
+        const max_valid = vals <= max_vec;
+
+        // Combine results
+        var mask: u8 = 0;
+        inline for (0..8) |idx| {
+            if (min_valid[idx] and max_valid[idx]) {
+                mask |= (@as(u8, 1) << @intCast(idx));
+            }
+        }
+
+        inline for (0..8) |j| {
+            results[i + j] = @intFromBool(((mask >> @intCast(j)) & 1) == 1);
+        }
+    }
+
+    // Handle remaining
+    while (i < count) : (i += 1) {
+        results[i] = @intFromBool(values[i] >= min and values[i] <= max);
+    }
+}
+
+/// Zero-allocation email validation (returns error code)
+export fn validate_email_zero_alloc(ptr: [*]const u8, len: usize) u8 {
+    const email = ptr[0..len];
+    const result = ultra.validateEmailUltra(email);
+    return @as(u8, @intFromBool(result.is_valid)) | (result.error_code << 1);
+}
+
+/// Zero-allocation string length validation
+export fn validate_string_length_zero_alloc(len: usize, min: usize, max: usize) u8 {
+    // Direct length check (no function call needed)
+    const too_short = @intFromBool(len < min);
+    const too_long = @intFromBool(len > max);
+    const error_code = too_short * ultra.ErrorCode.TOO_SHORT + too_long * ultra.ErrorCode.TOO_LONG;
+    const is_valid = error_code == 0;
+    
+    return @as(u8, @intFromBool(is_valid)) | (@as(u8, @intCast(error_code)) << 1);
+}
+
+/// Zero-allocation integer range validation
+export fn validate_int_range_zero_alloc(value: i64, min: i64, max: i64) u8 {
+    const result = ultra.validateIntRangeUltra(value, min, max);
+    return @as(u8, @intFromBool(result.is_valid)) | (result.error_code << 1);
+}
+
+/// 🌟 ULTIMATE SIMD USER BATCH VALIDATION
+export fn validate_user_batch_ultra(
+    names_ptr: [*]const [*:0]const u8,
+    emails_ptr: [*]const [*:0]const u8,
+    ages_ptr: [*]const i64,
+    count: usize,
+    name_min: usize,
+    name_max: usize,
+    age_min: i64,
+    age_max: i64,
+    results_ptr: [*]u8
+) usize {
+    const names = names_ptr[0..count];
+    const emails = emails_ptr[0..count];
+    const ages = ages_ptr[0..count];
+    const results = results_ptr[0..count];
+    
+    return simd.validateUserBatchUltra(names, emails, ages, results, name_min, name_max, age_min, age_max);
+}
+
+/// 💥 TURBO MODE i32: Maximum speed with regular JS numbers (no BigInt!)
+export fn validate_turbo_mode_i32(
+    count: u32,
+    string_lengths_ptr: [*]const u32,
+    numbers_ptr: [*]const i32,
+    min_len: u32,
+    max_len: u32,
+    min_num: i32,
+    max_num: i32,
+    results_ptr: [*]u8
+) u32 {
+    const string_lengths = string_lengths_ptr[0..count];
+    const numbers = numbers_ptr[0..count];
+    const results = results_ptr[0..count];
+
+    var valid_count: u32 = 0;
+    var i: usize = 0;
+
+    // SIMD processing - 8 items at once (i32 allows full 8-wide SIMD!)
+    while (i + 8 <= count) : (i += 8) {
+        var str_lengths: @Vector(8, u32) = undefined;
+        var nums: @Vector(8, i32) = undefined;
+
+        inline for (0..8) |j| {
+            str_lengths[j] = string_lengths[i + j];
+            nums[j] = numbers[i + j];
+        }
+
+        const min_len_vec = @as(@Vector(8, u32), @splat(min_len));
+        const max_len_vec = @as(@Vector(8, u32), @splat(max_len));
+        const str_min_valid = str_lengths >= min_len_vec;
+        const str_max_valid = str_lengths <= max_len_vec;
+
+        const min_num_vec = @as(@Vector(8, i32), @splat(min_num));
+        const max_num_vec = @as(@Vector(8, i32), @splat(max_num));
+        const num_min_valid = nums >= min_num_vec;
+        const num_max_valid = nums <= max_num_vec;
+
+        // Combine all results
+        inline for (0..8) |j| {
+            const str_ok = str_min_valid[j] and str_max_valid[j];
+            const num_ok = num_min_valid[j] and num_max_valid[j];
+            const is_valid = str_ok and num_ok;
+            results[i + j] = @intFromBool(is_valid);
+            valid_count += @intFromBool(is_valid);
+        }
+    }
+
+    // Handle remaining items
+    while (i < count) : (i += 1) {
+        const str_valid = string_lengths[i] >= min_len and string_lengths[i] <= max_len;
+        const num_valid = numbers[i] >= min_num and numbers[i] <= max_num;
+        const is_valid = str_valid and num_valid;
+        results[i] = @intFromBool(is_valid);
+        valid_count += @intFromBool(is_valid);
+    }
+
+    return valid_count;
+}
+
+/// 💥 TURBO MODE: Maximum speed validation (no error tracking)
+export fn validate_turbo_mode(
+    count: u32,
+    string_lengths_ptr: [*]const u32,
+    numbers_ptr: [*]const i64,
+    min_len: u32,
+    max_len: u32,
+    min_num: i64,
+    max_num: i64,
+    results_ptr: [*]u8
+) u32 {
+    const string_lengths = string_lengths_ptr[0..count];
+    const numbers = numbers_ptr[0..count];
+    const results = results_ptr[0..count];
+    
+    var valid_count: u32 = 0;
+    var i: usize = 0;
+    
+    // SIMD processing - 8 items at once
+    while (i + 8 <= count) : (i += 8) {
+        // String length validation
+        var str_lengths: @Vector(8, u32) = undefined;
+        var nums: @Vector(8, i64) = undefined;
+        
+        inline for (0..8) |j| {
+            str_lengths[j] = string_lengths[i + j];
+            nums[j] = numbers[i + j];
+        }
+        
+        const min_len_vec = @as(@Vector(8, u32), @splat(min_len));
+        const max_len_vec = @as(@Vector(8, u32), @splat(max_len));
+        const str_min_valid = str_lengths >= min_len_vec;
+        const str_max_valid = str_lengths <= max_len_vec;
+        
+        const min_num_vec = @as(@Vector(8, i64), @splat(min_num));
+        const max_num_vec = @as(@Vector(8, i64), @splat(max_num));
+        const num_min_valid = nums >= min_num_vec;
+        const num_max_valid = nums <= max_num_vec;
+        
+        // Process vector results with scalar logic
+        var str_mask: u8 = 0;
+        var num_mask: u8 = 0;
+        inline for (0..8) |idx| {
+            if (str_min_valid[idx] and str_max_valid[idx]) {
+                str_mask |= (@as(u8, 1) << @intCast(idx));
+            }
+            if (num_min_valid[idx] and num_max_valid[idx]) {
+                num_mask |= (@as(u8, 1) << @intCast(idx));
+            }
+        }
+        
+        inline for (0..8) |j| {
+            const str_ok = ((str_mask >> @intCast(j)) & 1) == 1;
+            const num_ok = ((num_mask >> @intCast(j)) & 1) == 1;
+            const is_valid = str_ok and num_ok;
+            results[i + j] = @intFromBool(is_valid);
+            valid_count += @intFromBool(is_valid);
+        }
+    }
+    
+    // Handle remaining items
+    while (i < count) : (i += 1) {
+        const str_valid = string_lengths[i] >= min_len and string_lengths[i] <= max_len;
+        const num_valid = numbers[i] >= min_num and numbers[i] <= max_num;
+        const is_valid = str_valid and num_valid;
+        results[i] = @intFromBool(is_valid);
+        valid_count += @intFromBool(is_valid);
+    }
+    
+    return valid_count;
 }
