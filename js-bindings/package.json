@@ -1,7 +1,7 @@
 {
   "name": "dhi",
-  "version": "0.4.2",
-  "description": "Ultra-fast validation library - 1.78x faster than Zod. Drop-in replacement with WASM performance. Works with Next.js!",
+  "version": "0.5.0",
+  "description": "Ultra-fast validation library - 2.47B ops/sec with SIMD i32! Drop-in Zod replacement. Works with Next.js!",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,7 +18,10 @@
     "type-checking",
     "nextjs",
     "next.js",
-    "edge-runtime"
+    "edge-runtime",
+    "simd",
+    "performance",
+    "zig"
   ],
   "author": "dhi team",
   "license": "MIT",

@@ -5,7 +5,8 @@
       "name": "dhi",
       "devDependencies": {
         "@types/bun": "latest",
-        "@types/node": "^20.0.0",
+        "@types/node": "^20.19.19",
+        "typescript": "^5.9.3",
       },
       "peerDependencies": {
         "typescript": "^5",

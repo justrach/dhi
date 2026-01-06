@@ -174,7 +174,36 @@ export const validators = {
   },
 
   positive: (value: number): boolean => {
-    return Boolean(wasm.validate_int_positive(BigInt(value)));
+    return Boolean(wasm.validate_int_positive_i32(value | 0));
+  },
+
+  negative: (value: number): boolean => {
+    return Boolean(wasm.validate_int_negative_i32(value | 0));
+  },
+
+  // 🚀 NEW i32 validators (no BigInt needed!)
+  intRange: (value: number, min: number, max: number): boolean => {
+    return Boolean(wasm.validate_int_i32(value | 0, min | 0, max | 0));
+  },
+
+  intGt: (value: number, min: number): boolean => {
+    return Boolean(wasm.validate_int_gt_i32(value | 0, min | 0));
+  },
+
+  intGte: (value: number, min: number): boolean => {
+    return Boolean(wasm.validate_int_gte_i32(value | 0, min | 0));
+  },
+
+  intLt: (value: number, max: number): boolean => {
+    return Boolean(wasm.validate_int_lt_i32(value | 0, max | 0));
+  },
+
+  intLte: (value: number, max: number): boolean => {
+    return Boolean(wasm.validate_int_lte_i32(value | 0, max | 0));
+  },
+
+  intMultipleOf: (value: number, divisor: number): boolean => {
+    return Boolean(wasm.validate_int_multiple_of_i32(value | 0, divisor | 0));
   },
 };
 

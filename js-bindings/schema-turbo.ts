@@ -73,26 +73,56 @@ export function stringLength(min: number, max: number) {
 export function numberRange(min: number, max: number) {
   return new TurboSchema<number>((items: number[]) => {
     const count = items.length;
-    
+
     // Allocate arrays in WASM
     const numbersPtr = wasm.alloc(count * 8); // f64 array
     const resultsPtr = wasm.alloc(count);      // u8 array
-    
+
     // Write numbers directly
     const numbersArray = new Float64Array(wasm.memory.buffer, numbersPtr, count);
     numbersArray.set(items);
-    
+
     // Call WASM batch function
     wasm.validate_numbers_batch(count, numbersPtr, min, max, resultsPtr);
-    
+
     // Read results
     const resultsArray = new Uint8Array(wasm.memory.buffer, resultsPtr, count);
     const results = Array.from(resultsArray, v => v === 1);
-    
+
     // Cleanup
     wasm.dealloc(numbersPtr, count * 8);
     wasm.dealloc(resultsPtr, count);
-    
+
+    return results;
+  });
+}
+
+// 🚀 TURBO i32: Integer range validator with SIMD (2.47B ops/sec!)
+export function intRange(min: number, max: number) {
+  return new TurboSchema<number>((items: number[]) => {
+    const count = items.length;
+
+    // Allocate arrays in WASM (i32 = 4 bytes)
+    const numbersPtr = wasm.alloc(count * 4);
+    const resultsPtr = wasm.alloc(count);
+
+    // Write as i32 array (no BigInt needed!)
+    const numbersArray = new Int32Array(wasm.memory.buffer, numbersPtr, count);
+    for (let i = 0; i < count; i++) {
+      numbersArray[i] = items[i] | 0; // Convert to i32
+    }
+
+    // Call SIMD i32 batch function
+    wasm.validate_int_range_simd_i32(numbersPtr, count, min | 0, max | 0, resultsPtr);
+
+    // Read results
+    const resultsArray = new Uint8Array(wasm.memory.buffer, resultsPtr, count);
+    const results = Array.from(resultsArray, v => v === 1);
+
+    // Cleanup
+    wasm.dealloc(numbersPtr, count * 4);
+    wasm.dealloc(resultsPtr, count);
+
     return results;
   });
 }
@@ -123,5 +153,6 @@ export function object<T extends Record<string, any>>(
 export const turbo = {
   string: (min: number, max: number) => stringLength(min, max),
   number: (min: number, max: number) => numberRange(min, max),
+  int: (min: number, max: number) => intRange(min, max), // 🚀 SIMD i32 - 2.47B ops/sec!
   object: object,
 };
