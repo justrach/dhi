@@ -203,13 +203,74 @@ export fn satya_validate_int_multiple_of(value: i64, divisor: i64) i32 {
     return if (validators_comp.validateMultipleOf(i64, value, divisor)) 1 else 0;
 }
 
-// Float validators
+// Float validators - full Pydantic numeric constraint parity
 export fn satya_validate_float_gt(value: f64, min: f64) i32 {
     return if (validators_comp.validateGt(f64, value, min)) 1 else 0;
 }
 
+export fn satya_validate_float_gte(value: f64, min: f64) i32 {
+    return if (validators_comp.validateGte(f64, value, min)) 1 else 0;
+}
+
+export fn satya_validate_float_lt(value: f64, max: f64) i32 {
+    return if (validators_comp.validateLt(f64, value, max)) 1 else 0;
+}
+
+export fn satya_validate_float_lte(value: f64, max: f64) i32 {
+    return if (validators_comp.validateLte(f64, value, max)) 1 else 0;
+}
+
+export fn satya_validate_float_positive(value: f64) i32 {
+    return if (validators_comp.validatePositive(f64, value)) 1 else 0;
+}
+
+export fn satya_validate_float_negative(value: f64) i32 {
+    return if (validators_comp.validateNegative(f64, value)) 1 else 0;
+}
+
+export fn satya_validate_float_non_negative(value: f64) i32 {
+    return if (validators_comp.validateNonNegative(f64, value)) 1 else 0;
+}
+
+export fn satya_validate_float_non_positive(value: f64) i32 {
+    return if (validators_comp.validateNonPositive(f64, value)) 1 else 0;
+}
+
 export fn satya_validate_float_finite(value: f64) i32 {
     return if (validators_comp.validateFinite(value)) 1 else 0;
+}
+
+// IPv6 validation
+export fn satya_validate_ipv6(str: [*:0]const u8) i32 {
+    const ip = std.mem.span(str);
+    return if (validateIpv6(ip)) @as(i32, 1) else @as(i32, 0);
+}
+
+fn validateIpv6(ip: []const u8) bool {
+    if (ip.len < 2 or ip.len > 45) return false;
+
+    // Handle :: shorthand
+    var colon_count: usize = 0;
+    var double_colon_count: usize = 0;
+    var i: usize = 0;
+
+    while (i < ip.len) : (i += 1) {
+        if (ip[i] == ':') {
+            colon_count += 1;
+            if (i + 1 < ip.len and ip[i + 1] == ':') {
+                double_colon_count += 1;
+                i += 1;
+            }
+        } else if (!std.ascii.isHex(ip[i])) {
+            return false;
+        }
+    }
+
+    if (double_colon_count > 1) return false;
+    if (double_colon_count == 0 and colon_count != 7) return false;
+    if (double_colon_count == 1 and colon_count > 7) return false;
+
+    return true;
 }
 
 // ============================================================================
