@@ -72,23 +72,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          release_name: dhi ${{ github.ref_name }}
           body: |
-            ## dhi v${{ github.ref_name }}
-            
-            **Ultra-fast validation library - 1.64x faster than Zod!**
-            
-            ### Performance
-            - TURBO mode: 40.26M ops/sec
-            - Batch API: 8.19x faster on mixed data
-            - Feature-complete: 100% Zod compatible
-            
+            ## dhi ${{ github.ref_name }}
+
+            **Ultra-fast Zod 4 drop-in replacement — SIMD-powered WASM + JIT compilation**
+
+            ### Performance (vs Zod 4.3.6)
+            - String validators: 1.1–2.9x faster
+            - Number validators: up to 48x faster
+            - Object validators: 4–7x faster (JIT-compiled)
+            - Coercion: 25–47x faster
+            - Zero production dependencies
+
+            ### Features
+            - Full Zod 4 API parity (drop-in replacement)
+            - Complete TypeScript type inference
+            - SIMD-powered WASM validators (28KB binary)
+            - JIT-compiled object schemas
+            - All string/number/object/array/union/enum validators
+
             ### Installation
             ```bash
             npm install dhi@${{ github.ref_name }}
             ```
-            
-            ### What's New
-            See CHANGELOG.md for details.
+
+            ### Migration from Zod
+            ```typescript
+            // Before
+            import { z } from 'zod';
+            // After
+            import { z } from 'dhi/schema';
+            // That's it — same API, faster runtime
+            ```
           draft: false
           prerelease: false
