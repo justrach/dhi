@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g., 0.3.0)'
+        description: 'Version to publish (e.g., 0.6.0)'
         required: true
-        default: '0.3.0'
+        default: '0.6.0'
 
 jobs:
   publish-npm:
@@ -25,18 +25,22 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      
+
       - name: Install dependencies
         working-directory: js-bindings
         run: bun install
-      
-      - name: Run tests
+
+      - name: Run compatibility tests
+        working-directory: js-bindings
+        run: bun run test-zod4-compat.ts
+
+      - name: Run feature tests
         working-directory: js-bindings
         run: bun run test-all-features.ts
-      
+
       - name: Verify WASM exists
         run: |
           if [ ! -f "js-bindings/dhi.wasm" ]; then
@@ -44,7 +48,11 @@ jobs:
             exit 1
           fi
           echo "WASM file size: $(ls -lh js-bindings/dhi.wasm | awk '{print $5}')"
-      
+
+      - name: Build
+        working-directory: js-bindings
+        run: npm run build
+
       - name: Update version
         if: github.event.inputs.version
         working-directory: js-bindings
