@@ -318,6 +318,163 @@ test('Object: nested errors with paths', () => {
 });
 
 // ============================================================================
+// 5. ARRAY, TUPLE, RECORD, MAP, SET
+// ============================================================================
+
+test('Array: basic', () => {
+  const schema = z.array(z.number());
+  expect(schema.parse([1, 2, 3]).length).toBe(3);
+  expect(schema.safeParse('not array').success).toBeFalse();
+});
+
+test('Array: min/max/nonempty', () => {
+  expect(z.array(z.number()).min(2).safeParse([1]).success).toBeFalse();
+  expect(z.array(z.number()).max(2).safeParse([1, 2, 3]).success).toBeFalse();
+  expect(z.array(z.number()).nonempty().safeParse([]).success).toBeFalse();
+});
+
+test('Tuple: basic', () => {
+  const schema = z.tuple([z.string(), z.number()]);
+  const result = schema.parse(['hello', 42]);
+  expect(result[0]).toBe('hello');
+  expect(result[1]).toBe(42);
+  expect(schema.safeParse(['hello']).success).toBeFalse();
+});
+
+test('Record: basic', () => {
+  const schema = z.record(z.number());
+  const result = schema.parse({ a: 1, b: 2 });
+  expect(result.a).toBe(1);
+  expect(schema.safeParse({ a: 'not number' }).success).toBeFalse();
+});
+
+test('Map: basic', () => {
+  const schema = z.map(z.string(), z.number());
+  const m = new Map([['a', 1], ['b', 2]]);
+  const result = schema.parse(m);
+  expect(result.get('a')).toBe(1);
+});
+
+test('Set: basic', () => {
+  const schema = z.set(z.number());
+  const s = new Set([1, 2, 3]);
+  const result = schema.parse(s);
+  expect(result.size).toBe(3);
+});
+
+// ============================================================================
+// 6. UNION, DISCRIMINATED UNION, INTERSECTION
+// ============================================================================
+
+test('Union: basic', () => {
+  const schema = z.union([z.string(), z.number()]);
+  expect(schema.parse('hello')).toBe('hello');
+  expect(schema.parse(42)).toBe(42);
+  expect(schema.safeParse(true).success).toBeFalse();
+});
+
+test('Discriminated union', () => {
+  const schema = z.discriminatedUnion('type', [
+    z.object({ type: z.literal('circle'), radius: z.number() }),
+    z.object({ type: z.literal('square'), side: z.number() }),
+  ]);
+  const circle = schema.parse({ type: 'circle', radius: 5 });
+  expect(circle.radius).toBe(5);
+  expect(schema.safeParse({ type: 'triangle', side: 3 }).success).toBeFalse();
+});
+
+test('Intersection', () => {
+  const schema = z.intersection(
+    z.object({ name: z.string() }),
+    z.object({ age: z.number() })
+  );
+  const result = schema.parse({ name: 'Alice', age: 30 });
+  expect(result.name).toBe('Alice');
+  expect(result.age).toBe(30);
+});
+
+// ============================================================================
+// 7. MODIFIERS: optional, nullable, default, catch, transform, refine, pipe
+// ============================================================================
+
+test('Optional', () => {
+  const schema = z.string().optional();
+  expect(schema.parse(undefined)).toBe(undefined);
+  expect(schema.parse('hello')).toBe('hello');
+});
+
+test('Nullable', () => {
+  const schema = z.string().nullable();
+  expect(schema.parse(null)).toBe(null);
+  expect(schema.parse('hello')).toBe('hello');
+});
+
+test('Nullish', () => {
+  const schema = z.string().nullish();
+  expect(schema.parse(null)).toBe(null);
+  expect(schema.parse(undefined)).toBe(undefined);
+  expect(schema.parse('hello')).toBe('hello');
+});
+
+test('Default', () => {
+  const schema = z.string().default('fallback');
+  expect(schema.parse(undefined)).toBe('fallback');
+  expect(schema.parse('custom')).toBe('custom');
+});
+
+test('Catch', () => {
+  const schema = z.number().catch(0);
+  expect(schema.parse('not a number')).toBe(0);
+  expect(schema.parse(42)).toBe(42);
+});
+
+test('Transform', () => {
+  const schema = z.string().transform(s => s.length);
+  expect(schema.parse('hello')).toBe(5);
+});
+
+test('Refine', () => {
+  const schema = z.number().refine(n => n > 0, 'Must be positive');
+  expect(schema.safeParse(-1).success).toBeFalse();
+  expect(schema.safeParse(1).success).toBeTrue();
+});
+
+test('SuperRefine', () => {
+  const schema = z.string().superRefine((val, ctx) => {
+    if (val.length < 5) ctx.addIssue({ message: 'Too short' });
+  });
+  expect(schema.safeParse('hi').success).toBeFalse();
+  expect(schema.safeParse('hello world').success).toBeTrue();
+});
+
+test('Pipe', () => {
+  const schema = z.string().transform(s => parseInt(s, 10)).pipe(z.number().min(0));
+  expect(schema.parse('42')).toBe(42);
+  expect(schema.safeParse('-5').success).toBeFalse();
+});
+
+test('Or (union shorthand)', () => {
+  const schema = z.string().or(z.number());
+  expect(schema.parse('hello')).toBe('hello');
+  expect(schema.parse(42)).toBe(42);
+});
+
+test('And (intersection shorthand)', () => {
+  const schema = z.object({ a: z.string() }).and(z.object({ b: z.number() }));
+  const result = schema.parse({ a: 'hello', b: 42 });
+  expect(result.a).toBe('hello');
+  expect(result.b).toBe(42);
+});
+
+test('Readonly', () => {
+  const schema = z.object({ name: z.string() }).readonly();
+  const result = schema.parse({ name: 'Alice' });
+  expect(result.name).toBe('Alice');
+  // Object should be frozen
+  expect(Object.isFrozen(result)).toBeTrue();
+});
+
+// ============================================================================
 // RESULTS
 // ============================================================================
 
