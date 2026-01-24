@@ -217,6 +217,107 @@ test('String: nonempty', () => {
 });
 
 // ============================================================================
+// 3. NUMBER VALIDATORS
+// ============================================================================
+
+test('Number: basic', () => {
+  expect(z.number().parse(42)).toBe(42);
+  expect(z.number().safeParse('42').success).toBeFalse();
+  expect(z.number().safeParse(NaN).success).toBeFalse();
+});
+
+test('Number: min/max/gt/lt', () => {
+  expect(z.number().min(5).safeParse(3).success).toBeFalse();
+  expect(z.number().min(5).safeParse(5).success).toBeTrue();
+  expect(z.number().max(10).safeParse(15).success).toBeFalse();
+  expect(z.number().gt(5).safeParse(5).success).toBeFalse();
+  expect(z.number().gt(5).safeParse(6).success).toBeTrue();
+  expect(z.number().lt(10).safeParse(10).success).toBeFalse();
+  expect(z.number().lt(10).safeParse(9).success).toBeTrue();
+});
+
+test('Number: int/positive/negative', () => {
+  expect(z.number().int().safeParse(5.5).success).toBeFalse();
+  expect(z.number().int().safeParse(5).success).toBeTrue();
+  expect(z.number().positive().safeParse(-1).success).toBeFalse();
+  expect(z.number().positive().safeParse(1).success).toBeTrue();
+  expect(z.number().negative().safeParse(1).success).toBeFalse();
+  expect(z.number().negative().safeParse(-1).success).toBeTrue();
+});
+
+test('Number: multipleOf/finite', () => {
+  expect(z.number().multipleOf(5).safeParse(10).success).toBeTrue();
+  expect(z.number().multipleOf(5).safeParse(11).success).toBeFalse();
+  expect(z.number().finite().safeParse(Infinity).success).toBeFalse();
+  expect(z.number().finite().safeParse(42).success).toBeTrue();
+});
+
+// ============================================================================
+// 4. OBJECT SCHEMAS
+// ============================================================================
+
+test('Object: basic validation', () => {
+  const schema = z.object({ name: z.string(), age: z.number() });
+  const result = schema.parse({ name: 'Alice', age: 30 });
+  expect(result.name).toBe('Alice');
+  expect(result.age).toBe(30);
+});
+
+test('Object: strips unknown keys by default', () => {
+  const schema = z.object({ name: z.string() });
+  const result = schema.parse({ name: 'Alice', extra: 'ignored' });
+  expect((result as any).extra).toBe(undefined);
+});
+
+test('Object: strict mode', () => {
+  const schema = z.object({ name: z.string() }).strict();
+  expect(schema.safeParse({ name: 'Alice', extra: 'bad' }).success).toBeFalse();
+});
+
+test('Object: passthrough', () => {
+  const schema = z.object({ name: z.string() }).passthrough();
+  const result = schema.parse({ name: 'Alice', extra: 'kept' });
+  expect((result as any).extra).toBe('kept');
+});
+
+test('Object: partial', () => {
+  const schema = z.object({ name: z.string(), age: z.number() }).partial();
+  expect(schema.safeParse({}).success).toBeTrue();
+  expect(schema.safeParse({ name: 'Alice' }).success).toBeTrue();
+});
+
+test('Object: pick/omit', () => {
+  const schema = z.object({ name: z.string(), age: z.number(), email: z.string() });
+  const picked = schema.pick({ name: true, age: true });
+  expect(picked.safeParse({ name: 'Alice', age: 30 }).success).toBeTrue();
+
+  const omitted = schema.omit({ email: true });
+  expect(omitted.safeParse({ name: 'Alice', age: 30 }).success).toBeTrue();
+});
+
+test('Object: extend/merge', () => {
+  const base = z.object({ name: z.string() });
+  const extended = base.extend({ age: z.number() });
+  expect(extended.parse({ name: 'Alice', age: 30 }).age).toBe(30);
+});
+
+test('Object: nested errors with paths', () => {
+  const schema = z.object({
+    user: z.object({
+      name: z.string().min(1),
+      age: z.number().positive(),
+    }),
+  });
+  const result = schema.safeParse({ user: { name: '', age: -1 } });
+  expect(result.success).toBeFalse();
+  if (!result.success) {
+    expect(result.error.issues.length > 0).toBeTrue();
+    // Path should include nested field
+    expect(result.error.issues[0].path.length > 0).toBeTrue();
+  }
+});
+
+// ============================================================================
 // RESULTS
 // ============================================================================
 
