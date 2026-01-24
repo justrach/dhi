@@ -382,13 +382,8 @@ static double as_double_coerce(PyObject* obj) {
 //              6=base64, 7=iso_date, 8=iso_datetime
 // =============================================================================
 
-static PyObject* py_validate_field(PyObject* self, PyObject* args) {
-    PyObject *value, *field_name_obj, *constraints;
-
-    if (!PyArg_ParseTuple(args, "OOO!", &value, &field_name_obj, &PyTuple_Type, &constraints)) {
-        return NULL;
-    }
-
+// Core validation logic - no arg parsing overhead
+static PyObject* validate_field_core(PyObject *value, const char *field_name, PyObject *constraints) {
     // Unpack constraints
     int type_code    = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 0));
     int strict       = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 1));
@@ -405,7 +400,6 @@ static PyObject* py_validate_field(PyObject* self, PyObject* args) {
     int to_lower     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 12));
     int to_upper     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 13));
 
-    const char* field_name = PyUnicode_AsUTF8(field_name_obj);
     PyObject* result = value;
     Py_INCREF(result);
 
@@ -678,6 +672,115 @@ static PyObject* py_validate_field(PyObject* self, PyObject* args) {
     return result;  // Validated (possibly transformed) value
 }
 
+// Python wrapper for validate_field - thin wrapper around core
+static PyObject* py_validate_field(PyObject* self, PyObject* args) {
+    PyObject *value, *field_name_obj, *constraints;
+    if (!PyArg_ParseTuple(args, "OOO!", &value, &field_name_obj, &PyTuple_Type, &constraints)) {
+        return NULL;
+    }
+    const char* field_name = PyUnicode_AsUTF8(field_name_obj);
+    if (!field_name) return NULL;
+    return validate_field_core(value, field_name, constraints);
+}
+
+// =============================================================================
+// init_model: Batch init — ONE Python→C call for the entire __init__
+// Validates all fields, sets attributes directly on self.__dict__
+//
+// init_model(self, kwargs_dict, field_specs)
+// field_specs: tuple of (field_name_str, alias_or_None, required_bool,
+//              default_obj, constraints_tuple)
+// Returns: None on success, or list of (field_name, error_msg) tuples on error
+// =============================================================================
+static PyObject* py_init_model(PyObject* self_unused, PyObject* args) {
+    PyObject *model_self, *kwargs, *field_specs;
+
+    if (!PyArg_ParseTuple(args, "OO!O!", &model_self, &PyDict_Type, &kwargs,
+                          &PyTuple_Type, &field_specs)) {
+        return NULL;
+    }
+
+    // Get self.__dict__ for fast direct attribute setting
+    PyObject *obj_dict = PyObject_GenericGetDict(model_self, NULL);
+    if (!obj_dict) return NULL;
+
+    Py_ssize_t n_fields = PyTuple_GET_SIZE(field_specs);
+    PyObject *errors = NULL;  // Lazy-allocated list of (name, msg) tuples
+
+    for (Py_ssize_t i = 0; i < n_fields; i++) {
+        PyObject *spec = PyTuple_GET_ITEM(field_specs, i);
+        PyObject *name_obj   = PyTuple_GET_ITEM(spec, 0);
+        PyObject *alias_obj  = PyTuple_GET_ITEM(spec, 1);
+        int required         = PyObject_IsTrue(PyTuple_GET_ITEM(spec, 2));
+        PyObject *default_val = PyTuple_GET_ITEM(spec, 3);
+        PyObject *constraints = PyTuple_GET_ITEM(spec, 4);
+
+        // --- Extract value from kwargs ---
+        PyObject *value = NULL;
+        if (alias_obj != Py_None) {
+            value = PyDict_GetItem(kwargs, alias_obj);  // borrowed ref
+        }
+        if (value == NULL) {
+            value = PyDict_GetItem(kwargs, name_obj);   // borrowed ref
+        }
+
+        if (value == NULL) {
+            if (!required) {
+                // Set default directly in __dict__
+                PyDict_SetItem(obj_dict, name_obj, default_val);
+                continue;
+            } else {
+                // Missing required field — collect error
+                if (!errors) {
+                    errors = PyList_New(0);
+                    if (!errors) { Py_DECREF(obj_dict); return NULL; }
+                }
+                PyObject *err = Py_BuildValue("(Os)", name_obj, "Field required");
+                PyList_Append(errors, err);
+                Py_DECREF(err);
+                continue;
+            }
+        }
+
+        // --- Validate field ---
+        const char *field_name = PyUnicode_AsUTF8(name_obj);
+        if (!field_name) { Py_DECREF(obj_dict); Py_XDECREF(errors); return NULL; }
+
+        PyObject *validated = validate_field_core(value, field_name, constraints);
+        if (validated == NULL) {
+            // Validation failed — capture error message
+            if (!errors) {
+                errors = PyList_New(0);
+                if (!errors) { Py_DECREF(obj_dict); PyErr_Clear(); return NULL; }
+            }
+            PyObject *exc_type, *exc_value, *exc_tb;
+            PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
+            PyObject *msg = exc_value ? PyObject_Str(exc_value) : PyUnicode_FromString("Validation failed");
+            PyObject *err = Py_BuildValue("(OO)", name_obj, msg);
+            PyList_Append(errors, err);
+            Py_DECREF(err);
+            Py_DECREF(msg);
+            Py_XDECREF(exc_type);
+            Py_XDECREF(exc_value);
+            Py_XDECREF(exc_tb);
+            continue;
+        }
+
+        // Set validated value directly in __dict__ (fastest path)
+        PyDict_SetItem(obj_dict, name_obj, validated);
+        Py_DECREF(validated);
+    }
+
+    Py_DECREF(obj_dict);
+
+    if (errors && PyList_GET_SIZE(errors) > 0) {
+        // Return errors list for Python to wrap in ValidationErrors
+        return errors;
+    }
+    Py_XDECREF(errors);
+    Py_RETURN_NONE;
+}
+
 // Method definitions
 static PyMethodDef DhiNativeMethods[] = {
     {"validate_int", py_validate_int, METH_VARARGS, 
@@ -690,6 +793,8 @@ static PyMethodDef DhiNativeMethods[] = {
      "GENERAL batch validation: (items, field_specs) -> (list[bool], int)"},
     {"validate_field", py_validate_field, METH_VARARGS,
      "Validate a single field: (value, field_name, constraints) -> validated_value"},
+    {"init_model", py_init_model, METH_VARARGS,
+     "Batch init: (self, kwargs, field_specs) -> None or errors list"},
     {NULL, NULL, 0, NULL}
 };
 

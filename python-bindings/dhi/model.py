@@ -378,6 +378,8 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any]) -
                         msg = msg[len(prefix):]
                     raise ValidationError(field_name, msg)
 
+            # Tag for batch init_model detection
+            native_validator.__dhi_native_constraints__ = native_constraints
             return native_validator
 
     return validator
@@ -455,6 +457,31 @@ class _ModelMeta(type):
             ))
         cls.__dhi_fast_fields__ = tuple(fast_fields)
 
+        # Try to build native init specs for batch C init (one Python→C call)
+        # Requirements: all fields fully native, no default_factory, no mutable defaults
+        native_init_specs = []
+        can_native_init = HAS_NATIVE_EXT
+        if can_native_init:
+            for field_name, required, default, default_factory, alias, validator in fast_fields:
+                if default_factory is not None:
+                    can_native_init = False
+                    break
+                if isinstance(default, (list, dict, set)):
+                    can_native_init = False
+                    break
+                constraints = getattr(validator, '__dhi_native_constraints__', None)
+                if constraints is None:
+                    can_native_init = False
+                    break
+                native_init_specs.append((
+                    field_name,
+                    alias,
+                    required,
+                    default if default is not _MISSING else None,
+                    constraints,
+                ))
+        cls.__dhi_native_init_specs__ = tuple(native_init_specs) if can_native_init else None
+
         return cls
 
 
@@ -485,9 +512,23 @@ class BaseModel(metaclass=_ModelMeta):
     __dhi_field_names__: List[str]
 
     def __init__(self, **kwargs: Any) -> None:
+        # --- ULTRA-FAST PATH: Batch C init (one Python→C call for all fields) ---
+        native_specs = self.__class__.__dhi_native_init_specs__
+        if native_specs is not None:
+            field_validators = getattr(self.__class__, '__dhi_field_validator_funcs__', None)
+            model_validators_before = getattr(self.__class__, '__dhi_model_validators_before__', None)
+            model_validators_after = getattr(self.__class__, '__dhi_model_validators_after__', None)
+            if not field_validators and not model_validators_before and not model_validators_after:
+                result = _dhi_native.init_model(self, kwargs, native_specs)
+                if result is None:
+                    return  # Success — all fields validated and set in C
+                # result is list of (field_name, error_msg) tuples
+                errors = [ValidationError(f, m) for f, m in result]
+                raise ValidationErrors(errors)
+
+        # --- STANDARD PATH ---
         errors: List[ValidationError] = []
 
-        # Run field validators and model validators
         field_validators = getattr(self.__class__, '__dhi_field_validator_funcs__', {})
         model_validators_before = getattr(self.__class__, '__dhi_model_validators_before__', [])
         model_validators_after = getattr(self.__class__, '__dhi_model_validators_after__', [])
