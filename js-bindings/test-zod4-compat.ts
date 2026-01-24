@@ -475,6 +475,177 @@ test('Readonly', () => {
 });
 
 // ============================================================================
+// 8. COERCION
+// ============================================================================
+
+test('Coerce string', () => {
+  expect(z.coerce.string().parse(42)).toBe('42');
+  expect(z.coerce.string().parse(true)).toBe('true');
+});
+
+test('Coerce number', () => {
+  expect(z.coerce.number().parse('42')).toBe(42);
+  expect(z.coerce.number().parse(true)).toBe(1);
+});
+
+test('Coerce boolean', () => {
+  expect(z.coerce.boolean().parse(1)).toBe(true);
+  expect(z.coerce.boolean().parse(0)).toBe(false);
+  expect(z.coerce.boolean().parse('')).toBe(false);
+});
+
+test('Coerce date', () => {
+  const result = z.coerce.date().parse('2024-01-15');
+  expect(result instanceof Date).toBeTrue();
+});
+
+// ============================================================================
+// 9. ZOD 4 NEW FEATURES
+// ============================================================================
+
+test('StringBool', () => {
+  const schema = z.stringbool();
+  expect(schema.parse('true')).toBe(true);
+  expect(schema.parse('false')).toBe(false);
+  expect(schema.parse('1')).toBe(true);
+  expect(schema.parse('0')).toBe(false);
+  expect(schema.parse('yes')).toBe(true);
+  expect(schema.parse('no')).toBe(false);
+  expect(schema.safeParse('maybe').success).toBeFalse();
+});
+
+test('Lazy (recursive types)', () => {
+  type Category = { name: string; children: Category[] };
+  const categorySchema: any = z.lazy(() =>
+    z.object({
+      name: z.string(),
+      children: z.array(categorySchema),
+    })
+  );
+  const result = categorySchema.parse({
+    name: 'root',
+    children: [{ name: 'child', children: [] }],
+  });
+  expect(result.name).toBe('root');
+  expect(result.children[0].name).toBe('child');
+});
+
+test('Enum: extract/exclude', () => {
+  const colors = z.enum(['red', 'green', 'blue']);
+  const warm = colors.extract(['red']);
+  expect(warm.safeParse('red').success).toBeTrue();
+  expect(warm.safeParse('blue').success).toBeFalse();
+});
+
+test('NativeEnum', () => {
+  enum Direction { Up = 'UP', Down = 'DOWN' }
+  const schema = z.nativeEnum(Direction);
+  expect(schema.parse('UP')).toBe('UP');
+  expect(schema.safeParse('LEFT').success).toBeFalse();
+});
+
+test('BigInt', () => {
+  expect(z.bigint().parse(42n)).toBe(42n);
+  expect(z.bigint().positive().safeParse(-1n).success).toBeFalse();
+  expect(z.bigint().min(10n).safeParse(5n).success).toBeFalse();
+});
+
+test('Date schema', () => {
+  const now = new Date();
+  expect(z.date().parse(now)).toBe(now);
+  expect(z.date().safeParse('not a date').success).toBeFalse();
+});
+
+test('Instance of', () => {
+  const schema = z.instanceof(Date);
+  expect(schema.parse(new Date()) instanceof Date).toBeTrue();
+  expect(schema.safeParse('not a date').success).toBeFalse();
+});
+
+test('Custom validator', () => {
+  const isPositive = (val: unknown): val is number => typeof val === 'number' && val > 0;
+  const schema = z.custom(isPositive, { message: 'Must be positive number' });
+  expect(schema.parse(5)).toBe(5);
+  expect(schema.safeParse(-1).success).toBeFalse();
+});
+
+test('Preprocess', () => {
+  const schema = z.preprocess((val) => String(val).trim(), z.string().min(1));
+  expect(schema.parse('  hello  ')).toBe('hello');
+  expect(schema.safeParse('   ').success).toBeFalse();
+});
+
+// ============================================================================
+// 10. ERROR HANDLING
+// ============================================================================
+
+test('ZodError: format()', () => {
+  const schema = z.object({
+    name: z.string(),
+    age: z.number(),
+  });
+  const result = schema.safeParse({ name: 42, age: 'bad' });
+  if (!result.success) {
+    const formatted = result.error.format();
+    expect(typeof formatted).toBe('object');
+    expect(Array.isArray(formatted._errors)).toBeTrue();
+  }
+});
+
+test('ZodError: flatten()', () => {
+  const schema = z.object({
+    name: z.string(),
+    age: z.number(),
+  });
+  const result = schema.safeParse({ name: 42, age: 'bad' });
+  if (!result.success) {
+    const flat = result.error.flatten();
+    expect(typeof flat.fieldErrors).toBe('object');
+    expect(Array.isArray(flat.formErrors)).toBeTrue();
+  }
+});
+
+test('Error is instance of ZodError', () => {
+  const schema = z.string();
+  const result = schema.safeParse(42);
+  if (!result.success) {
+    expect(result.error instanceof ZodError).toBeTrue();
+    expect(result.error.name).toBe('ZodError');
+  }
+});
+
+test('Parse throws ZodError', () => {
+  const schema = z.string();
+  let caught = false;
+  try {
+    schema.parse(42);
+  } catch (e) {
+    caught = e instanceof ZodError;
+  }
+  expect(caught).toBeTrue();
+});
+
+// ============================================================================
+// 11. MISC: describe, meta, brand, array shorthand
+// ============================================================================
+
+test('Describe', () => {
+  const schema = z.string().describe('A name field');
+  expect(schema._description).toBe('A name field');
+});
+
+test('Meta', () => {
+  const schema = z.string().meta({ label: 'Name' });
+  expect(schema._metadata?.label).toBe('Name');
+});
+
+test('Array shorthand (.array())', () => {
+  const schema = z.string().array();
+  const result = schema.parse(['a', 'b', 'c']);
+  expect(result.length).toBe(3);
+});
+
+// ============================================================================
 // RESULTS
 // ============================================================================
 
