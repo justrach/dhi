@@ -8,3 +8,6 @@ zig-out/
 *.dll
 *.exe
 .DS_Store
+__pycache__/
+*.pyc
+*.pyo
