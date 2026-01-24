@@ -1947,11 +1947,17 @@ export class DhiStringBool extends DhiType<boolean, string> {
 // ============================================================================
 
 export class DhiCustom<T> extends DhiType<T, unknown> {
-  constructor(private check: (value: unknown) => value is T, private params?: { message?: string }) { super(); }
+  private _checkFn: (value: unknown) => value is T;
+  private _params?: { message?: string };
+  constructor(checkFn: (value: unknown) => value is T, params?: { message?: string }) {
+    super();
+    this._checkFn = checkFn;
+    this._params = params;
+  }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T> {
-    if (this.check(value)) return { success: true, data: value };
-    return { success: false, error: new ZodError([{ code: 'custom', path, message: this.params?.message || 'Invalid value' }]) };
+    if (this._checkFn(value)) return { success: true, data: value };
+    return { success: false, error: new ZodError([{ code: 'custom', path, message: this._params?.message || 'Invalid value' }]) };
   }
 }
 
