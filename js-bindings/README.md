@@ -1,277 +1,167 @@
-# dhi - Ultra-Fast Validation for JavaScript/TypeScript
+# dhi
 
-**1.64x faster than Zod** with **40.26M ops/sec** in TURBO mode! 🚀
+**What if your Zod schemas ran 7x faster — with zero code changes?**
 
-Drop-in replacement for Zod with WASM-powered performance.
+```diff
+- import { z } from 'zod';
++ import { z } from 'dhi/schema';
+```
 
-## Quick Start
+That's it. Same API. Same types. Same everything. Just faster.
+
+---
+
+## The numbers
+
+We benchmarked dhi against Zod 4.3.6 across 33 real-world validation scenarios. dhi won 32 of them.
+
+| What you're validating | How much faster |
+|------------------------|-----------------|
+| Nested objects | **7.0x** |
+| Invalid objects | **15.4x** |
+| Number constraints | **4.7 – 49x** |
+| Arrays of numbers | **8.9x** |
+| Optional/nullable | **2 – 8x** |
+| Email (valid) | **1.5x** |
+| Email (invalid) | **77.8x** |
+| URL validation | **3.0x** |
+| UUID | **1.2x** |
+| Coerce to number | **26x** |
+| Coerce to string | **40x** |
+| Discriminated unions | **1.9x** |
+| Transforms | **4.7x** |
+
+Zero production dependencies. 28KB WASM binary. Full TypeScript inference.
+
+---
+
+## Install
 
 ```bash
 npm install dhi
-# or
-bun add dhi
 ```
 
-### Basic Usage (Drop-in Zod Replacement)
+## Use it
 
 ```typescript
-import { z } from "dhi/schema";
+import { z } from 'dhi/schema';
 
-// Works exactly like Zod!
-const UserSchema = z.object({
+const User = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email(),
-  age: z.number().positive().int(),
-  role: z.enum(["admin", "user", "guest"]),
-  tags: z.array(z.string()).optional()
+  age: z.number().int().positive(),
+  role: z.enum(['admin', 'user', 'guest']),
+  tags: z.array(z.string()).optional(),
 });
 
-// Validate single item
-const user = UserSchema.parse({ name: "Alice", email: "alice@example.com", age: 30, role: "user" });
+type User = z.infer<typeof User>;
+// { name: string; email: string; age: number; role: 'admin' | 'user' | 'guest'; tags?: string[] }
 
-// Safe validation
-const result = UserSchema.safeParse(data);
-if (result.success) {
-  console.log(result.data);
-} else {
-  console.log(result.error);
+const user = User.parse(data);         // throws on invalid
+const result = User.safeParse(data);   // { success: true, data } or { success: false, error }
+```
+
+Everything works the way you expect: `.optional()`, `.nullable()`, `.default()`, `.transform()`, `.refine()`, `.pipe()`, unions, discriminated unions, records, tuples, maps, sets, lazy schemas, branded types — all of it.
+
+---
+
+## Why it's fast
+
+Three things, working together:
+
+1. **JIT-compiled objects** — When you define an object schema, dhi generates a specialized validator function for that exact shape. No loops, no dynamic dispatch. Just straight-line type checks.
+
+2. **SIMD WASM validators** — Email, URL, and IPv4 validation runs through a 28KB WebAssembly module with 128-bit SIMD vector operations. Parallel character class checking instead of regex.
+
+3. **Zero-allocation error paths** — Errors only allocate when validation actually fails. The happy path touches no garbage collector.
+
+---
+
+## Full Zod 4 API
+
+dhi passes 77 compatibility tests covering the complete Zod 4 surface:
+
+**Primitives** — `string`, `number`, `bigint`, `boolean`, `date`, `symbol`, `undefined`, `null`, `void`, `never`, `any`, `unknown`, `nan`
+
+**String checks** — `min`, `max`, `length`, `email`, `url`, `uuid`, `ipv4`, `base64`, `date`, `startsWith`, `endsWith`, `includes`, `regex`, `trim`, `toLowerCase`, `toUpperCase`
+
+**Number checks** — `min`, `max`, `gt`, `gte`, `lt`, `lte`, `int`, `positive`, `negative`, `nonnegative`, `nonpositive`, `finite`, `multipleOf`
+
+**Composites** — `object`, `array`, `tuple`, `record`, `map`, `set`, `union`, `discriminatedUnion`, `intersection`
+
+**Modifiers** — `optional`, `nullable`, `nullish`, `default`, `catch`, `readonly`, `brand`
+
+**Effects** — `transform`, `refine`, `superRefine`, `preprocess`, `pipe`
+
+**Zod 4 extras** — `stringbool`, `looseObject`, `strictObject`, `coerce.*`
+
+---
+
+## Migrating from Zod
+
+### One-line swap
+
+```typescript
+// before
+import { z } from 'zod';
+
+// after
+import { z } from 'dhi/schema';
+```
+
+### TypeScript types still work
+
+```typescript
+import { z } from 'dhi/schema';
+
+const PostSchema = z.object({
+  title: z.string(),
+  body: z.string().min(10),
+  published: z.boolean().default(false),
+  tags: z.array(z.string()),
+});
+
+type Post = z.infer<typeof PostSchema>;
+// { title: string; body: string; published: boolean; tags: string[] }
+```
+
+### Error handling is the same
+
+```typescript
+import { z, ZodError } from 'dhi/schema';
+
+try {
+  schema.parse(badData);
+} catch (e) {
+  if (e instanceof ZodError) {
+    console.log(e.issues);
+    // [{ code: 'invalid_type', path: ['age'], message: 'Expected number, got string' }]
+  }
 }
 ```
 
-### TURBO Mode (Maximum Performance)
+---
 
-For simple schemas with string length and number range validations:
-
-```typescript
-import { turbo } from "dhi/turbo";
-
-// 40.26M ops/sec!
-const schema = turbo.object({
-  name: turbo.string(2, 100),
-  age: turbo.number(18, 120)
-});
-
-// Validate thousands at once
-const users = [/* ... 100K users ... */];
-const results = schema.validateMany(users);
-```
-
-### Batch API (8.19x faster on mixed data)
-
-```typescript
-import dhi from "dhi";
-
-const schema = {
-  name: dhi.z.string(2, 100),
-  email: dhi.z.email(),
-  age: dhi.z.positive()
-};
-
-// Blazing fast on mixed valid/invalid data
-const results = dhi.validateBatch(users, schema);
-```
-
-## Performance
-
-| Mode | ops/sec | vs Zod | Best For |
-|------|---------|--------|----------|
-| **TURBO** | **40.26M** | **1.64x faster** 🥇 | Simple schemas, maximum speed |
-| **Batch (mixed data)** | 15.76M | **8.19x faster** 🔥 | Real-world data with errors |
-| **Feature-complete** | 7.14M | 0.66x | Full Zod compatibility |
-
-## Features
-
-### All Zod Features ✅
-
-#### String Validators
-- `min()`, `max()`, `length()` - Length constraints
-- `email()`, `url()`, `uuid()` - Format validation
-- `startsWith()`, `endsWith()`, `includes()` - String checks
-- `regex()` - Custom patterns
-- `trim()`, `lowercase()`, `uppercase()` - Transformations
-
-#### Number Validators
-- `min()`, `max()` - Range
-- `gt()`, `gte()`, `lt()`, `lte()` - Comparisons  
-- `positive()`, `negative()`, `nonnegative()` - Sign checks
-- `int()`, `finite()` - Type constraints
-- `multipleOf()` - Divisibility
-
-#### Composite Types
-- `object()` - Object schemas
-- `array()` - Array validation
-- `union()` - Multiple types
-- `enum()` - Enumerations
-- `optional()`, `nullable()` - Modifiers
-
-#### Advanced
-- `.transform()` - Data transformation
-- `.refine()` - Custom validation
-- `.default()` - Default values
-- Type inference with `z.infer<>`
-
-## API Comparison
-
-### dhi (Drop-in Replacement)
-
-```typescript
-import { z } from "dhi/schema";
-
-// Works exactly like Zod!
-const schema = z.object({
-  name: z.string().email(),
-  age: z.number().positive()
-});
-```
-
-### Zod
-
-```typescript
-import { z } from "zod";
-
-const schema = z.object({
-  name: z.string().email(),
-  age: z.number().positive()
-});
-```
-
-**Yes, it's that simple!** Just change the import and you're done!
-
-## Migration from Zod
-
-### Option 1: Alias (Quickest)
-
-```typescript
-// Old: import { z } from "zod";
-import { z } from "dhi/schema";
-
-// Everything else stays the same!
-```
-
-### Option 2: Gradual Migration
-
-```typescript
-// Keep using Zod where needed
-import { z as zodz } from "zod";
-
-// Use dhi for performance-critical paths
-import { z } from "dhi/schema";
-import { turbo } from "dhi/turbo";
-```
-
-## When to Use Each API
-
-### Use TURBO Mode When:
-- ✅ Simple schemas (string length, number range)
-- ✅ Validating thousands of items
-- ✅ Maximum performance needed
-- ✅ Production workloads
-
-### Use Batch API When:
-- ✅ Mix of valid and invalid data
-- ✅ Need early-exit optimization
-- ✅ Real-world scenarios
-
-### Use Feature-Complete API When:
-- ✅ Need full Zod compatibility
-- ✅ Complex schemas with email, URL, UUID
-- ✅ Transformations and refinements
-- ✅ Detailed error messages
-
-## Real-World Example
-
-```typescript
-import { z } from "dhi/schema";
-
-// Financial data validation
-const TradeSchema = z.object({
-  tradeId: z.string().min(10).max(50),
-  cusip: z.string().length(9),
-  quantity: z.number().positive().int(),
-  price: z.number().positive(),
-  settlementDate: z.string(),
-  counterparty: z.string().min(5)
-});
-
-// Validate 100K trades
-const trades = [/* ... */];
-const results = trades.map(t => TradeSchema.safeParse(t));
-
-// Or use batch mode for even more speed
-import dhi from "dhi";
-const batchResults = dhi.validateBatch(trades, {
-  tradeId: dhi.z.string(10, 50),
-  cusip: dhi.z.string(9, 9),
-  quantity: dhi.z.positive(),
-  price: dhi.z.positive(),
-  settlementDate: dhi.z.isoDate(),
-  counterparty: dhi.z.string(5, 100)
-});
-```
-
-## Bundle Size
-
-- WASM module: **9.2KB** (smaller than most validators!)
-- Tree-shakeable
-- Zero dependencies (WASM is included)
-
-## Browser Support
-
-Works everywhere that supports WASM:
-- ✅ Chrome/Edge 57+
-- ✅ Firefox 52+
-- ✅ Safari 11+
-- ✅ Node.js 18+
-- ✅ Deno
-- ✅ Bun
-
-## TypeScript Support
-
-Full TypeScript support with type inference:
-
-```typescript
-import { z, infer as zodInfer } from "dhi/schema";
-
-const UserSchema = z.object({
-  name: z.string(),
-  age: z.number()
-});
-
-type User = zodInfer<typeof UserSchema>;
-// { name: string; age: number }
-```
-
-## Benchmarks
-
-Run benchmarks yourself:
+## Run the benchmarks yourself
 
 ```bash
-git clone https://github.com/justrach/satya-zig.git
-cd satya-zig/js-bindings
+git clone https://github.com/justrach/dhi-zig.git
+cd dhi-zig/js-bindings
 bun install
-bun run benchmark-final.ts
+bun run benchmark-vs-zod.ts
 ```
 
-## Why dhi?
+---
 
-1. **🚀 Blazing Fast**: 1.64x-8.19x faster than Zod
-2. **✅ Zod Compatible**: Drop-in replacement
-3. **🎯 Three APIs**: Choose speed vs features
-4. **📦 Tiny**: 9.2KB WASM
-5. **🌍 Universal**: Works everywhere
-6. **🔒 Type-Safe**: Full TypeScript support
+## Requirements
+
+- Node.js 18+ / Bun / Deno
+- Works anywhere WebAssembly runs (all modern browsers, edge runtimes)
 
 ## License
 
 MIT
 
-## Links
-
-- [GitHub](https://github.com/justrach/satya-zig)
-- [npm](https://www.npmjs.com/package/dhi)
-- [PyPI (Python)](https://pypi.org/project/dhi/)
-- [DHI JS Bindings](https://github.com/justrach/dhi-zig/tree/main/js-bindings)
-
 ---
 
-**Made with Zig + WASM** | **धी** means wisdom/intellect in Sanskrit 🧠
+**dhi** (Sanskrit: wisdom) — because validation shouldn't be the bottleneck.
