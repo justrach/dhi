@@ -27,6 +27,19 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
             var errors = validator.ValidationErrors.init(allocator);
             defer errors.deinit();
 
+            // Track which string fields were allocated so we can free on error
+            var string_allocated: [struct_info.fields.len]bool = .{false} ** struct_info.fields.len;
+
+            errdefer {
+                inline for (struct_info.fields, 0..) |field, i| {
+                    if (comptime isStringSliceType(field.type)) {
+                        if (string_allocated[i]) {
+                            allocator.free(@field(result, field.name));
+                        }
+                    }
+                }
+            }
+
             // Process fields manually to avoid comptime control flow issues
             comptime var field_index = 0;
             inline while (field_index < struct_info.fields.len) : (field_index += 1) {
@@ -46,6 +59,9 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
                     const field_result = fromJsonValueTyped(field.type, json_val, allocator);
                     if (field_result) |field_value| {
                         @field(result, field.name) = field_value;
+                        if (comptime isStringSliceType(field.type)) {
+                            string_allocated[field_index] = true;
+                        }
                     } else |err| {
                         const msg = try std.fmt.allocPrint(allocator, "Invalid value: {}", .{err});
                         defer allocator.free(msg);
@@ -86,6 +102,16 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
         },
         else => return fromJsonValueTyped(T, value, allocator),
     }
+}
+
+/// Check if a type is []const u8 (an allocated string slice)
+fn isStringSliceType(comptime T: type) bool {
+    const info = @typeInfo(T);
+    if (info == .@"pointer") {
+        const ptr = info.@"pointer";
+        return ptr.size == .slice and ptr.child == u8;
+    }
+    return false;
 }
 
 /// Convert JSON value to a specific type
@@ -174,11 +200,12 @@ test "parseAndValidate - simple struct" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name": "Rach", "age": 27}
     ;
 
     const user = try parseAndValidate(User, json, std.testing.allocator);
+    defer std.testing.allocator.free(user.name);
     try std.testing.expectEqualStrings("Rach", user.name);
     try std.testing.expectEqual(@as(u8, 27), user.age);
 }
@@ -189,11 +216,12 @@ test "parseAndValidate - optional field" {
         age: ?u8,
     };
 
-    const json = 
+    const json =
         \\{"name": "Alice"}
     ;
 
     const user = try parseAndValidate(User, json, std.testing.allocator);
+    defer std.testing.allocator.free(user.name);
     try std.testing.expectEqualStrings("Alice", user.name);
     try std.testing.expectEqual(@as(?u8, null), user.age);
 }
@@ -247,7 +275,7 @@ test "batchValidate - array of objects" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\[
         \\  {"name": "Alice", "age": 25},
         \\  {"name": "Bob", "age": 30}
@@ -255,7 +283,14 @@ test "batchValidate - array of objects" {
     ;
 
     const results = try batchValidate(User, json, std.testing.allocator);
-    defer std.testing.allocator.free(results);
+    defer {
+        for (results) |result| {
+            if (result.isValid()) {
+                std.testing.allocator.free(result.valid.name);
+            }
+        }
+        std.testing.allocator.free(results);
+    }
 
     try std.testing.expectEqual(@as(usize, 2), results.len);
     try std.testing.expect(results[0].isValid());
