@@ -482,6 +482,13 @@ class _ModelMeta(type):
                 ))
         cls.__dhi_native_init_specs__ = tuple(native_init_specs) if can_native_init else None
 
+        # Pre-compile into C structs for zero-overhead constraint access
+        if can_native_init and native_init_specs:
+            cls.__dhi_compiled_specs__ = _dhi_native.compile_model_specs(
+                tuple(native_init_specs))
+        else:
+            cls.__dhi_compiled_specs__ = None
+
         return cls
 
 
@@ -512,26 +519,23 @@ class BaseModel(metaclass=_ModelMeta):
     __dhi_field_names__: List[str]
 
     def __init__(self, **kwargs: Any) -> None:
-        # --- ULTRA-FAST PATH: Batch C init (one Python→C call for all fields) ---
-        native_specs = self.__class__.__dhi_native_init_specs__
-        if native_specs is not None:
-            field_validators = getattr(self.__class__, '__dhi_field_validator_funcs__', None)
-            model_validators_before = getattr(self.__class__, '__dhi_model_validators_before__', None)
-            model_validators_after = getattr(self.__class__, '__dhi_model_validators_after__', None)
-            if not field_validators and not model_validators_before and not model_validators_after:
-                result = _dhi_native.init_model(self, kwargs, native_specs)
-                if result is None:
-                    return  # Success — all fields validated and set in C
-                # result is list of (field_name, error_msg) tuples
-                errors = [ValidationError(f, m) for f, m in result]
-                raise ValidationErrors(errors)
+        # --- ULTRA-FAST PATH: Pre-compiled C structs (zero per-call unpacking) ---
+        cls = type(self)
+        compiled = cls.__dhi_compiled_specs__
+        if compiled is not None and not cls.__dhi_has_custom_validators__:
+            result = _dhi_native.init_model_compiled(self, kwargs, compiled)
+            if result is None:
+                return  # Success — all fields validated and set in C
+            # result is list of (field_name, error_msg) tuples
+            errors = [ValidationError(f, m) for f, m in result]
+            raise ValidationErrors(errors)
 
         # --- STANDARD PATH ---
         errors: List[ValidationError] = []
 
-        field_validators = getattr(self.__class__, '__dhi_field_validator_funcs__', {})
-        model_validators_before = getattr(self.__class__, '__dhi_model_validators_before__', [])
-        model_validators_after = getattr(self.__class__, '__dhi_model_validators_after__', [])
+        field_validators = getattr(cls, '__dhi_field_validator_funcs__', {})
+        model_validators_before = getattr(cls, '__dhi_model_validators_before__', [])
+        model_validators_after = getattr(cls, '__dhi_model_validators_after__', [])
 
         # Run 'before' model validators
         for mv in model_validators_before:
@@ -642,6 +646,7 @@ class BaseModel(metaclass=_ModelMeta):
         cls.__dhi_field_validator_funcs__ = field_validator_funcs
         cls.__dhi_model_validators_before__ = model_validators_before
         cls.__dhi_model_validators_after__ = model_validators_after
+        cls.__dhi_has_custom_validators__ = bool(field_validator_funcs or model_validators_before or model_validators_after)
 
     @classmethod
     def model_validate(cls, data: Dict[str, Any]) -> "BaseModel":
