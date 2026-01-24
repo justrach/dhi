@@ -5,6 +5,7 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <math.h>
 
 // External Zig functions from libsatya - COMPREHENSIVE VALIDATORS
 // Basic validators
@@ -36,7 +37,13 @@ extern int satya_validate_int_multiple_of(long value, long divisor);
 
 // Float validators
 extern int satya_validate_float_gt(double value, double min);
+extern int satya_validate_float_gte(double value, double min);
+extern int satya_validate_float_lt(double value, double max);
+extern int satya_validate_float_lte(double value, double max);
 extern int satya_validate_float_finite(double value);
+
+// IPv6 validator
+extern int satya_validate_ipv6(const char* str);
 
 // Python wrapper: validate_int(value, min, max) -> bool
 static PyObject* py_validate_int(PyObject* self, PyObject* args) {
@@ -351,6 +358,326 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
     return Py_BuildValue("(Ni)", result_list, (Py_ssize_t)valid_count);
 }
 
+// Helpers: safely extract numeric values from PyObject (handles int/float mix)
+static long as_long_coerce(PyObject* obj) {
+    if (PyLong_Check(obj)) return PyLong_AsLong(obj);
+    if (PyFloat_Check(obj)) return (long)PyFloat_AsDouble(obj);
+    return PyLong_AsLong(obj);
+}
+
+static double as_double_coerce(PyObject* obj) {
+    if (PyFloat_Check(obj)) return PyFloat_AsDouble(obj);
+    if (PyLong_Check(obj)) return (double)PyLong_AsLong(obj);
+    return PyFloat_AsDouble(obj);
+}
+
+// =============================================================================
+// validate_field: Single C call per field — type check + constraints + format
+// Constraints tuple format:
+//   (type_code, strict, gt, ge, lt, le, multiple_of, min_len, max_len,
+//    allow_inf_nan, format_code, strip_ws, to_lower, to_upper)
+//
+// type_code: 0=any, 1=int, 2=float, 3=str, 4=bool, 5=bytes
+// format_code: 0=none, 1=email, 2=url, 3=uuid, 4=ipv4, 5=ipv6,
+//              6=base64, 7=iso_date, 8=iso_datetime
+// =============================================================================
+
+static PyObject* py_validate_field(PyObject* self, PyObject* args) {
+    PyObject *value, *field_name_obj, *constraints;
+
+    if (!PyArg_ParseTuple(args, "OOO!", &value, &field_name_obj, &PyTuple_Type, &constraints)) {
+        return NULL;
+    }
+
+    // Unpack constraints
+    int type_code    = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 0));
+    int strict       = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 1));
+    PyObject *gt_obj = PyTuple_GET_ITEM(constraints, 2);
+    PyObject *ge_obj = PyTuple_GET_ITEM(constraints, 3);
+    PyObject *lt_obj = PyTuple_GET_ITEM(constraints, 4);
+    PyObject *le_obj = PyTuple_GET_ITEM(constraints, 5);
+    PyObject *mul_obj = PyTuple_GET_ITEM(constraints, 6);
+    PyObject *minl_obj = PyTuple_GET_ITEM(constraints, 7);
+    PyObject *maxl_obj = PyTuple_GET_ITEM(constraints, 8);
+    int allow_inf_nan = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 9));
+    int format_code   = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 10));
+    int strip_ws     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 11));
+    int to_lower     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 12));
+    int to_upper     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 13));
+
+    const char* field_name = PyUnicode_AsUTF8(field_name_obj);
+    PyObject* result = value;
+    Py_INCREF(result);
+
+    // --- TYPE CHECKING ---
+    if (type_code == 1) { // int
+        if (strict) {
+            if (!PyLong_CheckExact(result) || PyBool_Check(result)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Expected exactly int, got %s",
+                    field_name, Py_TYPE(value)->tp_name);
+            }
+        } else {
+            if (PyBool_Check(result)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Expected int, got bool", field_name);
+            }
+            if (!PyLong_Check(result)) {
+                if (PyFloat_Check(result)) {
+                    // Coerce float to int
+                    PyObject* new_val = PyNumber_Long(result);
+                    if (!new_val) {
+                        Py_DECREF(result);
+                        return PyErr_Format(PyExc_ValueError,
+                            "%s: Cannot convert float to int", field_name);
+                    }
+                    Py_DECREF(result);
+                    result = new_val;
+                } else {
+                    Py_DECREF(result);
+                    return PyErr_Format(PyExc_ValueError,
+                        "%s: Expected int, got %s",
+                        field_name, Py_TYPE(value)->tp_name);
+                }
+            }
+        }
+    } else if (type_code == 2) { // float
+        if (strict) {
+            if (!PyFloat_CheckExact(result)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Expected exactly float, got %s",
+                    field_name, Py_TYPE(value)->tp_name);
+            }
+        } else {
+            if (PyBool_Check(result)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Expected float, got bool", field_name);
+            }
+            if (!PyFloat_Check(result)) {
+                if (PyLong_Check(result)) {
+                    PyObject* new_val = PyNumber_Float(result);
+                    if (!new_val) {
+                        Py_DECREF(result);
+                        return PyErr_Format(PyExc_ValueError,
+                            "%s: Cannot convert int to float", field_name);
+                    }
+                    Py_DECREF(result);
+                    result = new_val;
+                } else {
+                    Py_DECREF(result);
+                    return PyErr_Format(PyExc_ValueError,
+                        "%s: Expected float, got %s",
+                        field_name, Py_TYPE(value)->tp_name);
+                }
+            }
+        }
+    } else if (type_code == 3) { // str
+        if (!PyUnicode_Check(result)) {
+            Py_DECREF(result);
+            return PyErr_Format(PyExc_ValueError,
+                "%s: Expected str, got %s",
+                field_name, Py_TYPE(value)->tp_name);
+        }
+    } else if (type_code == 4) { // bool
+        if (!PyBool_Check(result)) {
+            Py_DECREF(result);
+            return PyErr_Format(PyExc_ValueError,
+                "%s: Expected bool, got %s",
+                field_name, Py_TYPE(value)->tp_name);
+        }
+    } else if (type_code == 5) { // bytes
+        if (!PyBytes_Check(result)) {
+            Py_DECREF(result);
+            return PyErr_Format(PyExc_ValueError,
+                "%s: Expected bytes, got %s",
+                field_name, Py_TYPE(value)->tp_name);
+        }
+    }
+
+    // --- STRING TRANSFORMS (before validation) ---
+    if (PyUnicode_Check(result)) {
+        if (strip_ws) {
+            PyObject* stripped = PyObject_CallMethod(result, "strip", NULL);
+            if (!stripped) { Py_DECREF(result); return NULL; }
+            Py_DECREF(result);
+            result = stripped;
+        }
+        if (to_lower) {
+            PyObject* lowered = PyObject_CallMethod(result, "lower", NULL);
+            if (!lowered) { Py_DECREF(result); return NULL; }
+            Py_DECREF(result);
+            result = lowered;
+        }
+        if (to_upper) {
+            PyObject* uppered = PyObject_CallMethod(result, "upper", NULL);
+            if (!uppered) { Py_DECREF(result); return NULL; }
+            Py_DECREF(result);
+            result = uppered;
+        }
+    }
+
+    // --- NUMERIC CONSTRAINTS (use Zig validators) ---
+    if (PyLong_Check(result) && !PyBool_Check(result)) {
+        long val = PyLong_AsLong(result);
+        if (gt_obj != Py_None) {
+            long gt_val = as_long_coerce(gt_obj);
+            if (!satya_validate_int_gt(val, gt_val)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Value must be > %ld, got %ld", field_name, gt_val, val);
+            }
+        }
+        if (ge_obj != Py_None) {
+            long ge_val = as_long_coerce(ge_obj);
+            if (!satya_validate_int_gte(val, ge_val)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Value must be >= %ld, got %ld", field_name, ge_val, val);
+            }
+        }
+        if (lt_obj != Py_None) {
+            long lt_val = as_long_coerce(lt_obj);
+            if (!satya_validate_int_lt(val, lt_val)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Value must be < %ld, got %ld", field_name, lt_val, val);
+            }
+        }
+        if (le_obj != Py_None) {
+            long le_val = as_long_coerce(le_obj);
+            if (!satya_validate_int_lte(val, le_val)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Value must be <= %ld, got %ld", field_name, le_val, val);
+            }
+        }
+        if (mul_obj != Py_None) {
+            long mul_val = as_long_coerce(mul_obj);
+            if (!satya_validate_int_multiple_of(val, mul_val)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Value must be a multiple of %ld, got %ld", field_name, mul_val, val);
+            }
+        }
+    } else if (PyFloat_Check(result)) {
+        double val = PyFloat_AsDouble(result);
+        if (!allow_inf_nan) {
+            if (!satya_validate_float_finite(val)) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Value must be finite", field_name);
+            }
+        }
+        if (gt_obj != Py_None) {
+            double gt_val = as_double_coerce(gt_obj);
+            if (!satya_validate_float_gt(val, gt_val)) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%s: Value must be > %g, got %g", field_name, gt_val, val);
+                Py_DECREF(result);
+                PyErr_SetString(PyExc_ValueError, buf);
+                return NULL;
+            }
+        }
+        if (ge_obj != Py_None) {
+            double ge_val = as_double_coerce(ge_obj);
+            if (!satya_validate_float_gte(val, ge_val)) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%s: Value must be >= %g, got %g", field_name, ge_val, val);
+                Py_DECREF(result);
+                PyErr_SetString(PyExc_ValueError, buf);
+                return NULL;
+            }
+        }
+        if (lt_obj != Py_None) {
+            double lt_val = as_double_coerce(lt_obj);
+            if (!satya_validate_float_lt(val, lt_val)) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%s: Value must be < %g, got %g", field_name, lt_val, val);
+                Py_DECREF(result);
+                PyErr_SetString(PyExc_ValueError, buf);
+                return NULL;
+            }
+        }
+        if (le_obj != Py_None) {
+            double le_val = as_double_coerce(le_obj);
+            if (!satya_validate_float_lte(val, le_val)) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%s: Value must be <= %g, got %g", field_name, le_val, val);
+                Py_DECREF(result);
+                PyErr_SetString(PyExc_ValueError, buf);
+                return NULL;
+            }
+        }
+        if (mul_obj != Py_None) {
+            double mul_val = as_double_coerce(mul_obj);
+            double remainder = fmod(val, mul_val);
+            if (remainder != 0.0 && fabs(remainder) > 1e-9) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "%s: Value must be a multiple of %g, got %g", field_name, mul_val, val);
+                Py_DECREF(result);
+                PyErr_SetString(PyExc_ValueError, buf);
+                return NULL;
+            }
+        }
+    }
+
+    // --- LENGTH CONSTRAINTS ---
+    if (minl_obj != Py_None || maxl_obj != Py_None) {
+        Py_ssize_t length = PyObject_Length(result);
+        if (length == -1 && PyErr_Occurred()) {
+            Py_DECREF(result);
+            return NULL;
+        }
+        if (minl_obj != Py_None) {
+            Py_ssize_t min_len = PyLong_AsSsize_t(minl_obj);
+            if (length < min_len) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Length must be >= %zd, got %zd", field_name, min_len, length);
+            }
+        }
+        if (maxl_obj != Py_None) {
+            Py_ssize_t max_len = PyLong_AsSsize_t(maxl_obj);
+            if (length > max_len) {
+                Py_DECREF(result);
+                return PyErr_Format(PyExc_ValueError,
+                    "%s: Length must be <= %zd, got %zd", field_name, max_len, length);
+            }
+        }
+    }
+
+    // --- FORMAT VALIDATION (Zig-powered) ---
+    if (format_code > 0 && PyUnicode_Check(result)) {
+        const char* str_val = PyUnicode_AsUTF8(result);
+        if (!str_val) { Py_DECREF(result); return NULL; }
+        int valid = 1;
+        const char* fmt_name = "unknown format";
+
+        switch (format_code) {
+            case 1: valid = satya_validate_email(str_val); fmt_name = "email"; break;
+            case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
+            case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
+            case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
+            case 5: valid = satya_validate_ipv6(str_val); fmt_name = "IPv6"; break;
+            case 6: valid = satya_validate_base64(str_val); fmt_name = "base64"; break;
+            case 7: valid = satya_validate_iso_date(str_val); fmt_name = "ISO date"; break;
+            case 8: valid = satya_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
+        }
+
+        if (!valid) {
+            Py_DECREF(result);
+            return PyErr_Format(PyExc_ValueError,
+                "%s: Invalid %s format", field_name, fmt_name);
+        }
+    }
+
+    return result;  // Validated (possibly transformed) value
+}
+
 // Method definitions
 static PyMethodDef DhiNativeMethods[] = {
     {"validate_int", py_validate_int, METH_VARARGS, 
@@ -361,6 +688,8 @@ static PyMethodDef DhiNativeMethods[] = {
      "Validate email format (str) -> bool"},
     {"validate_batch_direct", py_validate_batch_direct, METH_VARARGS,
      "GENERAL batch validation: (items, field_specs) -> (list[bool], int)"},
+    {"validate_field", py_validate_field, METH_VARARGS,
+     "Validate a single field: (value, field_name, constraints) -> validated_value"},
     {NULL, NULL, 0, NULL}
 };
 

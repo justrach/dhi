@@ -182,7 +182,8 @@ class _ZigValidator:
                 except Exception as e:
                     print(f"⚠️  Failed to load {name}: {e}")
         
-        print("ℹ️  Using pure Python implementation (slower)")
+        if not HAS_NATIVE_EXT:
+            print("ℹ️  Using pure Python implementation (slower)")
     
     @property
     def available(self) -> bool:
