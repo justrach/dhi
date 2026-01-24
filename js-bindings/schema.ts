@@ -1,393 +1,2092 @@
 /**
- * dhi - BLAZING FAST Complete Schema API
- * ALL features, beats Zod performance
+ * dhi - Ultra-fast Zod 4 compatible schema validation with SIMD-powered WASM backend
+ * Full TypeScript type inference, complete Zod 4 API parity
+ *
+ * Usage:
+ *   import { z } from 'dhi/schema';
+ *   const schema = z.object({ name: z.string(), age: z.number() });
+ *   type User = z.infer<typeof schema>;
  */
 
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
-const wasmPath = join(import.meta.dir || __dirname, "dhi.wasm");
+// ============================================================================
+// WASM Backend Loading
+// ============================================================================
+
+const __dir = typeof import.meta.dir === "string"
+  ? import.meta.dir
+  : dirname(fileURLToPath(import.meta.url));
+const wasmPath = join(__dir, "dhi.wasm");
 const wasmBytes = readFileSync(wasmPath);
 const wasmModule = await WebAssembly.instantiate(wasmBytes, {});
 const wasm = wasmModule.instance.exports as any;
-
 const encoder = new TextEncoder();
 
-// Pre-defined error objects (no allocation)
-const ERRORS = {
-  invalid_type_string: { success: false as const, error: { issues: [{ path: [], message: 'Expected string', code: 'invalid_type' }] } },
-  invalid_type_number: { success: false as const, error: { issues: [{ path: [], message: 'Expected number', code: 'invalid_type' }] } },
-  invalid_type_boolean: { success: false as const, error: { issues: [{ path: [], message: 'Expected boolean', code: 'invalid_type' }] } },
-  invalid_type_object: { success: false as const, error: { issues: [{ path: [], message: 'Expected object', code: 'invalid_type' }] } },
-  invalid_type_array: { success: false as const, error: { issues: [{ path: [], message: 'Expected array', code: 'invalid_type' }] } },
-  too_small: { success: false as const, error: { issues: [{ path: [], message: 'Too small', code: 'too_small' }] } },
-  too_big: { success: false as const, error: { issues: [{ path: [], message: 'Too big', code: 'too_big' }] } },
-  invalid_string: { success: false as const, error: { issues: [{ path: [], message: 'Invalid', code: 'invalid_string' }] } },
-  invalid_email: { success: false as const, error: { issues: [{ path: [], message: 'Invalid email', code: 'invalid_string' }] } },
-  invalid_enum: { success: false as const, error: { issues: [{ path: [], message: 'Invalid enum', code: 'invalid_enum_value' }] } },
+function wasmValidateString(fn: string, value: string): boolean {
+  const bytes = encoder.encode(value);
+  const ptr = wasm.alloc(bytes.length);
+  if (!ptr) return false;
+  new Uint8Array(wasm.memory.buffer).set(bytes, ptr);
+  const result = wasm[fn](ptr, bytes.length);
+  wasm.dealloc(ptr, bytes.length);
+  return result;
+}
+
+// --------------------------------------------------------------------------
+// Fast pure-JS validators (avoid WASM FFI for short-string ops)
+// --------------------------------------------------------------------------
+
+// Pre-computed lookup table for hex digits (charCode → valid)
+const HEX_CHARS = new Uint8Array(128);
+for (let i = 48; i <= 57; i++) HEX_CHARS[i] = 1;   // 0-9
+for (let i = 65; i <= 70; i++) HEX_CHARS[i] = 1;   // A-F
+for (let i = 97; i <= 102; i++) HEX_CHARS[i] = 1;  // a-f
+
+// Pre-computed lookup table for base64 chars
+const B64_CHARS = new Uint8Array(128);
+for (let i = 65; i <= 90; i++) B64_CHARS[i] = 1;   // A-Z
+for (let i = 97; i <= 122; i++) B64_CHARS[i] = 1;  // a-z
+for (let i = 48; i <= 57; i++) B64_CHARS[i] = 1;   // 0-9
+B64_CHARS[43] = 1; // +
+B64_CHARS[47] = 1; // /
+
+// Pre-computed lookup for email local-part chars
+const EMAIL_LOCAL = new Uint8Array(128);
+for (let i = 65; i <= 90; i++) EMAIL_LOCAL[i] = 1;  // A-Z
+for (let i = 97; i <= 122; i++) EMAIL_LOCAL[i] = 1; // a-z
+for (let i = 48; i <= 57; i++) EMAIL_LOCAL[i] = 1;  // 0-9
+EMAIL_LOCAL[46] = 1; EMAIL_LOCAL[95] = 1; EMAIL_LOCAL[37] = 1; // . _ %
+EMAIL_LOCAL[43] = 1; EMAIL_LOCAL[45] = 1; // + -
+
+// Pre-computed lookup for email domain chars
+const EMAIL_DOMAIN = new Uint8Array(128);
+for (let i = 65; i <= 90; i++) EMAIL_DOMAIN[i] = 1;  // A-Z
+for (let i = 97; i <= 122; i++) EMAIL_DOMAIN[i] = 1; // a-z
+for (let i = 48; i <= 57; i++) EMAIL_DOMAIN[i] = 1;  // 0-9
+EMAIL_DOMAIN[46] = 1; EMAIL_DOMAIN[45] = 1; // . -
+
+// UUID regex compiled once → V8 Irregexp JITs this to native code
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function fastValidateUuid(s: string): boolean {
+  return s.length === 36 && UUID_RE.test(s);
+}
+
+function fastValidateBase64(s: string): boolean {
+  if (s.length === 0) return false;
+  const len = s.length;
+  if (len % 4 !== 0) {
+    // Allow unpadded: just validate chars
+    for (let i = 0; i < len; i++) {
+      const c = s.charCodeAt(i);
+      if (c > 127 || !B64_CHARS[c]) return false;
+    }
+    return true;
+  }
+  // Padded: check chars then padding
+  let padStart = len;
+  if (s.charCodeAt(len - 1) === 61) padStart = len - (s.charCodeAt(len - 2) === 61 ? 2 : 1);
+  for (let i = 0; i < padStart; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 127 || !B64_CHARS[c]) return false;
+  }
+  return true;
+}
+
+function fastValidateDate(s: string): boolean {
+  if (s.length !== 10) return false;
+  if (s.charCodeAt(4) !== 45 || s.charCodeAt(7) !== 45) return false;
+  // Check all digit positions
+  for (const i of [0,1,2,3,5,6,8,9]) {
+    const c = s.charCodeAt(i);
+    if (c < 48 || c > 57) return false;
+  }
+  const month = (s.charCodeAt(5) - 48) * 10 + (s.charCodeAt(6) - 48);
+  const day = (s.charCodeAt(8) - 48) * 10 + (s.charCodeAt(9) - 48);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+function fastValidateEmail(s: string): boolean {
+  if (s.length < 3 || s.length > 320) return false;
+  const atIdx = s.indexOf('@');
+  if (atIdx < 1 || atIdx > s.length - 3) return false;
+  // Validate local part
+  for (let i = 0; i < atIdx; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 127 || !EMAIL_LOCAL[c]) return false;
+  }
+  // Validate domain part
+  const domain = s.substring(atIdx + 1);
+  if (domain.indexOf('.') === -1) return false;
+  if (domain.charCodeAt(0) === 45 || domain.charCodeAt(domain.length - 1) === 45) return false;
+  for (let i = 0; i < domain.length; i++) {
+    const c = domain.charCodeAt(i);
+    if (c > 127 || !EMAIL_DOMAIN[c]) return false;
+  }
+  return true;
+}
+
+// Shared empty path for optimistic (no-error) parsing - avoids allocation
+const EMPTY_PATH: (string | number)[] = [];
+
+// ============================================================================
+// Type System - Full Zod 4 Compatible Types
+// ============================================================================
+
+/** Extract the output type from a schema */
+export type infer<T extends DhiType<any, any>> = T["_output"];
+
+/** Extract the input type from a schema */
+export type input<T extends DhiType<any, any>> = T["_input"];
+
+/** Extract the output type */
+export type output<T extends DhiType<any, any>> = T["_output"];
+
+/** Utility: make all properties optional */
+type Partial_<T> = { [K in keyof T]?: T[K] };
+
+/** Utility: make all properties required */
+type Required_<T> = { [K in keyof T]-?: T[K] };
+
+/** Utility: pick specific keys */
+type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
+
+/** Utility: omit specific keys */
+type Omit_<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] };
+
+/** Infer object shape from schema shape */
+type InferShape<T extends Record<string, DhiType<any, any>>> = {
+  [K in keyof T]: T[K]["_output"];
 };
 
-function makeError(code: string, message: string): ValidationResult<never> {
-  return { success: false, error: { issues: [{ path: [], message, code }] } };
+type InferInputShape<T extends Record<string, DhiType<any, any>>> = {
+  [K in keyof T]: T[K]["_input"];
+};
+
+/** Make optional keys actually optional in the type */
+type OptionalKeys<T extends Record<string, DhiType<any, any>>> = {
+  [K in keyof T]: undefined extends T[K]["_output"] ? K : never;
+}[keyof T];
+
+type RequiredKeys<T extends Record<string, DhiType<any, any>>> = Exclude<keyof T, OptionalKeys<T>>;
+
+type InferObjectOutput<T extends Record<string, DhiType<any, any>>> =
+  { [K in RequiredKeys<T> & string]: T[K]["_output"] } &
+  { [K in OptionalKeys<T> & string]?: T[K]["_output"] };
+
+type InferObjectInput<T extends Record<string, DhiType<any, any>>> =
+  { [K in RequiredKeys<T> & string]: T[K]["_input"] } &
+  { [K in OptionalKeys<T> & string]?: T[K]["_input"] };
+
+// ============================================================================
+// Error Types - Zod 4 Compatible
+// ============================================================================
+
+export type ZodIssueCode =
+  | "invalid_type"
+  | "invalid_literal"
+  | "custom"
+  | "invalid_union"
+  | "invalid_union_discriminator"
+  | "invalid_enum_value"
+  | "unrecognized_keys"
+  | "invalid_arguments"
+  | "invalid_return_type"
+  | "invalid_date"
+  | "invalid_string"
+  | "too_small"
+  | "too_big"
+  | "invalid_intersection_types"
+  | "not_multiple_of"
+  | "not_finite";
+
+export interface ZodIssue {
+  code: ZodIssueCode;
+  path: (string | number)[];
+  message: string;
+  expected?: string;
+  received?: string;
+  fatal?: boolean;
 }
 
-export type ValidationResult<T> = 
-  | { success: true; data: T }
-  | { success: false; error: { issues: Array<{ path: any[]; message: string; code: string }> } };
+export class ZodError {
+  issues: ZodIssue[];
+  readonly name = "ZodError";
 
-// Base - no path tracking overhead
-export abstract class Schema<T = any> {
-  abstract _validate(value: any): ValidationResult<T>;
-  
-  parse(value: any): T {
-    const result = this._validate(value);
-    if (!result.success) throw new Error('Validation failed');
+  constructor(issues: ZodIssue[]) {
+    this.issues = issues;
+  }
+
+  get errors() { return this.issues; }
+
+  get message() {
+    return JSON.stringify(this.issues, null, 2);
+  }
+
+  format(): Record<string, any> {
+    const fmt: Record<string, any> = { _errors: [] };
+    for (const issue of this.issues) {
+      if (issue.path.length === 0) {
+        fmt._errors.push(issue.message);
+      } else {
+        let curr = fmt;
+        for (const seg of issue.path) {
+          if (!curr[seg]) curr[seg] = { _errors: [] };
+          curr = curr[seg];
+        }
+        curr._errors.push(issue.message);
+      }
+    }
+    return fmt;
+  }
+
+  flatten() {
+    const fieldErrors: Record<string, string[]> = {};
+    const formErrors: string[] = [];
+    for (const issue of this.issues) {
+      if (issue.path.length === 0) {
+        formErrors.push(issue.message);
+      } else {
+        const key = issue.path.join(".");
+        if (!fieldErrors[key]) fieldErrors[key] = [];
+        fieldErrors[key].push(issue.message);
+      }
+    }
+    return { formErrors, fieldErrors };
+  }
+}
+
+export type SafeParseResult<T> =
+  | { success: true; data: T; error?: never }
+  | { success: false; data?: never; error: ZodError };
+
+// ============================================================================
+// Base Schema Type
+// ============================================================================
+
+export abstract class DhiType<Output = any, Input = Output> {
+  readonly _output!: Output;
+  readonly _input!: Input;
+  _description?: string;
+  _metadata?: Record<string, any>;
+
+  abstract _parse(value: unknown, path: (string | number)[]): SafeParseResult<Output>;
+
+  parse(value: unknown): Output {
+    const result = this._parse(value, []);
+    if (!result.success) throw result.error;
     return result.data;
   }
-  
-  safeParse(value: any): ValidationResult<T> {
-    return this._validate(value);
+
+  safeParse(value: unknown): SafeParseResult<Output> {
+    return this._parse(value, []);
   }
-  
-  optional() { return new OptionalSchema(this); }
-  nullable() { return new NullableSchema(this); }
-  default(defaultValue: T) { return new DefaultSchema(this, defaultValue); }
-  transform<U>(fn: (value: T) => U) { return new TransformSchema(this, fn); }
-  refine(check: (value: T) => boolean, message?: string) { return new RefineSchema(this, check, message); }
+
+  async parseAsync(value: unknown): Promise<Output> {
+    return this.parse(value);
+  }
+
+  async safeParseAsync(value: unknown): Promise<SafeParseResult<Output>> {
+    return this.safeParse(value);
+  }
+
+  optional(): DhiOptional<this> {
+    return new DhiOptional(this);
+  }
+
+  nullable(): DhiNullable<this> {
+    return new DhiNullable(this);
+  }
+
+  nullish(): DhiOptional<DhiNullable<this>> {
+    return new DhiOptional(new DhiNullable(this));
+  }
+
+  default(defaultValue: Output | (() => Output)): DhiDefault<this> {
+    return new DhiDefault(this, defaultValue);
+  }
+
+  catch(catchValue: Output | (() => Output)): DhiCatch<this> {
+    return new DhiCatch(this, catchValue);
+  }
+
+  transform<U>(fn: (value: Output) => U): DhiTransform<this, U> {
+    return new DhiTransform(this, fn);
+  }
+
+  refine(check: (value: Output) => boolean, message?: string | { message?: string; path?: (string | number)[] }): DhiRefine<this> {
+    const msg = typeof message === 'string' ? message : message?.message;
+    const path = typeof message === 'object' ? message?.path : undefined;
+    return new DhiRefine(this, check, msg, path);
+  }
+
+  superRefine(refinement: (value: Output, ctx: { addIssue: (issue: Partial<ZodIssue>) => void }) => void): DhiSuperRefine<this> {
+    return new DhiSuperRefine(this, refinement);
+  }
+
+  pipe<T extends DhiType<any, Output>>(schema: T): DhiPipe<this, T> {
+    return new DhiPipe(this, schema);
+  }
+
+  or<T extends DhiType<any, any>>(other: T): DhiUnion<[this, T]> {
+    return new DhiUnion([this, other]);
+  }
+
+  and<T extends DhiType<any, any>>(other: T): DhiIntersection<this, T> {
+    return new DhiIntersection(this, other);
+  }
+
+  array(): DhiArray<this> {
+    return new DhiArray(this);
+  }
+
+  readonly(): DhiReadonly<this> {
+    return new DhiReadonly(this);
+  }
+
+  brand<B extends string>(): DhiType<Output & { __brand: B }, Input> {
+    return this as any;
+  }
+
+  describe(description: string): this {
+    const clone = Object.create(Object.getPrototypeOf(this));
+    Object.assign(clone, this);
+    clone._description = description;
+    return clone;
+  }
+
+  meta(metadata: Record<string, any>): this {
+    const clone = Object.create(Object.getPrototypeOf(this));
+    Object.assign(clone, this);
+    clone._metadata = { ...this._metadata, ...metadata };
+    return clone;
+  }
+
+  isOptional(): boolean {
+    return false;
+  }
+
+  isNullable(): boolean {
+    return false;
+  }
+
+  // Zod 4: nonoptional - removes optionality
+  nonoptional(): DhiType<Exclude<Output, undefined>, Exclude<Input, undefined>> {
+    return this as any;
+  }
+
+  // Zod 4: exactOptional - optional without affecting defaults
+  exactOptional(): DhiOptional<this> {
+    return new DhiOptional(this);
+  }
+
+  // Zod 4: check - new name for superRefine
+  check(refinement: (value: Output, ctx: { addIssue: (issue: Partial<ZodIssue>) => void }) => void): DhiSuperRefine<this> {
+    return new DhiSuperRefine(this, refinement);
+  }
+
+  // Zod 4: overwrite - transform without changing inferred type
+  overwrite(fn: (value: Output) => Output): DhiTransform<this, Output> {
+    return new DhiTransform(this, fn) as any;
+  }
+
+  // Zod 4: prefault - default that gets processed by subsequent transforms
+  prefault(defaultValue: Input | (() => Input)): DhiDefault<this> {
+    return new DhiDefault(this, defaultValue as any);
+  }
+
+  // Zod 4: clone
+  clone(): this {
+    const clone = Object.create(Object.getPrototypeOf(this));
+    Object.assign(clone, this);
+    return clone;
+  }
 }
 
-// String - FULLY OPTIMIZED
-export class StringSchema extends Schema<string> {
-  _min?: number;
-  _max?: number;
-  _email = false;
-  _url = false;
-  _uuid = false;
-  _startsWith?: string;
-  _endsWith?: string;
-  _includes?: string;
-  _regex?: RegExp;
-  
-  min(l: number): this { this._min = l; return this; }
-  max(l: number): this { this._max = l; return this; }
-  length(l: number): this { this._min = l; this._max = l; return this; }
-  email(): this { this._email = true; return this; }
-  url(): this { this._url = true; return this; }
-  uuid(): this { this._uuid = true; return this; }
-  startsWith(s: string): this { this._startsWith = s; return this; }
-  endsWith(s: string): this { this._endsWith = s; return this; }
-  includes(s: string): this { this._includes = s; return this; }
-  regex(r: RegExp): this { this._regex = r; return this; }
-  trim() { return this.transform(v => v.trim()); }
-  lowercase() { return this.transform(v => v.toLowerCase()); }
-  uppercase() { return this.transform(v => v.toUpperCase()); }
-  
-  _validate(value: any): ValidationResult<string> {
-    // INLINE: All checks with minimal overhead
-    if (typeof value !== 'string') return ERRORS.invalid_type_string;
-    
-    const len = value.length;
-    if (this._min !== undefined && len < this._min) return ERRORS.too_small;
-    if (this._max !== undefined && len > this._max) return makeError('too_big', 'Too long');
-    
-    // JS string checks (no WASM overhead)
-    if (this._startsWith && !value.startsWith(this._startsWith)) return ERRORS.invalid_string;
-    if (this._endsWith && !value.endsWith(this._endsWith)) return ERRORS.invalid_string;
-    if (this._includes && !value.includes(this._includes)) return ERRORS.invalid_string;
-    if (this._regex && !this._regex.test(value)) return ERRORS.invalid_string;
-    
-    // WASM checks (only when needed)
-    if (this._email) {
-      // Quick pre-check
-      if (value.indexOf('@') === -1 || value.indexOf('.') === -1) return ERRORS.invalid_email;
-      const bytes = encoder.encode(value);
-      const ptr = wasm.alloc(bytes.length);
-      new Uint8Array(wasm.memory.buffer).set(bytes, ptr);
-      const valid = wasm.validate_email(ptr, bytes.length);
-      wasm.dealloc(ptr, bytes.length);
-      if (!valid) return ERRORS.invalid_email;
+// ============================================================================
+// Primitive Schemas
+// ============================================================================
+
+export class DhiString extends DhiType<string, string> {
+  private checks: Array<{ type: string; value?: any; message?: string }> = [];
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<string> {
+    if (typeof value !== 'string') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected string, received ' + typeof value, expected: 'string', received: typeof value }]) };
     }
-    
-    if (this._url) {
-      const bytes = encoder.encode(value);
-      const ptr = wasm.alloc(bytes.length);
-      new Uint8Array(wasm.memory.buffer).set(bytes, ptr);
-      const valid = wasm.validate_url(ptr, bytes.length);
-      wasm.dealloc(ptr, bytes.length);
-      if (!valid) return ERRORS.invalid_string;
+
+    let current: string = value;
+    const checks = this.checks;
+    if (checks.length === 0) return { success: true, data: current };
+
+    for (let ci = 0; ci < checks.length; ci++) {
+      const check = checks[ci];
+      switch (check.type) {
+        case 'min':
+          if (current.length < check.value)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `String must contain at least ${check.value} character(s)` }]) };
+          break;
+        case 'max':
+          if (current.length > check.value)
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `String must contain at most ${check.value} character(s)` }]) };
+          break;
+        case 'length':
+          if (current.length !== check.value)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `String must contain exactly ${check.value} character(s)` }]) };
+          break;
+        case 'email':
+          if (!fastValidateEmail(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid email' }]) };
+          break;
+        case 'url':
+          if (!wasmValidateString('validate_url_simd', current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid url' }]) };
+          break;
+        case 'uuid':
+          if (!fastValidateUuid(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid uuid' }]) };
+          break;
+        case 'cuid':
+          if (!/^c[^\s-]{8,}$/i.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid cuid' }]) };
+          break;
+        case 'cuid2':
+          if (!/^[0-9a-z]+$/.test(current) || current.length === 0)
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid cuid2' }]) };
+          break;
+        case 'ulid':
+          if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid ulid' }]) };
+          break;
+        case 'emoji':
+          if (!/\p{Emoji}/u.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid emoji' }]) };
+          break;
+        case 'ipv4':
+          if (!wasmValidateString('validate_ipv4_simd', current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv4 address' }]) };
+          break;
+        case 'ipv6':
+          if (!/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(current) &&
+              !/^(([0-9a-fA-F]{1,4}:)*)?::([0-9a-fA-F]{1,4}(:)?)*$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv6 address' }]) };
+          break;
+        case 'ip':
+          if (!wasmValidateString('validate_ipv4_simd', current) &&
+              !/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IP address' }]) };
+          break;
+        case 'base64':
+          if (!fastValidateBase64(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid base64' }]) };
+          break;
+        case 'datetime':
+          if (!wasmValidateString('validate_iso_datetime', current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid datetime' }]) };
+          break;
+        case 'date':
+          if (!fastValidateDate(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid date string' }]) };
+          break;
+        case 'time': {
+          const timeRegex = /^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(\.\d+)?$/;
+          if (!timeRegex.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid time string' }]) };
+          break;
+        }
+        case 'duration': {
+          const durationRegex = /^P(?:\d+Y)?(?:\d+M)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$/;
+          if (!durationRegex.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid duration' }]) };
+          break;
+        }
+        case 'regex':
+          if (!check.value.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid' }]) };
+          break;
+        case 'includes':
+          if (!current.includes(check.value))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || `Must include "${check.value}"` }]) };
+          break;
+        case 'startsWith':
+          if (!current.startsWith(check.value))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || `Must start with "${check.value}"` }]) };
+          break;
+        case 'endsWith':
+          if (!current.endsWith(check.value))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || `Must end with "${check.value}"` }]) };
+          break;
+        case 'trim':
+          current = current.trim();
+          break;
+        case 'toLowerCase':
+          current = current.toLowerCase();
+          break;
+        case 'toUpperCase':
+          current = current.toUpperCase();
+          break;
+        case 'nonempty':
+          if (current.length === 0)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'String must contain at least 1 character(s)' }]) };
+          break;
+        case 'lowercase':
+          current = current.toLowerCase();
+          break;
+        case 'uppercase':
+          current = current.toUpperCase();
+          break;
+        case 'normalize':
+          current = current.normalize(check.value || 'NFC');
+          break;
+        case 'slugify':
+          current = current.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          break;
+        case 'jwt':
+          if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid JWT' }]) };
+          break;
+        case 'nanoid':
+          if (!/^[A-Za-z0-9_-]{21}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid nanoid' }]) };
+          break;
+        case 'base64url':
+          if (!/^[A-Za-z0-9_-]+$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid base64url' }]) };
+          break;
+        case 'cidrv4':
+          if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid CIDR v4' }]) };
+          break;
+        case 'cidrv6':
+          if (!/^[0-9a-fA-F:]+\/\d{1,3}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid CIDR v6' }]) };
+          break;
+        case 'e164':
+          if (!/^\+[1-9]\d{1,14}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid E.164 phone number' }]) };
+          break;
+        case 'mac':
+          if (!/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid MAC address' }]) };
+          break;
+        case 'xid':
+          if (!/^[0-9a-v]{20}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid XID' }]) };
+          break;
+        case 'ksuid':
+          if (!/^[0-9A-Za-z]{27}$/.test(current))
+            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid KSUID' }]) };
+          break;
+      }
     }
-    
-    if (this._uuid) {
-      const bytes = encoder.encode(value);
-      const ptr = wasm.alloc(bytes.length);
-      new Uint8Array(wasm.memory.buffer).set(bytes, ptr);
-      const valid = wasm.validate_uuid(ptr, bytes.length);
-      wasm.dealloc(ptr, bytes.length);
-      if (!valid) return ERRORS.invalid_string;
+
+    return { success: true, data: current };
+  }
+
+  min(length: number, message?: string): this { this.checks.push({ type: 'min', value: length, message }); return this; }
+  max(length: number, message?: string): this { this.checks.push({ type: 'max', value: length, message }); return this; }
+  length(length: number, message?: string): this { this.checks.push({ type: 'length', value: length, message }); return this; }
+  email(message?: string): this { this.checks.push({ type: 'email', message }); return this; }
+  url(message?: string): this { this.checks.push({ type: 'url', message }); return this; }
+  uuid(message?: string): this { this.checks.push({ type: 'uuid', message }); return this; }
+  cuid(message?: string): this { this.checks.push({ type: 'cuid', message }); return this; }
+  cuid2(message?: string): this { this.checks.push({ type: 'cuid2', message }); return this; }
+  ulid(message?: string): this { this.checks.push({ type: 'ulid', message }); return this; }
+  emoji(message?: string): this { this.checks.push({ type: 'emoji', message }); return this; }
+  ip(message?: string): this { this.checks.push({ type: 'ip', message }); return this; }
+  ipv4(message?: string): this { this.checks.push({ type: 'ipv4', message }); return this; }
+  ipv6(message?: string): this { this.checks.push({ type: 'ipv6', message }); return this; }
+  base64(message?: string): this { this.checks.push({ type: 'base64', message }); return this; }
+  datetime(opts?: { message?: string; offset?: boolean; precision?: number }): this { this.checks.push({ type: 'datetime', message: opts?.message }); return this; }
+  date(message?: string): this { this.checks.push({ type: 'date', message }); return this; }
+  time(opts?: { message?: string; precision?: number }): this { this.checks.push({ type: 'time', message: opts?.message }); return this; }
+  duration(message?: string): this { this.checks.push({ type: 'duration', message }); return this; }
+  regex(pattern: RegExp, message?: string): this { this.checks.push({ type: 'regex', value: pattern, message }); return this; }
+  includes(substr: string, opts?: { message?: string; position?: number }): this { this.checks.push({ type: 'includes', value: substr, message: opts?.message }); return this; }
+  startsWith(prefix: string, message?: string): this { this.checks.push({ type: 'startsWith', value: prefix, message }); return this; }
+  endsWith(suffix: string, message?: string): this { this.checks.push({ type: 'endsWith', value: suffix, message }); return this; }
+  trim(): this { this.checks.push({ type: 'trim' }); return this; }
+  toLowerCase(): this { this.checks.push({ type: 'toLowerCase' }); return this; }
+  toUpperCase(): this { this.checks.push({ type: 'toUpperCase' }); return this; }
+  normalize(form?: string): this { this.checks.push({ type: 'normalize', value: form || 'NFC' }); return this; }
+  slugify(): this { this.checks.push({ type: 'slugify' }); return this; }
+  nonempty(message?: string): this { this.checks.push({ type: 'nonempty', message }); return this; }
+
+  // Zod 4: case transforms
+  lowercase(message?: string): this { this.checks.push({ type: 'lowercase', message }); return this; }
+  uppercase(message?: string): this { this.checks.push({ type: 'uppercase', message }); return this; }
+
+  // Zod 4: additional format validators
+  jwt(message?: string): this { this.checks.push({ type: 'jwt', message }); return this; }
+  nanoid(message?: string): this { this.checks.push({ type: 'nanoid', message }); return this; }
+  base64url(message?: string): this { this.checks.push({ type: 'base64url', message }); return this; }
+  guid(message?: string): this { this.checks.push({ type: 'uuid', message }); return this; } // guid = less strict uuid
+  cidrv4(message?: string): this { this.checks.push({ type: 'cidrv4', message }); return this; }
+  cidrv6(message?: string): this { this.checks.push({ type: 'cidrv6', message }); return this; }
+  e164(message?: string): this { this.checks.push({ type: 'e164', message }); return this; }
+  mac(message?: string): this { this.checks.push({ type: 'mac', message }); return this; }
+  xid(message?: string): this { this.checks.push({ type: 'xid', message }); return this; }
+  ksuid(message?: string): this { this.checks.push({ type: 'ksuid', message }); return this; }
+  uuidv4(message?: string): this { return this.uuid(message); }
+  uuidv6(message?: string): this { return this.uuid(message); }
+  uuidv7(message?: string): this { return this.uuid(message); }
+
+  // Zod 4 aliases
+  minLength(length: number, message?: string): this { return this.min(length, message); }
+  maxLength(length: number, message?: string): this { return this.max(length, message); }
+}
+
+export class DhiNumber extends DhiType<number, number> {
+  private checks: Array<{ type: string; value?: any; message?: string }> = [];
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<number> {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected number, received ' + typeof value, expected: 'number', received: typeof value }]) };
     }
-    
+
+    const checks = this.checks;
+    for (let ci = 0; ci < checks.length; ci++) {
+      const check = checks[ci];
+      switch (check.type) {
+        case 'min':
+        case 'gte':
+          if (value < check.value)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Number must be greater than or equal to ${check.value}` }]) };
+          break;
+        case 'max':
+        case 'lte':
+          if (value > check.value)
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Number must be less than or equal to ${check.value}` }]) };
+          break;
+        case 'gt':
+          if (value <= check.value)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Number must be greater than ${check.value}` }]) };
+          break;
+        case 'lt':
+          if (value >= check.value)
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Number must be less than ${check.value}` }]) };
+          break;
+        case 'int':
+          if (!Number.isInteger(value))
+            return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: check.message || 'Expected integer, received float' }]) };
+          break;
+        case 'positive':
+          if (value <= 0)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Number must be greater than 0' }]) };
+          break;
+        case 'negative':
+          if (value >= 0)
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || 'Number must be less than 0' }]) };
+          break;
+        case 'nonnegative':
+          if (value < 0)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Number must be greater than or equal to 0' }]) };
+          break;
+        case 'nonpositive':
+          if (value > 0)
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || 'Number must be less than or equal to 0' }]) };
+          break;
+        case 'multipleOf':
+        case 'step':
+          if (value % check.value !== 0)
+            return { success: false, error: new ZodError([{ code: 'not_multiple_of', path, message: check.message || `Number must be a multiple of ${check.value}` }]) };
+          break;
+        case 'finite':
+          if (!Number.isFinite(value))
+            return { success: false, error: new ZodError([{ code: 'not_finite', path, message: check.message || 'Number must be finite' }]) };
+          break;
+        case 'safe':
+          if (!Number.isSafeInteger(value))
+            return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: check.message || 'Number must be a safe integer' }]) };
+          break;
+      }
+    }
+
+    return { success: true, data: value };
+  }
+
+  min(value: number, message?: string): this { this.checks.push({ type: 'min', value, message }); return this; }
+  max(value: number, message?: string): this { this.checks.push({ type: 'max', value, message }); return this; }
+  gt(value: number, message?: string): this { this.checks.push({ type: 'gt', value, message }); return this; }
+  gte(value: number, message?: string): this { this.checks.push({ type: 'gte', value, message }); return this; }
+  lt(value: number, message?: string): this { this.checks.push({ type: 'lt', value, message }); return this; }
+  lte(value: number, message?: string): this { this.checks.push({ type: 'lte', value, message }); return this; }
+  int(message?: string): this { this.checks.push({ type: 'int', message }); return this; }
+  positive(message?: string): this { this.checks.push({ type: 'positive', message }); return this; }
+  negative(message?: string): this { this.checks.push({ type: 'negative', message }); return this; }
+  nonnegative(message?: string): this { this.checks.push({ type: 'nonnegative', message }); return this; }
+  nonpositive(message?: string): this { this.checks.push({ type: 'nonpositive', message }); return this; }
+  multipleOf(value: number, message?: string): this { this.checks.push({ type: 'multipleOf', value, message }); return this; }
+  step(value: number, message?: string): this { this.checks.push({ type: 'step', value, message }); return this; }
+  finite(message?: string): this { this.checks.push({ type: 'finite', message }); return this; }
+  safe(message?: string): this { this.checks.push({ type: 'safe', message }); return this; }
+
+  // Zod 4 aliases
+  minimum(value: number, message?: string): this { return this.gte(value, message); }
+  maximum(value: number, message?: string): this { return this.lte(value, message); }
+}
+
+export class DhiBigInt extends DhiType<bigint, bigint> {
+  private checks: Array<{ type: string; value?: any; message?: string }> = [];
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<bigint> {
+    if (typeof value !== 'bigint') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected bigint, received ' + typeof value }]) };
+    }
+
+    for (const check of this.checks) {
+      switch (check.type) {
+        case 'min':
+        case 'gte':
+          if (value < check.value) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Value too small` }]) };
+          break;
+        case 'max':
+        case 'lte':
+          if (value > check.value) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Value too big` }]) };
+          break;
+        case 'gt':
+          if (value <= check.value) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Value too small` }]) };
+          break;
+        case 'lt':
+          if (value >= check.value) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Value too big` }]) };
+          break;
+        case 'positive':
+          if (value <= 0n) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Must be positive` }]) };
+          break;
+        case 'negative':
+          if (value >= 0n) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Must be negative` }]) };
+          break;
+        case 'nonnegative':
+          if (value < 0n) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Must be non-negative` }]) };
+          break;
+        case 'nonpositive':
+          if (value > 0n) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Must be non-positive` }]) };
+          break;
+        case 'multipleOf':
+          if (value % check.value !== 0n) return { success: false, error: new ZodError([{ code: 'not_multiple_of', path, message: check.message || `Not a multiple` }]) };
+          break;
+      }
+    }
+
+    return { success: true, data: value };
+  }
+
+  min(value: bigint, message?: string): this { this.checks.push({ type: 'min', value, message }); return this; }
+  max(value: bigint, message?: string): this { this.checks.push({ type: 'max', value, message }); return this; }
+  gt(value: bigint, message?: string): this { this.checks.push({ type: 'gt', value, message }); return this; }
+  gte(value: bigint, message?: string): this { this.checks.push({ type: 'gte', value, message }); return this; }
+  lt(value: bigint, message?: string): this { this.checks.push({ type: 'lt', value, message }); return this; }
+  lte(value: bigint, message?: string): this { this.checks.push({ type: 'lte', value, message }); return this; }
+  positive(message?: string): this { this.checks.push({ type: 'positive', message }); return this; }
+  negative(message?: string): this { this.checks.push({ type: 'negative', message }); return this; }
+  nonnegative(message?: string): this { this.checks.push({ type: 'nonnegative', message }); return this; }
+  nonpositive(message?: string): this { this.checks.push({ type: 'nonpositive', message }); return this; }
+  multipleOf(value: bigint, message?: string): this { this.checks.push({ type: 'multipleOf', value, message }); return this; }
+}
+
+export class DhiBoolean extends DhiType<boolean, boolean> {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<boolean> {
+    if (typeof value !== 'boolean') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected boolean, received ' + typeof value }]) };
+    }
     return { success: true, data: value };
   }
 }
 
-// Number - FULLY OPTIMIZED
-export class NumberSchema extends Schema<number> {
-  _min?: number;
-  _max?: number;
-  _gt?: number;
-  _gte?: number;
-  _lt?: number;
-  _lte?: number;
-  _positive = false;
-  _negative = false;
-  _int = false;
-  _multipleOf?: number;
-  
-  min(v: number): this { this._min = v; return this; }
-  max(v: number): this { this._max = v; return this; }
-  gt(v: number): this { this._gt = v; return this; }
-  gte(v: number): this { this._gte = v; return this; }
-  lt(v: number): this { this._lt = v; return this; }
-  lte(v: number): this { this._lte = v; return this; }
-  positive(): this { this._positive = true; return this; }
-  negative(): this { this._negative = true; return this; }
-  int(): this { this._int = true; return this; }
-  multipleOf(v: number): this { this._multipleOf = v; return this; }
-  
-  _validate(value: any): ValidationResult<number> {
-    if (typeof value !== 'number') return ERRORS.invalid_type_number;
-    if (this._int && (value | 0) !== value) return makeError('invalid_type', 'Expected integer');
-    if (this._positive && value <= 0) return makeError('too_small', 'Must be positive');
-    if (this._negative && value >= 0) return makeError('too_big', 'Must be negative');
-    if (this._min !== undefined && value < this._min) return ERRORS.too_small;
-    if (this._max !== undefined && value > this._max) return ERRORS.too_big;
-    if (this._gt !== undefined && value <= this._gt) return ERRORS.too_small;
-    if (this._gte !== undefined && value < this._gte) return ERRORS.too_small;
-    if (this._lt !== undefined && value >= this._lt) return ERRORS.too_big;
-    if (this._lte !== undefined && value > this._lte) return ERRORS.too_big;
-    if (this._multipleOf !== undefined && value % this._multipleOf !== 0) return makeError('invalid_number', 'Not a multiple');
-    
+export class DhiDate extends DhiType<Date, Date> {
+  private checks: Array<{ type: string; value?: any; message?: string }> = [];
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Date> {
+    if (!(value instanceof Date) || isNaN(value.getTime())) {
+      return { success: false, error: new ZodError([{ code: 'invalid_date', path, message: 'Invalid date' }]) };
+    }
+
+    for (const check of this.checks) {
+      switch (check.type) {
+        case 'min':
+          if (value.getTime() < check.value.getTime())
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Date too early' }]) };
+          break;
+        case 'max':
+          if (value.getTime() > check.value.getTime())
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || 'Date too late' }]) };
+          break;
+      }
+    }
+
+    return { success: true, data: value };
+  }
+
+  min(date: Date, message?: string): this { this.checks.push({ type: 'min', value: date, message }); return this; }
+  max(date: Date, message?: string): this { this.checks.push({ type: 'max', value: date, message }); return this; }
+}
+
+export class DhiSymbol extends DhiType<symbol, symbol> {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<symbol> {
+    if (typeof value !== 'symbol') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected symbol' }]) };
+    }
     return { success: true, data: value };
   }
 }
 
-// Primitives - INLINE
-export class BooleanSchema extends Schema<boolean> {
-  _validate(v: any): ValidationResult<boolean> {
-    return typeof v === 'boolean' ? { success: true, data: v } : ERRORS.invalid_type_boolean;
+export class DhiUndefined extends DhiType<undefined, undefined> {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<undefined> {
+    if (value !== undefined) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected undefined' }]) };
+    }
+    return { success: true, data: undefined };
   }
 }
 
-export class NullSchema extends Schema<null> {
-  _validate(v: any): ValidationResult<null> {
-    return v === null ? { success: true, data: null } : makeError('invalid_type', 'Expected null');
+export class DhiNull extends DhiType<null, null> {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<null> {
+    if (value !== null) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected null' }]) };
+    }
+    return { success: true, data: null };
   }
 }
 
-export class UndefinedSchema extends Schema<undefined> {
-  _validate(v: any): ValidationResult<undefined> {
-    return v === undefined ? { success: true, data: undefined } : makeError('invalid_type', 'Expected undefined');
+export class DhiVoid extends DhiType<void, void> {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<void> {
+    if (value !== undefined) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected void' }]) };
+    }
+    return { success: true, data: undefined };
   }
 }
 
-export class AnySchema extends Schema<any> {
-  _validate(v: any): ValidationResult<any> {
-    return { success: true, data: v };
+export class DhiNever extends DhiType<never, never> {
+  _parse(_value: unknown, path: (string | number)[]): SafeParseResult<never> {
+    return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected never' }]) };
   }
 }
 
-// Enum - Set lookup
-export class EnumSchema<T extends string> extends Schema<T> {
+export class DhiAny extends DhiType<any, any> {
+  _parse(value: unknown, _path: (string | number)[]): SafeParseResult<any> {
+    return { success: true, data: value };
+  }
+}
+
+export class DhiUnknown extends DhiType<unknown, unknown> {
+  _parse(value: unknown, _path: (string | number)[]): SafeParseResult<unknown> {
+    return { success: true, data: value };
+  }
+}
+
+export class DhiNaN extends DhiType<number, number> {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<number> {
+    if (typeof value !== 'number' || !Number.isNaN(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected NaN' }]) };
+    }
+    return { success: true, data: value };
+  }
+}
+
+// ============================================================================
+// Literal & Enum
+// ============================================================================
+
+export class DhiLiteral<T extends string | number | boolean | bigint | null | undefined> extends DhiType<T, T> {
+  constructor(private value: T) { super(); }
+
+  _parse(input: unknown, path: (string | number)[]): SafeParseResult<T> {
+    if (input !== this.value) {
+      return { success: false, error: new ZodError([{ code: 'invalid_literal', path, message: `Expected ${JSON.stringify(this.value)}, received ${JSON.stringify(input)}` }]) };
+    }
+    return { success: true, data: input as T };
+  }
+}
+
+export class DhiEnum<T extends readonly [string, ...string[]]> extends DhiType<T[number], T[number]> {
+  readonly options: T;
+  readonly enum: { [K in T[number]]: K };
   private _set: Set<string>;
-  
-  constructor(values: readonly T[]) {
+
+  constructor(values: T) {
     super();
+    this.options = values;
     this._set = new Set(values);
+    this.enum = {} as any;
+    for (const val of values) {
+      (this.enum as any)[val] = val;
+    }
   }
-  
-  _validate(v: any): ValidationResult<T> {
-    return this._set.has(v) ? { success: true, data: v } : ERRORS.invalid_enum;
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T[number]> {
+    if (typeof value !== 'string' || !this._set.has(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_enum_value', path, message: `Invalid enum value. Expected ${this.options.map(v => `'${v}'`).join(' | ')}, received '${value}'` }]) };
+    }
+    return { success: true, data: value as T[number] };
+  }
+
+  extract<U extends T[number]>(values: readonly U[]): DhiEnum<[U, ...U[]]> {
+    return new DhiEnum(values as any);
+  }
+
+  exclude<U extends T[number]>(values: readonly U[]): DhiEnum<[Exclude<T[number], U>]> {
+    const remaining = this.options.filter(v => !values.includes(v as any));
+    return new DhiEnum(remaining as any);
   }
 }
 
-// Array - optimized loop
-export class ArraySchema<T> extends Schema<T[]> {
-  private _min?: number;
-  private _max?: number;
-  
-  constructor(private element: Schema<T>) { super(); }
-  
-  min(l: number): this { this._min = l; return this; }
-  max(l: number): this { this._max = l; return this; }
-  
-  _validate(value: any): ValidationResult<T[]> {
-    if (!Array.isArray(value)) return ERRORS.invalid_type_array;
-    
-    const len = value.length;
-    if (this._min !== undefined && len < this._min) return makeError('too_small', 'Too few elements');
-    if (this._max !== undefined && len > this._max) return makeError('too_big', 'Too many elements');
-    
-    const result: T[] = [];
-    for (let i = 0; i < len; i++) {
-      const r = this.element._validate(value[i]);
-      if (!r.success) return r as any;
-      result.push(r.data);
+export class DhiNativeEnum<T extends Record<string, string | number>> extends DhiType<T[keyof T], T[keyof T]> {
+  private _values: Set<string | number>;
+
+  constructor(private enumObj: T) {
+    super();
+    this._values = new Set(Object.values(enumObj));
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T[keyof T]> {
+    if (!this._values.has(value as any)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_enum_value', path, message: 'Invalid enum value' }]) };
     }
-    
+    return { success: true, data: value as T[keyof T] };
+  }
+}
+
+// ============================================================================
+// Object Schema
+// ============================================================================
+
+export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiType<
+  { [K in RequiredKeys<T> & string]: T[K]["_output"] } & { [K in OptionalKeys<T> & string]?: T[K]["_output"] },
+  { [K in RequiredKeys<T> & string]: T[K]["_input"] } & { [K in OptionalKeys<T> & string]?: T[K]["_input"] }
+> {
+  readonly shape: T;
+  private _keys: string[];
+  private _unknownKeys: 'strip' | 'strict' | 'passthrough' = 'strip';
+  private _catchall?: DhiType<any, any>;
+  private _jit: ((value: any) => any) | null | undefined = undefined; // undefined = not compiled yet
+
+  constructor(shape: T) {
+    super();
+    this.shape = shape;
+    this._keys = Object.keys(shape);
+  }
+
+  private _compileJIT(): ((value: any) => any) | null {
+    if (this._unknownKeys !== 'strip') return null;
+
+    const keys = this._keys;
+    const shape = this.shape;
+    const closureVars: any[] = [];
+    const closureNames: string[] = [];
+    const bodyLines: string[] = [];
+
+    bodyLines.push('return function(v){');
+    bodyLines.push('if(typeof v!=="object"||v===null||Array.isArray(v))return null;');
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const ks = JSON.stringify(key);
+      const vi = `v${i}`;
+      bodyLines.push(`var ${vi}=v[${ks}];`);
+
+      const schema = shape[key];
+      const emitted = this._emitFieldCheck(vi, schema, closureVars, closureNames, i);
+      if (!emitted) return null; // Can't JIT this schema, fallback
+      bodyLines.push(emitted);
+    }
+
+    // Build result object
+    bodyLines.push('return{');
+    for (let i = 0; i < keys.length; i++) {
+      bodyLines.push(`${JSON.stringify(keys[i])}:v${i},`);
+    }
+    bodyLines.push('};};');
+
+    try {
+      const fn = new Function(...closureNames, bodyLines.join('\n'));
+      return fn(...closureVars);
+    } catch {
+      return null;
+    }
+  }
+
+  private _emitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], names: string[], idx: number): string | null {
+    // Unwrap optional/nullable
+    if (schema instanceof DhiOptional) {
+      const inner = (schema as any)._inner;
+      const innerCheck = this._emitFieldCheck(vi, inner, vars, names, idx);
+      if (!innerCheck) return null;
+      return `if(${vi}!==undefined){${innerCheck}}`;
+    }
+    if (schema instanceof DhiNullable) {
+      const inner = (schema as any)._inner;
+      const innerCheck = this._emitFieldCheck(vi, inner, vars, names, idx);
+      if (!innerCheck) return null;
+      return `if(${vi}!==null){${innerCheck}}`;
+    }
+
+    if (schema instanceof DhiString) {
+      const checks = (schema as any).checks;
+      let code = `if(typeof ${vi}!=="string")return null;`;
+      for (const check of checks) {
+        switch (check.type) {
+          case 'min': code += `if(${vi}.length<${check.value})return null;`; break;
+          case 'max': code += `if(${vi}.length>${check.value})return null;`; break;
+          case 'length': code += `if(${vi}.length!==${check.value})return null;`; break;
+          case 'nonempty': code += `if(${vi}.length===0)return null;`; break;
+          case 'email': {
+            const fname = `_e${idx}`;
+            names.push(fname);
+            vars.push(fastValidateEmail);
+            code += `if(!${fname}(${vi}))return null;`;
+            break;
+          }
+          case 'uuid': {
+            const fname = `_u${idx}`;
+            names.push(fname);
+            vars.push(fastValidateUuid);
+            code += `if(!${fname}(${vi}))return null;`;
+            break;
+          }
+          case 'url': {
+            const fname = `_url${idx}`;
+            names.push(fname);
+            vars.push((s: string) => wasmValidateString('validate_url_simd', s));
+            code += `if(!${fname}(${vi}))return null;`;
+            break;
+          }
+          case 'base64': {
+            const fname = `_b${idx}`;
+            names.push(fname);
+            vars.push(fastValidateBase64);
+            code += `if(!${fname}(${vi}))return null;`;
+            break;
+          }
+          case 'date': {
+            const fname = `_d${idx}`;
+            names.push(fname);
+            vars.push(fastValidateDate);
+            code += `if(!${fname}(${vi}))return null;`;
+            break;
+          }
+          case 'includes': code += `if(!${vi}.includes(${JSON.stringify(check.value)}))return null;`; break;
+          case 'startsWith': code += `if(!${vi}.startsWith(${JSON.stringify(check.value)}))return null;`; break;
+          case 'endsWith': code += `if(!${vi}.endsWith(${JSON.stringify(check.value)}))return null;`; break;
+          case 'trim': code += `${vi}=${vi}.trim();`; break;
+          case 'toLowerCase': code += `${vi}=${vi}.toLowerCase();`; break;
+          case 'toUpperCase': code += `${vi}=${vi}.toUpperCase();`; break;
+          case 'regex': {
+            const fname = `_rx${idx}`;
+            names.push(fname);
+            vars.push(check.value);
+            code += `if(!${fname}.test(${vi}))return null;`;
+            break;
+          }
+          default: return null; // Can't JIT this check
+        }
+      }
+      return code;
+    }
+
+    if (schema instanceof DhiNumber) {
+      const checks = (schema as any).checks;
+      let code = `if(typeof ${vi}!=="number"||${vi}!==${vi})return null;`;
+      for (const check of checks) {
+        switch (check.type) {
+          case 'min': code += `if(${vi}<${check.value})return null;`; break;
+          case 'max': code += `if(${vi}>${check.value})return null;`; break;
+          case 'gt': code += `if(${vi}<=${check.value})return null;`; break;
+          case 'gte': code += `if(${vi}<${check.value})return null;`; break;
+          case 'lt': code += `if(${vi}>=${check.value})return null;`; break;
+          case 'lte': code += `if(${vi}>${check.value})return null;`; break;
+          case 'int': code += `if(${vi}!==(${vi}|0)&&!Number.isInteger(${vi}))return null;`; break;
+          case 'positive': code += `if(${vi}<=0)return null;`; break;
+          case 'negative': code += `if(${vi}>=0)return null;`; break;
+          case 'nonnegative': code += `if(${vi}<0)return null;`; break;
+          case 'nonpositive': code += `if(${vi}>0)return null;`; break;
+          case 'finite': code += `if(!isFinite(${vi}))return null;`; break;
+          case 'multipleOf': code += `if(${vi}%${check.value}!==0)return null;`; break;
+          case 'safe': code += `if(${vi}<-9007199254740991||${vi}>9007199254740991)return null;`; break;
+          default: return null;
+        }
+      }
+      return code;
+    }
+
+    if (schema instanceof DhiBoolean) {
+      return `if(typeof ${vi}!=="boolean")return null;`;
+    }
+
+    if (schema instanceof DhiEnum) {
+      const fname = `_en${idx}`;
+      names.push(fname);
+      vars.push((schema as any)._set);
+      return `if(!${fname}.has(${vi}))return null;`;
+    }
+
+    if (schema instanceof DhiLiteral) {
+      const litVal = (schema as any).value;
+      return `if(${vi}!==${JSON.stringify(litVal)})return null;`;
+    }
+
+    if (schema instanceof DhiObject) {
+      // Recursively JIT nested objects
+      const fname = `_obj${idx}`;
+      names.push(fname);
+      // Ensure nested object has its JIT compiled
+      if ((schema as any)._jit === undefined) {
+        (schema as any)._jit = (schema as any)._compileJIT();
+      }
+      const nestedJit = (schema as any)._jit;
+      if (nestedJit) {
+        vars.push(nestedJit);
+        return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+      }
+      return null; // Can't JIT nested object
+    }
+
+    if (schema instanceof DhiArray) {
+      const elem = (schema as any).element;
+      const elemChecks = (schema as any).checks;
+      // Only JIT simple arrays (no length checks, primitive elements)
+      if (elemChecks.length === 0) {
+        if (elem instanceof DhiNumber && (elem as any).checks.length === 0) {
+          return `if(!Array.isArray(${vi}))return null;for(var _i${idx}=0;_i${idx}<${vi}.length;_i${idx}++){if(typeof ${vi}[_i${idx}]!=="number")return null;}`;
+        }
+        if (elem instanceof DhiString && (elem as any).checks.length === 0) {
+          return `if(!Array.isArray(${vi}))return null;for(var _i${idx}=0;_i${idx}<${vi}.length;_i${idx}++){if(typeof ${vi}[_i${idx}]!=="string")return null;}`;
+        }
+        if (elem instanceof DhiBoolean) {
+          return `if(!Array.isArray(${vi}))return null;for(var _i${idx}=0;_i${idx}<${vi}.length;_i${idx}++){if(typeof ${vi}[_i${idx}]!=="boolean")return null;}`;
+        }
+      }
+      return null; // Can't JIT complex arrays
+    }
+
+    return null; // Unknown schema type, can't JIT
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<any> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected object, received ' + (Array.isArray(value) ? 'array' : typeof value) }]) };
+    }
+
+    // Compile JIT on first use
+    if (this._jit === undefined) {
+      this._jit = this._compileJIT();
+    }
+
+    // Use JIT fast path if available
+    if (this._jit) {
+      const jitResult = this._jit(value);
+      if (jitResult !== null) {
+        return { success: true, data: jitResult };
+      }
+      // JIT returned null = validation failed, fall through to error path
+    } else {
+      // No JIT available, try generic fast path
+      const obj = value as Record<string, unknown>;
+      const keys = this._keys;
+      const shape = this.shape;
+      const numKeys = keys.length;
+      const result: Record<string, any> = {};
+      let hasError = false;
+
+      for (let ki = 0; ki < numKeys; ki++) {
+        const key = keys[ki];
+        const fieldResult = shape[key]._parse(obj[key], EMPTY_PATH);
+        if (!fieldResult.success) {
+          hasError = true;
+          break;
+        }
+        result[key] = fieldResult.data;
+      }
+
+      if (!hasError && this._unknownKeys === 'strip') {
+        return { success: true, data: result };
+      }
+      if (!hasError) {
+        // Handle strict/passthrough
+        const issues: ZodIssue[] = [];
+        if (this._unknownKeys === 'strict') {
+          const obj2 = value as Record<string, unknown>;
+          const objKeys = Object.keys(obj2);
+          for (let i = 0; i < objKeys.length; i++) {
+            if (!keys.includes(objKeys[i])) {
+              issues.push({ code: 'unrecognized_keys', path, message: `Unrecognized key(s) in object: '${objKeys[i]}'` });
+            }
+          }
+        } else if (this._unknownKeys === 'passthrough') {
+          const obj2 = value as Record<string, unknown>;
+          const objKeys = Object.keys(obj2);
+          for (let i = 0; i < objKeys.length; i++) {
+            const key = objKeys[i];
+            if (!keys.includes(key)) {
+              result[key] = obj2[key];
+            }
+          }
+        }
+        if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+        return { success: true, data: result };
+      }
+    }
+
+    // Slow error path: redo with proper paths for error reporting
+    const obj = value as Record<string, unknown>;
+    const keys = this._keys;
+    const shape = this.shape;
+    const issues: ZodIssue[] = [];
+    for (let ki = 0; ki < keys.length; ki++) {
+      const key = keys[ki];
+      const fieldResult = shape[key]._parse(obj[key], [...path, key]);
+      if (!fieldResult.success) {
+        issues.push(...fieldResult.error.issues);
+      }
+    }
+    return { success: false, error: new ZodError(issues) };
+  }
+
+  strict(message?: string): DhiObject<T> {
+    const clone = this._clone();
+    clone._unknownKeys = 'strict';
+    return clone;
+  }
+
+  passthrough(): DhiObject<T> {
+    const clone = this._clone();
+    clone._unknownKeys = 'passthrough';
+    return clone;
+  }
+
+  loose(): DhiObject<T> {
+    return this.passthrough();
+  }
+
+  strip(): DhiObject<T> {
+    const clone = this._clone();
+    clone._unknownKeys = 'strip';
+    return clone;
+  }
+
+  catchall<C extends DhiType<any, any>>(schema: C): DhiObject<T> {
+    const clone = this._clone();
+    clone._catchall = schema;
+    clone._unknownKeys = 'passthrough';
+    return clone;
+  }
+
+  extend<U extends Record<string, DhiType<any, any>>>(shape: U): DhiObject<T & U> {
+    return new DhiObject({ ...this.shape, ...shape }) as any;
+  }
+
+  merge<U extends DhiObject<any>>(other: U): DhiObject<T & U["shape"]> {
+    return new DhiObject({ ...this.shape, ...other.shape }) as any;
+  }
+
+  pick<K extends keyof T>(keys: { [P in K]: true }): DhiObject<Pick<T, K>> {
+    const picked: any = {};
+    for (const key of Object.keys(keys)) {
+      if (key in this.shape) picked[key] = this.shape[key];
+    }
+    return new DhiObject(picked);
+  }
+
+  omit<K extends keyof T>(keys: { [P in K]: true }): DhiObject<Omit<T, K>> {
+    const omitted: any = {};
+    for (const key of this._keys) {
+      if (!(key in keys)) omitted[key] = this.shape[key];
+    }
+    return new DhiObject(omitted);
+  }
+
+  partial(): DhiObject<{ [K in keyof T]: DhiOptional<T[K]> }> {
+    const partialShape: any = {};
+    for (const key of this._keys) {
+      partialShape[key] = this.shape[key].optional();
+    }
+    return new DhiObject(partialShape);
+  }
+
+  deepPartial(): DhiObject<any> {
+    const partialShape: any = {};
+    for (const key of this._keys) {
+      const field = this.shape[key];
+      if (field instanceof DhiObject) {
+        partialShape[key] = field.deepPartial().optional();
+      } else {
+        partialShape[key] = field.optional();
+      }
+    }
+    return new DhiObject(partialShape);
+  }
+
+  required(): DhiObject<{ [K in keyof T]: T[K] extends DhiOptional<infer U> ? U : T[K] }> {
+    const requiredShape: any = {};
+    for (const key of this._keys) {
+      const field = this.shape[key];
+      requiredShape[key] = field instanceof DhiOptional ? (field as any)._inner : field;
+    }
+    return new DhiObject(requiredShape);
+  }
+
+  keyof(): DhiEnum<[string, ...string[]]> {
+    return new DhiEnum(this._keys as [string, ...string[]]);
+  }
+
+  private _clone(): DhiObject<T> {
+    const clone = new DhiObject(this.shape);
+    clone._unknownKeys = this._unknownKeys;
+    clone._catchall = this._catchall;
+    return clone;
+  }
+}
+
+// ============================================================================
+// Array Schema
+// ============================================================================
+
+export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][], T["_input"][]> {
+  private checks: Array<{ type: string; value?: number; message?: string }> = [];
+
+  constructor(private element: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"][]> {
+    if (!Array.isArray(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected array, received ' + typeof value }]) };
+    }
+
+    const len = value.length;
+
+    for (const check of this.checks) {
+      if (check.type === 'min' && len < check.value!)
+        return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Array must contain at least ${check.value} element(s)` }]) };
+      if (check.type === 'max' && len > check.value!)
+        return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Array must contain at most ${check.value} element(s)` }]) };
+      if (check.type === 'length' && len !== check.value!)
+        return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Array must contain exactly ${check.value} element(s)` }]) };
+      if (check.type === 'nonempty' && len === 0)
+        return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Array must contain at least 1 element(s)' }]) };
+    }
+
+    // Fast path: for primitive type schemas, validate inline without allocations
+    const elem = this.element;
+    if (elem instanceof DhiNumber && (elem as any).checks.length === 0) {
+      for (let i = 0; i < len; i++) {
+        if (typeof value[i] !== 'number') {
+          return { success: false, error: new ZodError([{ code: 'invalid_type', path: [...path, i], message: 'Expected number, received ' + typeof value[i] }]) };
+        }
+      }
+      return { success: true, data: value as any };
+    }
+    if (elem instanceof DhiString && (elem as any).checks.length === 0) {
+      for (let i = 0; i < len; i++) {
+        if (typeof value[i] !== 'string') {
+          return { success: false, error: new ZodError([{ code: 'invalid_type', path: [...path, i], message: 'Expected string, received ' + typeof value[i] }]) };
+        }
+      }
+      return { success: true, data: value as any };
+    }
+    if (elem instanceof DhiBoolean) {
+      for (let i = 0; i < len; i++) {
+        if (typeof value[i] !== 'boolean') {
+          return { success: false, error: new ZodError([{ code: 'invalid_type', path: [...path, i], message: 'Expected boolean, received ' + typeof value[i] }]) };
+        }
+      }
+      return { success: true, data: value as any };
+    }
+
+    // General path: full validation with path tracking
+    // Use a reusable child path to avoid spreading on every iteration
+    const childPath = path.concat(0 as any);
+    const lastIdx = childPath.length - 1;
+    const result: T["_output"][] = new Array(len);
+    const issues: ZodIssue[] = [];
+
+    for (let i = 0; i < len; i++) {
+      childPath[lastIdx] = i;
+      const r = elem._parse(value[i], childPath);
+      if (!r.success) {
+        // Create a fresh path copy for the error (since childPath is reused)
+        for (const issue of r.error.issues) {
+          issues.push({ ...issue, path: [...issue.path] });
+        }
+      } else {
+        result[i] = r.data;
+      }
+    }
+
+    if (issues.length > 0) {
+      return { success: false, error: new ZodError(issues) };
+    }
+
+    return { success: true, data: result };
+  }
+
+  min(length: number, message?: string): this { this.checks.push({ type: 'min', value: length, message }); return this; }
+  max(length: number, message?: string): this { this.checks.push({ type: 'max', value: length, message }); return this; }
+  length(length: number, message?: string): this { this.checks.push({ type: 'length', value: length, message }); return this; }
+  nonempty(message?: string): this { this.checks.push({ type: 'nonempty', message }); return this; }
+
+  // Zod 4 aliases
+  minSize(length: number, message?: string): this { return this.min(length, message); }
+  maxSize(length: number, message?: string): this { return this.max(length, message); }
+  size(length: number, message?: string): this { return this.length(length, message); }
+}
+
+// ============================================================================
+// Tuple Schema
+// ============================================================================
+
+type TupleOutput<T extends DhiType<any, any>[]> = { [K in keyof T]: T[K]["_output"] };
+type TupleInput<T extends DhiType<any, any>[]> = { [K in keyof T]: T[K]["_input"] };
+
+export class DhiTuple<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> extends DhiType<TupleOutput<T>, TupleInput<T>> {
+  private _rest?: DhiType<any, any>;
+
+  constructor(private items: T) { super(); }
+
+  rest<R extends DhiType<any, any>>(schema: R): DhiTuple<T> {
+    const clone = new DhiTuple(this.items);
+    clone._rest = schema;
+    return clone as any;
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<TupleOutput<T>> {
+    if (!Array.isArray(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected array (tuple)' }]) };
+    }
+
+    if (!this._rest && value.length !== this.items.length) {
+      return { success: false, error: new ZodError([{ code: 'too_small', path, message: `Expected ${this.items.length} items, got ${value.length}` }]) };
+    }
+
+    if (value.length < this.items.length) {
+      return { success: false, error: new ZodError([{ code: 'too_small', path, message: `Expected at least ${this.items.length} items` }]) };
+    }
+
+    const result: any[] = [];
+    const issues: ZodIssue[] = [];
+
+    for (let i = 0; i < this.items.length; i++) {
+      const r = this.items[i]._parse(value[i], [...path, i]);
+      if (!r.success) issues.push(...r.error.issues);
+      else result.push(r.data);
+    }
+
+    if (this._rest) {
+      for (let i = this.items.length; i < value.length; i++) {
+        const r = this._rest._parse(value[i], [...path, i]);
+        if (!r.success) issues.push(...r.error.issues);
+        else result.push(r.data);
+      }
+    }
+
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result as TupleOutput<T> };
+  }
+}
+
+// ============================================================================
+// Record Schema
+// ============================================================================
+
+export class DhiRecord<K extends DhiType<string, string>, V extends DhiType<any, any>> extends DhiType<Record<K["_output"], V["_output"]>, Record<K["_input"], V["_input"]>> {
+  constructor(private keySchema: K, private valueSchema: V) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Record<K["_output"], V["_output"]>> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected object' }]) };
+    }
+
+    const result: Record<string, any> = {};
+    const issues: ZodIssue[] = [];
+
+    for (const [key, val] of Object.entries(value)) {
+      const keyResult = this.keySchema._parse(key, [...path, key]);
+      if (!keyResult.success) {
+        issues.push(...keyResult.error.issues);
+        continue;
+      }
+
+      const valResult = this.valueSchema._parse(val, [...path, key]);
+      if (!valResult.success) {
+        issues.push(...valResult.error.issues);
+      } else {
+        result[keyResult.data] = valResult.data;
+      }
+    }
+
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
     return { success: true, data: result };
   }
 }
 
-// Object - MAXIMUM OPTIMIZATION
-export class ObjectSchema<T extends Record<string, any>> extends Schema<T> {
-  private _keys: string[];
-  private _schemas: Schema<any>[];
-  private _len: number;
-  private _strict = false;
-  private _passthrough = false;
-  
-  constructor(shape: { [K in keyof T]: Schema<T[K]> }) {
+// ============================================================================
+// Map & Set
+// ============================================================================
+
+export class DhiMap<K extends DhiType<any, any>, V extends DhiType<any, any>> extends DhiType<Map<K["_output"], V["_output"]>, Map<K["_input"], V["_input"]>> {
+  constructor(private keySchema: K, private valueSchema: V) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Map<K["_output"], V["_output"]>> {
+    if (!(value instanceof Map)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Map' }]) };
+    }
+
+    const result = new Map<K["_output"], V["_output"]>();
+    const issues: ZodIssue[] = [];
+
+    for (const [k, v] of value.entries()) {
+      const keyR = this.keySchema._parse(k, [...path, 'key']);
+      const valR = this.valueSchema._parse(v, [...path, 'value']);
+      if (!keyR.success) issues.push(...keyR.error.issues);
+      if (!valR.success) issues.push(...valR.error.issues);
+      if (keyR.success && valR.success) result.set(keyR.data, valR.data);
+    }
+
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result };
+  }
+}
+
+export class DhiSet<T extends DhiType<any, any>> extends DhiType<Set<T["_output"]>, Set<T["_input"]>> {
+  private checks: Array<{ type: string; value?: number; message?: string }> = [];
+
+  constructor(private valueSchema: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Set<T["_output"]>> {
+    if (!(value instanceof Set)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Set' }]) };
+    }
+
+    for (const check of this.checks) {
+      if (check.type === 'min' && value.size < check.value!) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Set must have at least ${check.value} elements` }]) };
+      if (check.type === 'max' && value.size > check.value!) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Set must have at most ${check.value} elements` }]) };
+      if (check.type === 'size' && value.size !== check.value!) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Set must have exactly ${check.value} elements` }]) };
+      if (check.type === 'nonempty' && value.size === 0) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Set must not be empty' }]) };
+    }
+
+    const result = new Set<T["_output"]>();
+    const issues: ZodIssue[] = [];
+
+    for (const item of value) {
+      const r = this.valueSchema._parse(item, path);
+      if (!r.success) issues.push(...r.error.issues);
+      else result.add(r.data);
+    }
+
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result };
+  }
+
+  min(size: number, message?: string): this { this.checks.push({ type: 'min', value: size, message }); return this; }
+  max(size: number, message?: string): this { this.checks.push({ type: 'max', value: size, message }); return this; }
+  size(size: number, message?: string): this { this.checks.push({ type: 'size', value: size, message }); return this; }
+  nonempty(message?: string): this { this.checks.push({ type: 'nonempty', message }); return this; }
+}
+
+// ============================================================================
+// Union & Discriminated Union & Intersection
+// ============================================================================
+
+type UnionOutput<T extends DhiType<any, any>[]> = T[number]["_output"];
+type UnionInput<T extends DhiType<any, any>[]> = T[number]["_input"];
+
+export class DhiUnion<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> extends DhiType<UnionOutput<T>, UnionInput<T>> {
+  constructor(private options: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<UnionOutput<T>> {
+    const issues: ZodIssue[] = [];
+    for (const option of this.options) {
+      const result = option._parse(value, path);
+      if (result.success) return result;
+      issues.push(...result.error.issues);
+    }
+    return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input' }]) };
+  }
+}
+
+export class DhiDiscriminatedUnion<
+  Discriminator extends string,
+  Options extends [DhiObject<any>, ...DhiObject<any>[]]
+> extends DhiType<Options[number]["_output"], Options[number]["_input"]> {
+  private _optionsMap: Map<any, DhiObject<any>>;
+
+  constructor(private discriminator: Discriminator, private options: Options) {
     super();
-    const entries = Object.entries(shape);
-    this._keys = entries.map(([k]) => k);
-    this._schemas = entries.map(([, v]) => v as Schema<any>);
-    this._len = this._keys.length;
-  }
-  
-  strict(): this {
-    this._strict = true;
-    this._passthrough = false;
-    return this;
-  }
-  
-  passthrough(): this {
-    this._passthrough = true;
-    this._strict = false;
-    return this;
-  }
-  
-  _validate(value: any): ValidationResult<T> {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return ERRORS.invalid_type_object;
-    }
-    
-    // Check for unknown keys if strict mode
-    if (this._strict) {
-      const valueKeys = Object.keys(value);
-      for (const k of valueKeys) {
-        if (!this._keys.includes(k)) {
-          return { success: false, error: { issues: [{ path: [], message: `Unknown key: ${k}`, code: 'unrecognized_keys' }] } };
-        }
+    this._optionsMap = new Map();
+    for (const option of options) {
+      const schema = option.shape[discriminator];
+      if (schema instanceof DhiLiteral) {
+        this._optionsMap.set((schema as any).value, option);
       }
     }
-    
-    const result: any = {};
-    
-    // Unrolled loop for common cases
-    if (this._len === 1) {
-      const k = this._keys[0];
-      const r = this._schemas[0]._validate(value[k]);
-      if (!r.success) return r;
-      result[k] = r.data;
-    } else if (this._len === 2) {
-      const k0 = this._keys[0];
-      const r0 = this._schemas[0]._validate(value[k0]);
-      if (!r0.success) return r0;
-      result[k0] = r0.data;
-      
-      const k1 = this._keys[1];
-      const r1 = this._schemas[1]._validate(value[k1]);
-      if (!r1.success) return r1;
-      result[k1] = r1.data;
-    } else {
-      // General case
-      for (let i = 0; i < this._len; i++) {
-        const k = this._keys[i];
-        const r = this._schemas[i]._validate(value[k]);
-        if (!r.success) return r;
-        result[k] = r.data;
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Options[number]["_output"]> {
+    if (typeof value !== 'object' || value === null) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected object' }]) };
+    }
+
+    const discriminatorValue = (value as any)[this.discriminator];
+    const option = this._optionsMap.get(discriminatorValue);
+
+    if (!option) {
+      return { success: false, error: new ZodError([{ code: 'invalid_union_discriminator', path: [...path, this.discriminator], message: `Invalid discriminator value` }]) };
+    }
+
+    return option._parse(value, path);
+  }
+}
+
+export class DhiIntersection<L extends DhiType<any, any>, R extends DhiType<any, any>> extends DhiType<L["_output"] & R["_output"], L["_input"] & R["_input"]> {
+  constructor(private left: L, private right: R) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<L["_output"] & R["_output"]> {
+    const leftResult = this.left._parse(value, path);
+    if (!leftResult.success) return leftResult as any;
+
+    const rightResult = this.right._parse(value, path);
+    if (!rightResult.success) return rightResult as any;
+
+    // Merge results
+    if (typeof leftResult.data === 'object' && typeof rightResult.data === 'object') {
+      return { success: true, data: { ...leftResult.data, ...rightResult.data } };
+    }
+
+    return { success: true, data: leftResult.data };
+  }
+}
+
+// ============================================================================
+// Lazy (recursive schemas)
+// ============================================================================
+
+export class DhiLazy<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"]> {
+  constructor(private getter: () => T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    return this.getter()._parse(value, path);
+  }
+}
+
+// ============================================================================
+// Promise Schema
+// ============================================================================
+
+export class DhiPromise<T extends DhiType<any, any>> extends DhiType<Promise<T["_output"]>, Promise<T["_input"]>> {
+  constructor(private schema: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Promise<T["_output"]>> {
+    if (!(value instanceof Promise)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Promise' }]) };
+    }
+    // We can't validate the resolved value synchronously
+    const validated = value.then(v => this.schema.parse(v));
+    return { success: true, data: validated };
+  }
+}
+
+// ============================================================================
+// Function Schema
+// ============================================================================
+
+export class DhiFunction<
+  Args extends DhiTuple<any> | DhiType<any, any>,
+  Returns extends DhiType<any, any>
+> extends DhiType<(...args: any[]) => any, (...args: any[]) => any> {
+  private _args?: Args;
+  private _returns?: Returns;
+
+  args<A extends DhiTuple<any>>(schema: A): DhiFunction<A, Returns> {
+    const fn = new DhiFunction<A, Returns>();
+    (fn as any)._args = schema;
+    (fn as any)._returns = this._returns;
+    return fn;
+  }
+
+  returns<R extends DhiType<any, any>>(schema: R): DhiFunction<Args, R> {
+    const fn = new DhiFunction<Args, R>();
+    (fn as any)._args = this._args;
+    (fn as any)._returns = schema;
+    return fn;
+  }
+
+  implement(fn: (...args: any[]) => any): (...args: any[]) => any {
+    return (...args: any[]) => {
+      if (this._args) this._args.parse(args);
+      const result = fn(...args);
+      if (this._returns) return this._returns.parse(result);
+      return result;
+    };
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<any> {
+    if (typeof value !== 'function') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected function' }]) };
+    }
+    return { success: true, data: value };
+  }
+}
+
+// ============================================================================
+// instanceof
+// ============================================================================
+
+export class DhiInstanceOf<T extends abstract new (...args: any[]) => any> extends DhiType<InstanceType<T>, InstanceType<T>> {
+  constructor(private cls: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<InstanceType<T>> {
+    if (!(value instanceof this.cls)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: `Expected instance of ${this.cls.name}` }]) };
+    }
+    return { success: true, data: value as InstanceType<T> };
+  }
+}
+
+// ============================================================================
+// Modifiers: Optional, Nullable, Default, Catch, Transform, Refine, Pipe, Readonly
+// ============================================================================
+
+export class DhiOptional<T extends DhiType<any, any>> extends DhiType<T["_output"] | undefined, T["_input"] | undefined> {
+  constructor(private _inner: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"] | undefined> {
+    if (value === undefined) return { success: true, data: undefined };
+    return this._inner._parse(value, path);
+  }
+
+  unwrap(): T { return this._inner; }
+  isOptional() { return true; }
+}
+
+export class DhiNullable<T extends DhiType<any, any>> extends DhiType<T["_output"] | null, T["_input"] | null> {
+  constructor(private _inner: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"] | null> {
+    if (value === null) return { success: true, data: null };
+    return this._inner._parse(value, path);
+  }
+
+  unwrap(): T { return this._inner; }
+  isNullable() { return true; }
+}
+
+export class DhiDefault<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"] | undefined> {
+  constructor(private _inner: T, private _default: T["_output"] | (() => T["_output"])) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    if (value === undefined) {
+      const def = typeof this._default === 'function' ? (this._default as Function)() : this._default;
+      return { success: true, data: def };
+    }
+    return this._inner._parse(value, path);
+  }
+
+  removeDefault(): T { return this._inner; }
+}
+
+export class DhiCatch<T extends DhiType<any, any>> extends DhiType<T["_output"], unknown> {
+  constructor(private _inner: T, private _catch: T["_output"] | (() => T["_output"])) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const result = this._inner._parse(value, path);
+    if (result.success) return result;
+    const catchVal = typeof this._catch === 'function' ? (this._catch as Function)() : this._catch;
+    return { success: true, data: catchVal };
+  }
+
+  removeCatch(): T { return this._inner; }
+}
+
+export class DhiTransform<T extends DhiType<any, any>, U> extends DhiType<U, T["_input"]> {
+  constructor(private _inner: T, private _transform: (value: T["_output"]) => U) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<U> {
+    const result = this._inner._parse(value, path);
+    if (!result.success) return result as any;
+    try {
+      return { success: true, data: this._transform(result.data) };
+    } catch (e: any) {
+      return { success: false, error: new ZodError([{ code: 'custom', path, message: e?.message || 'Transform failed' }]) };
+    }
+  }
+}
+
+export class DhiRefine<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"]> {
+  constructor(private _inner: T, private _check: (value: T["_output"]) => boolean, private _message?: string, private _path?: (string | number)[]) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const result = this._inner._parse(value, path);
+    if (!result.success) return result;
+    if (!this._check(result.data)) {
+      return { success: false, error: new ZodError([{ code: 'custom', path: this._path ? [...path, ...this._path] : path, message: this._message || 'Invalid value' }]) };
+    }
+    return result;
+  }
+}
+
+export class DhiSuperRefine<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"]> {
+  constructor(private _inner: T, private _refinement: (value: T["_output"], ctx: { addIssue: (issue: Partial<ZodIssue>) => void }) => void) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const result = this._inner._parse(value, path);
+    if (!result.success) return result;
+
+    const issues: ZodIssue[] = [];
+    const ctx = {
+      addIssue: (issue: Partial<ZodIssue>) => {
+        issues.push({ code: issue.code || 'custom', path: issue.path || path, message: issue.message || 'Invalid' });
       }
+    };
+
+    this._refinement(result.data, ctx);
+
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return result;
+  }
+}
+
+export class DhiPipe<A extends DhiType<any, any>, B extends DhiType<any, any>> extends DhiType<B["_output"], A["_input"]> {
+  constructor(private _a: A, private _b: B) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<B["_output"]> {
+    const aResult = this._a._parse(value, path);
+    if (!aResult.success) return aResult as any;
+    return this._b._parse(aResult.data, path);
+  }
+}
+
+export class DhiReadonly<T extends DhiType<any, any>> extends DhiType<Readonly<T["_output"]>, T["_input"]> {
+  constructor(private _inner: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Readonly<T["_output"]>> {
+    const result = this._inner._parse(value, path);
+    if (!result.success) return result;
+    if (typeof result.data === 'object' && result.data !== null) {
+      return { success: true, data: Object.freeze(result.data) };
     }
-    
-    // Handle passthrough mode - include extra keys
-    if (this._passthrough) {
-      for (const k in value) {
-        if (!this._keys.includes(k)) {
-          result[k] = value[k];
-        }
-      }
+    return result as SafeParseResult<Readonly<T["_output"]>>;
+  }
+}
+
+// ============================================================================
+// Preprocess & Effects
+// ============================================================================
+
+export class DhiPreprocess<T extends DhiType<any, any>> extends DhiType<T["_output"], unknown> {
+  constructor(private _preprocess: (value: unknown) => unknown, private _schema: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const processed = this._preprocess(value);
+    return this._schema._parse(processed, path);
+  }
+}
+
+// ============================================================================
+// Coercion Schemas
+// ============================================================================
+
+class DhiCoercedString extends DhiString {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<string> {
+    return super._parse(String(value), path);
+  }
+}
+
+class DhiCoercedNumber extends DhiNumber {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<number> {
+    return super._parse(Number(value), path);
+  }
+}
+
+class DhiCoercedBoolean extends DhiBoolean {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<boolean> {
+    return super._parse(Boolean(value), path);
+  }
+}
+
+class DhiCoercedBigInt extends DhiBigInt {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<bigint> {
+    try {
+      return super._parse(BigInt(value as any), path);
+    } catch {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Cannot coerce to bigint' }]) };
     }
-    
-    return { success: true, data: result as T };
   }
 }
 
-// Modifiers
-export class OptionalSchema<T> extends Schema<T | undefined> {
-  constructor(private inner: Schema<T>) { super(); }
-  _validate(v: any): ValidationResult<T | undefined> {
-    return v === undefined ? { success: true, data: undefined } : this.inner._validate(v);
-  }
-}
-
-export class NullableSchema<T> extends Schema<T | null> {
-  constructor(private inner: Schema<T>) { super(); }
-  _validate(v: any): ValidationResult<T | null> {
-    return v === null ? { success: true, data: null } : this.inner._validate(v);
-  }
-}
-
-export class DefaultSchema<T> extends Schema<T> {
-  constructor(private inner: Schema<T>, private defaultValue: T) { super(); }
-  _validate(v: any): ValidationResult<T> {
-    return v === undefined ? { success: true, data: this.defaultValue } : this.inner._validate(v);
-  }
-}
-
-export class TransformSchema<T, U> extends Schema<U> {
-  constructor(private inner: Schema<T>, private transformer: (value: T) => U) { super(); }
-  _validate(v: any): ValidationResult<U> {
-    const r = this.inner._validate(v);
-    return r.success ? { success: true, data: this.transformer(r.data) } : r as any;
-  }
-}
-
-export class RefineSchema<T> extends Schema<T> {
-  constructor(private inner: Schema<T>, private check: (value: T) => boolean, private message?: string) { super(); }
-  _validate(v: any): ValidationResult<T> {
-    const r = this.inner._validate(v);
-    if (!r.success) return r;
-    return this.check(r.data) ? r : makeError('custom', this.message || 'Invalid value');
-  }
-}
-
-export class UnionSchema extends Schema<any> {
-  constructor(private options: Schema<any>[]) { super(); }
-  _validate(v: any): ValidationResult<any> {
-    for (let i = 0; i < this.options.length; i++) {
-      const r = this.options[i]._validate(v);
-      if (r.success) return r;
+class DhiCoercedDate extends DhiDate {
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Date> {
+    if (typeof value === 'string' || typeof value === 'number') {
+      return super._parse(new Date(value), path);
     }
-    return makeError('invalid_union', 'Invalid union');
+    return super._parse(value, path);
   }
 }
 
-// Factory
+// ============================================================================
+// StringBool (Zod 4 feature)
+// ============================================================================
+
+export class DhiStringBool extends DhiType<boolean, string> {
+  private _trueValues = new Set(['true', '1', 'yes', 'on']);
+  private _falseValues = new Set(['false', '0', 'no', 'off']);
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<boolean> {
+    if (typeof value !== 'string') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected string' }]) };
+    }
+    const lower = value.toLowerCase();
+    if (this._trueValues.has(lower)) return { success: true, data: true };
+    if (this._falseValues.has(lower)) return { success: true, data: false };
+    return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Invalid boolean string' }]) };
+  }
+}
+
+// ============================================================================
+// Custom Schema
+// ============================================================================
+
+export class DhiCustom<T> extends DhiType<T, unknown> {
+  constructor(private check: (value: unknown) => value is T, private params?: { message?: string }) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T> {
+    if (this.check(value)) return { success: true, data: value };
+    return { success: false, error: new ZodError([{ code: 'custom', path, message: this.params?.message || 'Invalid value' }]) };
+  }
+}
+
+// ============================================================================
+// Main Export: z namespace (Zod 4 compatible)
+// ============================================================================
+
 export const z = {
-  string: () => new StringSchema(),
-  number: () => new NumberSchema(),
-  boolean: () => new BooleanSchema(),
-  null: () => new NullSchema(),
-  undefined: () => new UndefinedSchema(),
-  any: () => new AnySchema(),
-  
-  array: <T>(element: Schema<T>) => new ArraySchema(element),
-  object: <T extends Record<string, any>>(shape: { [K in keyof T]: Schema<T[K]> }) => new ObjectSchema(shape),
-  enum: <T extends string>(values: readonly T[]) => new EnumSchema(values),
-  union: (options: Schema<any>[]) => new UnionSchema(options),
-  
-  optional: <T>(schema: Schema<T>) => new OptionalSchema(schema),
-  nullable: <T>(schema: Schema<T>) => new NullableSchema(schema),
-};
+  // Primitives
+  string: () => new DhiString(),
+  number: () => new DhiNumber(),
+  bigint: () => new DhiBigInt(),
+  boolean: () => new DhiBoolean(),
+  date: () => new DhiDate(),
+  symbol: () => new DhiSymbol(),
+  undefined: () => new DhiUndefined(),
+  null: () => new DhiNull(),
+  void: () => new DhiVoid(),
+  never: () => new DhiNever(),
+  any: () => new DhiAny(),
+  unknown: () => new DhiUnknown(),
+  nan: () => new DhiNaN(),
 
-export type infer<T extends Schema<any>> = T extends Schema<infer U> ? U : never;
+  // Literals & Enums
+  literal: <T extends string | number | boolean | bigint | null | undefined>(value: T) => new DhiLiteral(value),
+  enum: <T extends readonly [string, ...string[]]>(values: T) => new DhiEnum(values),
+  nativeEnum: <T extends Record<string, string | number>>(enumObj: T) => new DhiNativeEnum(enumObj),
+
+  // Composites
+  object: <T extends Record<string, DhiType<any, any>>>(shape: T) => new DhiObject(shape),
+  array: <T extends DhiType<any, any>>(schema: T) => new DhiArray(schema),
+  tuple: <T extends [DhiType<any, any>, ...DhiType<any, any>[]]>(items: T) => new DhiTuple(items),
+  record: <K extends DhiType<string, string>, V extends DhiType<any, any>>(keyOrValue: K | V, value?: V) => {
+    if (value) return new DhiRecord(keyOrValue as K, value);
+    return new DhiRecord(new DhiString() as any, keyOrValue as V);
+  },
+  map: <K extends DhiType<any, any>, V extends DhiType<any, any>>(keySchema: K, valueSchema: V) => new DhiMap(keySchema, valueSchema),
+  set: <T extends DhiType<any, any>>(schema: T) => new DhiSet(schema),
+
+  // Unions & Intersections
+  union: <T extends [DhiType<any, any>, ...DhiType<any, any>[]]>(options: T) => new DhiUnion(options),
+  discriminatedUnion: <D extends string, T extends [DhiObject<any>, ...DhiObject<any>[]]>(discriminator: D, options: T) => new DhiDiscriminatedUnion(discriminator, options),
+  intersection: <L extends DhiType<any, any>, R extends DhiType<any, any>>(left: L, right: R) => new DhiIntersection(left, right),
+
+  // Recursive & Advanced
+  lazy: <T extends DhiType<any, any>>(getter: () => T) => new DhiLazy(getter),
+  promise: <T extends DhiType<any, any>>(schema: T) => new DhiPromise(schema),
+  function: () => new DhiFunction(),
+  instanceof: <T extends abstract new (...args: any[]) => any>(cls: T) => new DhiInstanceOf(cls),
+
+  // Modifiers
+  optional: <T extends DhiType<any, any>>(schema: T) => new DhiOptional(schema),
+  nullable: <T extends DhiType<any, any>>(schema: T) => new DhiNullable(schema),
+
+  // Effects
+  preprocess: <T extends DhiType<any, any>>(preprocess: (value: unknown) => unknown, schema: T) => new DhiPreprocess(preprocess, schema),
+  custom: <T>(check: (value: unknown) => value is T, params?: { message?: string }) => new DhiCustom(check, params),
+
+  // Zod 4: stringbool
+  stringbool: () => new DhiStringBool(),
+
+  // Zod 4 top-level object helpers
+  looseObject: <T extends Record<string, DhiType<any, any>>>(shape: T) => new DhiObject(shape).loose(),
+  strictObject: <T extends Record<string, DhiType<any, any>>>(shape: T) => new DhiObject(shape).strict(),
+
+  // Pipe: chain schemas (validate A then validate/transform B)
+  pipe: <A extends DhiType<any, any>, B extends DhiType<any, any>>(a: A, b: B) => new DhiPipe(a, b),
+
+  // Coercion
+  coerce: {
+    string: () => new DhiCoercedString(),
+    number: () => new DhiCoercedNumber(),
+    boolean: () => new DhiCoercedBoolean(),
+    bigint: () => new DhiCoercedBigInt(),
+    date: () => new DhiCoercedDate(),
+  },
+
+  // Type utilities (these are type-level only, no runtime impact)
+  infer: undefined as any,
+  input: undefined as any,
+  output: undefined as any,
+
+  // Error class
+  ZodError,
+} as const;
+
+// Type-level utilities
+export namespace z {
+  export type infer<T extends DhiType<any, any>> = T["_output"];
+  export type input<T extends DhiType<any, any>> = T["_input"];
+  export type output<T extends DhiType<any, any>> = T["_output"];
+}
+
+// Also export as `d` for dhi-native usage
+export const d = z;
+export namespace d {
+  export type infer<T extends DhiType<any, any>> = T["_output"];
+  export type input<T extends DhiType<any, any>> = T["_input"];
+  export type output<T extends DhiType<any, any>> = T["_output"];
+}
+
+// Re-export types for compatibility
+export type { DhiType as ZodType };
+export type { DhiString as ZodString };
+export type { DhiNumber as ZodNumber };
+export type { DhiBigInt as ZodBigInt };
+export type { DhiBoolean as ZodBoolean };
+export type { DhiDate as ZodDate };
+export type { DhiUndefined as ZodUndefined };
+export type { DhiNull as ZodNull };
+export type { DhiVoid as ZodVoid };
+export type { DhiNever as ZodNever };
+export type { DhiAny as ZodAny };
+export type { DhiUnknown as ZodUnknown };
+export type { DhiArray as ZodArray };
+export type { DhiObject as ZodObject };
+export type { DhiUnion as ZodUnion };
+export type { DhiDiscriminatedUnion as ZodDiscriminatedUnion };
+export type { DhiIntersection as ZodIntersection };
+export type { DhiTuple as ZodTuple };
+export type { DhiRecord as ZodRecord };
+export type { DhiMap as ZodMap };
+export type { DhiSet as ZodSet };
+export type { DhiLazy as ZodLazy };
+export type { DhiLiteral as ZodLiteral };
+export type { DhiEnum as ZodEnum };
+export type { DhiNativeEnum as ZodNativeEnum };
+export type { DhiOptional as ZodOptional };
+export type { DhiNullable as ZodNullable };
+export type { DhiDefault as ZodDefault };
+export type { DhiTransform as ZodEffects };
+export type { DhiRefine as ZodRefine };
+export type { DhiPipe as ZodPipeline };
+export type { DhiPromise as ZodPromise };
+export type { DhiFunction as ZodFunction };
+
+// Default export
+export default z;
