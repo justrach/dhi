@@ -14,18 +14,18 @@
   <text x="400" y="55" fill="#334155" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
   <text x="170" y="85" fill="#f8fafc" font-size="13" text-anchor="end">Union</text>
   <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="655" y="74" fill="#10b981" font-size="11">68.8M/s</text>
-  <rect x="180" y="80" width="289.2618083522962" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="474.2618083522962" y="94" fill="#6366f1" font-size="11">42.4M/s</text>
+  <text x="655" y="74" fill="#10b981" font-size="11">37.5M/s</text>
+  <rect x="180" y="80" width="292.42139320292193" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="477.42139320292193" y="94" fill="#6366f1" font-size="11">23.3M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#f97316" rx="15"/>
   <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">1.6x</text>
   <text x="170" y="135" fill="#f8fafc" font-size="13" text-anchor="end">DiscriminatedUnion</text>
-  <rect x="180" y="110" width="362.44807101028664" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="547.4480710102866" y="124" fill="#10b981" font-size="11">53.1M/s</text>
-  <rect x="180" y="130" width="160.20307219407118" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="345.2030721940712" y="144" fill="#6366f1" font-size="11">23.5M/s</text>
+  <rect x="180" y="110" width="325.1658077966109" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="510.1658077966109" y="124" fill="#10b981" font-size="11">26.0M/s</text>
+  <rect x="180" y="130" width="159.98820626823036" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="344.98820626823033" y="144" fill="#6366f1" font-size="11">12.8M/s</text>
   <rect x="670" y="115" width="70" height="30" fill="#f97316" rx="15"/>
-  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.3x</text>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.0x</text>
   <rect x="660" y="170" width="15" height="15" fill="url(#dhiGrad)"/>
   <text x="680" y="182" fill="#f8fafc" font-size="12">dhi</text>
   <rect x="720" y="170" width="15" height="15" fill="url(#zodGrad)"/>
