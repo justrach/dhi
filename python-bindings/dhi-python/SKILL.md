@@ -1,8 +1,11 @@
 ---
 name: dhi-python
 description: Ultra-fast data validation library for Python (520x faster than Pydantic). Use when building validated data models, API request/response schemas, or configuration objects. Provides Pydantic v2-compatible BaseModel API with Zig-powered native validation.
-dependencies: dhi>=1.1.3
 license: MIT
+metadata:
+  dependencies: dhi>=1.1.3
+  pypi: https://pypi.org/project/dhi/
+  github: https://github.com/justrach/dhi
 ---
 
 # dhi - Ultra-Fast Python Validation

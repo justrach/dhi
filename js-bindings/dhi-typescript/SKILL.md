@@ -1,8 +1,11 @@
 ---
 name: dhi-typescript
 description: Ultra-fast validation library for TypeScript/JavaScript (77x faster than Zod). Use when building validated schemas for APIs, forms, or data processing. Provides Zod 4-compatible API with WASM-powered SIMD validation.
-dependencies: dhi
 license: MIT
+metadata:
+  dependencies: dhi
+  npm: https://www.npmjs.com/package/dhi
+  github: https://github.com/justrach/dhi
 ---
 
 # dhi - Ultra-Fast TypeScript Validation
