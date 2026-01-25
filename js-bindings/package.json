@@ -1,7 +1,7 @@
 {
   "name": "dhi",
-  "version": "0.5.0",
-  "description": "Ultra-fast validation library - 2.47B ops/sec with SIMD i32! Drop-in Zod replacement. Works with Next.js!",
+  "version": "0.6.0",
+  "description": "Ultra-fast Zod 4 drop-in replacement - SIMD-powered WASM validators, full TypeScript type inference, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -72,7 +72,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^20.19.19",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
     "typescript": "^5"

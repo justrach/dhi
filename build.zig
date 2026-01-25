@@ -63,6 +63,11 @@ pub fn build(b: *std.Build) void {
     wasm_lib.rdynamic = true;
     b.installArtifact(wasm_lib);
 
+    // Create model module (Pydantic-style API)
+    const model_mod = b.addModule("model", .{
+        .root_source_file = b.path("src/model.zig"),
+    });
+
     // Export module for use as a dependency
     const satya_module = b.addModule("satya", .{
         .root_source_file = b.path("src/root.zig"),
@@ -122,11 +127,27 @@ pub fn build(b: *std.Build) void {
     const advanced_step = b.step("run-advanced", "Run advanced validation example");
     advanced_step.dependOn(&run_advanced.step);
 
+    // Example: model_example (Pydantic-style API)
+    const model_example = b.addExecutable(.{
+        .name = "model_example",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/model_example.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    model_example.root_module.addImport("model", model_mod);
+
+    const run_model = b.addRunArtifact(model_example);
+    const model_step = b.step("run-model", "Run Pydantic-style model example");
+    model_step.dependOn(&run_model.step);
+
     // Run all examples
     const run_all = b.step("run-all", "Run all examples");
     run_all.dependOn(&run_basic.step);
     run_all.dependOn(&run_json.step);
     run_all.dependOn(&run_advanced.step);
+    run_all.dependOn(&run_model.step);
 
     // Tests for validator module
     const validator_tests = b.addTest(.{
@@ -163,11 +184,23 @@ pub fn build(b: *std.Build) void {
 
     const run_json_validator_tests = b.addRunArtifact(json_validator_tests);
 
+    // Tests for model module (Pydantic-style API)
+    const model_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/model.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_model_tests = b.addRunArtifact(model_tests);
+
     // Test step runs all tests
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_validator_tests.step);
     test_step.dependOn(&run_combinators_tests.step);
     test_step.dependOn(&run_json_validator_tests.step);
+    test_step.dependOn(&run_model_tests.step);
 
     // Benchmark executable
     const benchmark = b.addExecutable(.{
