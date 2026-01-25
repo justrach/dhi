@@ -84,7 +84,7 @@ const user = try User.parse(.{
 ### TypeScript (vs Zod 4)
 
 <p align="center">
-  <img src="docs/benchmarks/speedup-all.svg" alt="dhi vs Zod Performance" width="800"/>
+  <img src="docs/benchmarks/speedup-all.png" alt="dhi vs Zod Performance" width="800"/>
 </p>
 
 | Category | Speedup vs Zod 4 |

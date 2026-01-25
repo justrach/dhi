@@ -17,11 +17,11 @@ That's it. Same API. Same types. Full Zod 4 compatibility. Just faster.
 ## Benchmarks
 
 <p align="center">
-  <img src="../docs/benchmarks/speedup-all.svg" alt="dhi vs Zod Performance" width="800"/>
+  <img src="../docs/benchmarks/speedup-all.png" alt="dhi vs Zod Performance" width="800"/>
 </p>
 
 <p align="center">
-  <img src="../docs/benchmarks/top-10.svg" alt="Top 10 Performance Gains" width="800"/>
+  <img src="../docs/benchmarks/top-10.png" alt="Top 10 Performance Gains" width="800"/>
 </p>
 
 ### Performance Summary

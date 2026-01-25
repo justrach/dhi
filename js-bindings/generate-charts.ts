@@ -1,8 +1,9 @@
 /**
- * Generate SVG benchmark charts from JSON results
- * Uses simple SVG without style attributes for GitHub compatibility
+ * Generate PNG benchmark charts from JSON results
+ * Uses node-canvas for GitHub-compatible PNG output
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { createCanvas } from 'canvas';
 
 interface BenchmarkResult {
   name: string;
@@ -32,7 +33,7 @@ if (!existsSync('charts')) {
   mkdirSync('charts');
 }
 
-// Color palette (light theme for GitHub compatibility)
+// Color palette (light theme)
 const colors = {
   dhi: '#059669',      // Emerald 600
   zod: '#4f46e5',      // Indigo 600
@@ -58,15 +59,26 @@ function generateBarChart(results: BenchmarkResult[], title: string, filename: s
   const padding = { top: 60, right: 150, bottom: 40, left: 180 };
   const height = padding.top + padding.bottom + results.length * (barHeight + 10);
 
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = colors.bg;
+  ctx.fillRect(0, 0, width, height);
+
+  // Title
+  ctx.fillStyle = colors.text;
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, width / 2, 35);
+
+  // Subtitle
+  ctx.fillStyle = colors.grid;
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Operations per second (higher is better)', width / 2, 55);
+
   const maxOps = Math.max(...results.flatMap(r => [r.dhi, r.zod]));
   const scale = (width - padding.left - padding.right) / maxOps;
-
-  // Simple SVG without style attributes for GitHub compatibility
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-  <rect width="${width}" height="${height}" fill="${colors.bg}"/>
-  <text x="${width/2}" y="35" fill="${colors.text}" font-size="20" font-weight="bold" text-anchor="middle" font-family="sans-serif">${title}</text>
-  <text x="${width/2}" y="55" fill="${colors.grid}" font-size="12" text-anchor="middle" font-family="sans-serif">Operations per second (higher is better)</text>
-`;
 
   results.forEach((r, i) => {
     const y = padding.top + i * (barHeight + 10);
@@ -74,49 +86,80 @@ function generateBarChart(results: BenchmarkResult[], title: string, filename: s
     const zodWidth = Math.round(r.zod * scale);
 
     // Label
-    svg += `  <text x="${padding.left - 10}" y="${y + barHeight/2 + 5}" fill="${colors.text}" font-size="13" text-anchor="end" font-family="sans-serif">${r.name}</text>\n`;
+    ctx.fillStyle = colors.text;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(r.name, padding.left - 10, y + barHeight / 2 + 5);
 
-    // dhi bar (solid color instead of gradient)
-    svg += `  <rect x="${padding.left}" y="${y}" width="${dhiWidth}" height="${barHeight/2 - 2}" fill="${colors.dhi}" rx="3"/>\n`;
-    svg += `  <text x="${padding.left + dhiWidth + 5}" y="${y + barHeight/4 + 4}" fill="${colors.dhi}" font-size="11" font-family="sans-serif">${(r.dhi / 1e6).toFixed(1)}M/s</text>\n`;
+    // dhi bar
+    ctx.fillStyle = colors.dhi;
+    roundRect(ctx, padding.left, y, dhiWidth, barHeight / 2 - 2, 3);
+    ctx.fillStyle = colors.dhi;
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${(r.dhi / 1e6).toFixed(1)}M/s`, padding.left + dhiWidth + 5, y + barHeight / 4 + 4);
 
-    // Zod bar (solid color instead of gradient)
-    svg += `  <rect x="${padding.left}" y="${y + barHeight/2}" width="${zodWidth}" height="${barHeight/2 - 2}" fill="${colors.zod}" rx="3"/>\n`;
-    svg += `  <text x="${padding.left + zodWidth + 5}" y="${y + barHeight*3/4 + 4}" fill="${colors.zod}" font-size="11" font-family="sans-serif">${(r.zod / 1e6).toFixed(1)}M/s</text>\n`;
+    // Zod bar
+    ctx.fillStyle = colors.zod;
+    roundRect(ctx, padding.left, y + barHeight / 2, zodWidth, barHeight / 2 - 2, 3);
+    ctx.fillStyle = colors.zod;
+    ctx.fillText(`${(r.zod / 1e6).toFixed(1)}M/s`, padding.left + zodWidth + 5, y + barHeight * 3 / 4 + 4);
 
     // Speedup badge
     const speedupColor = r.speedup >= 10 ? '#22c55e' : r.speedup >= 5 ? '#eab308' : '#f97316';
-    svg += `  <rect x="${width - 130}" y="${y + 5}" width="70" height="30" fill="${speedupColor}" rx="15"/>\n`;
-    svg += `  <text x="${width - 95}" y="${y + 25}" fill="white" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">${r.speedup.toFixed(1)}x</text>\n`;
+    ctx.fillStyle = speedupColor;
+    roundRect(ctx, width - 130, y + 5, 70, 30, 15);
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${r.speedup.toFixed(1)}x`, width - 95, y + 25);
   });
 
   // Legend
-  svg += `  <rect x="${width - 140}" y="${height - 30}" width="15" height="15" fill="${colors.dhi}"/>\n`;
-  svg += `  <text x="${width - 120}" y="${height - 18}" fill="${colors.text}" font-size="12" font-family="sans-serif">dhi</text>\n`;
-  svg += `  <rect x="${width - 80}" y="${height - 30}" width="15" height="15" fill="${colors.zod}"/>\n`;
-  svg += `  <text x="${width - 60}" y="${height - 18}" fill="${colors.text}" font-size="12" font-family="sans-serif">Zod</text>\n`;
+  ctx.fillStyle = colors.dhi;
+  ctx.fillRect(width - 140, height - 30, 15, 15);
+  ctx.fillStyle = colors.text;
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('dhi', width - 120, height - 18);
 
-  svg += '</svg>';
+  ctx.fillStyle = colors.zod;
+  ctx.fillRect(width - 80, height - 30, 15, 15);
+  ctx.fillStyle = colors.text;
+  ctx.fillText('Zod', width - 60, height - 18);
 
-  writeFileSync(`charts/${filename}`, svg);
+  // Save as PNG
+  const buffer = canvas.toBuffer('image/png');
+  writeFileSync(`charts/${filename}`, buffer);
   console.log(`Generated: charts/${filename}`);
 }
 
 function generateSpeedupChart(results: BenchmarkResult[], filename: string) {
   const width = 800;
   const barHeight = 35;
-  const padding = { top: 60, right: 100, bottom: 40, left: 180 };
+  const padding = { top: 60, right: 120, bottom: 40, left: 180 };
   const height = padding.top + padding.bottom + results.length * (barHeight + 8);
+
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = colors.bg;
+  ctx.fillRect(0, 0, width, height);
+
+  // Title
+  ctx.fillStyle = colors.text;
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('dhi vs Zod 4 — Performance Comparison', width / 2, 35);
+
+  // Subtitle
+  ctx.fillStyle = colors.grid;
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Speedup factor (higher is better)', width / 2, 55);
 
   const maxSpeedup = Math.max(...results.map(r => r.speedup));
   const scale = (width - padding.left - padding.right) / maxSpeedup;
-
-  // Simple SVG without style attributes for GitHub compatibility
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-  <rect width="${width}" height="${height}" fill="${colors.bg}"/>
-  <text x="${width/2}" y="35" fill="${colors.text}" font-size="20" font-weight="bold" text-anchor="middle" font-family="sans-serif">dhi vs Zod 4 — Performance Comparison</text>
-  <text x="${width/2}" y="55" fill="${colors.grid}" font-size="12" text-anchor="middle" font-family="sans-serif">Speedup factor (higher is better)</text>
-`;
 
   // Sort by speedup
   const sorted = [...results].sort((a, b) => b.speedup - a.speedup);
@@ -126,24 +169,42 @@ function generateSpeedupChart(results: BenchmarkResult[], filename: string) {
     const barWidth = Math.round(r.speedup * scale);
 
     // Label
-    svg += `  <text x="${padding.left - 10}" y="${y + barHeight/2 + 5}" fill="${colors.text}" font-size="13" text-anchor="end" font-family="sans-serif">${r.name}</text>\n`;
+    ctx.fillStyle = colors.text;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(r.name, padding.left - 10, y + barHeight / 2 + 5);
 
-    // Bar with hex color based on speedup
+    // Bar with color based on speedup
     const barColor = getSpeedupColor(r.speedup, maxSpeedup);
-    svg += `  <rect x="${padding.left}" y="${y}" width="${barWidth}" height="${barHeight - 4}" fill="${barColor}" rx="4"/>\n`;
+    ctx.fillStyle = barColor;
+    roundRect(ctx, padding.left, y, barWidth, barHeight - 4, 4);
 
     // Speedup label
-    svg += `  <text x="${padding.left + barWidth + 8}" y="${y + barHeight/2 + 5}" fill="${colors.text}" font-size="13" font-weight="bold" font-family="sans-serif">${r.speedup.toFixed(1)}x faster</text>\n`;
+    ctx.fillStyle = colors.text;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${r.speedup.toFixed(1)}x faster`, padding.left + barWidth + 8, y + barHeight / 2 + 5);
   });
 
   // Average line
   const avgX = Math.round(padding.left + data.summary.averageSpeedup * scale);
-  svg += `  <line x1="${avgX}" y1="${padding.top - 10}" x2="${avgX}" y2="${height - padding.bottom + 10}" stroke="${colors.accent}" stroke-width="2" stroke-dasharray="5,5"/>\n`;
-  svg += `  <text x="${avgX}" y="${padding.top - 15}" fill="${colors.accent}" font-size="11" text-anchor="middle" font-family="sans-serif">Avg: ${data.summary.averageSpeedup.toFixed(1)}x</text>\n`;
+  ctx.strokeStyle = colors.accent;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(avgX, padding.top - 10);
+  ctx.lineTo(avgX, height - padding.bottom + 10);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
-  svg += '</svg>';
+  ctx.fillStyle = colors.accent;
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`Avg: ${data.summary.averageSpeedup.toFixed(1)}x`, avgX, padding.top - 15);
 
-  writeFileSync(`charts/${filename}`, svg);
+  // Save as PNG
+  const buffer = canvas.toBuffer('image/png');
+  writeFileSync(`charts/${filename}`, buffer);
   console.log(`Generated: charts/${filename}`);
 }
 
@@ -152,17 +213,67 @@ function generateSummaryBadge() {
   const width = 180;
   const height = 50;
 
-  // Simple badge without gradients for GitHub compatibility
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-  <rect width="${width}" height="${height}" rx="8" fill="#1e293b"/>
-  <rect x="2" y="2" width="${width-4}" height="${height-4}" rx="6" fill="none" stroke="#10b981" stroke-width="2"/>
-  <text x="${width/2}" y="22" fill="#94a3b8" font-size="11" font-family="sans-serif" text-anchor="middle">avg speedup vs Zod</text>
-  <text x="${width/2}" y="40" fill="#10b981" font-size="18" font-weight="bold" font-family="sans-serif" text-anchor="middle">${avgSpeedup.toFixed(1)}x faster</text>
-</svg>`;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
 
-  writeFileSync('charts/badge.svg', svg);
-  console.log('Generated: charts/badge.svg');
+  // Background
+  ctx.fillStyle = '#1e293b';
+  roundRect(ctx, 0, 0, width, height, 8);
+
+  // Border
+  ctx.strokeStyle = '#10b981';
+  ctx.lineWidth = 2;
+  roundRectStroke(ctx, 2, 2, width - 4, height - 4, 6);
+
+  // Text
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('avg speedup vs Zod', width / 2, 22);
+
+  ctx.fillStyle = '#10b981';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText(`${avgSpeedup.toFixed(1)}x faster`, width / 2, 40);
+
+  // Save as PNG
+  const buffer = canvas.toBuffer('image/png');
+  writeFileSync('charts/badge.png', buffer);
+  console.log('Generated: charts/badge.png');
 }
+
+// Helper function to draw rounded rectangles
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function roundRectStroke(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.stroke();
+}
+
+// Type for canvas context
+type CanvasRenderingContext2D = ReturnType<ReturnType<typeof createCanvas>['getContext']>;
 
 // Group results by category
 const categories = new Map<string, BenchmarkResult[]>();
@@ -172,17 +283,17 @@ data.results.forEach(r => {
 });
 
 // Generate charts
-generateSpeedupChart(data.results, 'speedup-all.svg');
+generateSpeedupChart(data.results, 'speedup-all.png');
 generateSummaryBadge();
 
 categories.forEach((results, category) => {
-  const filename = `benchmark-${category.toLowerCase().replace(/\s+/g, '-')}.svg`;
+  const filename = `benchmark-${category.toLowerCase().replace(/\s+/g, '-')}.png`;
   generateBarChart(results, `${category} Benchmarks`, filename);
 });
 
 // Generate combined chart with top performers
 const topPerformers = [...data.results].sort((a, b) => b.speedup - a.speedup).slice(0, 10);
-generateBarChart(topPerformers, 'Top 10 Performance Gains', 'top-10.svg');
+generateBarChart(topPerformers, 'Top 10 Performance Gains', 'top-10.png');
 
 console.log('\nSummary:');
 console.log(`  Total benchmarks: ${data.summary.totalBenchmarks}`);

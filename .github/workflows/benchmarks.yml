@@ -53,7 +53,7 @@ jobs:
 
           # Copy charts to docs folder
           mkdir -p docs/benchmarks
-          cp js-bindings/charts/*.svg docs/benchmarks/
+          cp js-bindings/charts/*.png docs/benchmarks/
           cp js-bindings/benchmark-results.json docs/benchmarks/
 
           # Check if there are changes
