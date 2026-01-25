@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" style="font-family: system-ui, sans-serif;">
+  <defs>
+    <linearGradient id="dhiGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#34d399;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="zodGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#818cf8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="200" fill="#0f172a"/>
+  <text x="400" y="35" fill="#f8fafc" font-size="20" font-weight="bold" text-anchor="middle">Unions Benchmarks</text>
+  <text x="400" y="55" fill="#334155" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
+  <text x="170" y="85" fill="#f8fafc" font-size="13" text-anchor="end">Union</text>
+  <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="655" y="74" fill="#10b981" font-size="11">68.8M/s</text>
+  <rect x="180" y="80" width="289.2618083522962" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="474.2618083522962" y="94" fill="#6366f1" font-size="11">42.4M/s</text>
+  <rect x="670" y="65" width="70" height="30" fill="#f97316" rx="15"/>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">1.6x</text>
+  <text x="170" y="135" fill="#f8fafc" font-size="13" text-anchor="end">DiscriminatedUnion</text>
+  <rect x="180" y="110" width="362.44807101028664" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="547.4480710102866" y="124" fill="#10b981" font-size="11">53.1M/s</text>
+  <rect x="180" y="130" width="160.20307219407118" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="345.2030721940712" y="144" fill="#6366f1" font-size="11">23.5M/s</text>
+  <rect x="670" y="115" width="70" height="30" fill="#f97316" rx="15"/>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.3x</text>
+  <rect x="660" y="170" width="15" height="15" fill="url(#dhiGrad)"/>
+  <text x="680" y="182" fill="#f8fafc" font-size="12">dhi</text>
+  <rect x="720" y="170" width="15" height="15" fill="url(#zodGrad)"/>
+  <text x="740" y="182" fill="#f8fafc" font-size="12">Zod</text>
+</svg>

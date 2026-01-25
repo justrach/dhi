@@ -1,7 +1,7 @@
 {
   "name": "dhi",
-  "version": "0.6.0",
-  "description": "Ultra-fast Zod 4 drop-in replacement - SIMD-powered WASM validators, full TypeScript type inference, 28KB binary",
+  "version": "1.1.4",
+  "description": "Ultra-fast Zod 4 drop-in replacement - 20x faster average, full API parity, SIMD WASM, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

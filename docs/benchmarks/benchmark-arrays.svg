@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 150" style="font-family: system-ui, sans-serif;">
+  <defs>
+    <linearGradient id="dhiGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#34d399;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="zodGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#818cf8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="150" fill="#0f172a"/>
+  <text x="400" y="35" fill="#f8fafc" font-size="20" font-weight="bold" text-anchor="middle">Arrays Benchmarks</text>
+  <text x="400" y="55" fill="#334155" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
+  <text x="170" y="85" fill="#f8fafc" font-size="13" text-anchor="end">Array<number></text>
+  <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="655" y="74" fill="#10b981" font-size="11">68.9M/s</text>
+  <rect x="180" y="80" width="53.938692436968275" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="238.93869243696827" y="94" fill="#6366f1" font-size="11">7.9M/s</text>
+  <rect x="670" y="65" width="70" height="30" fill="#eab308" rx="15"/>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">8.7x</text>
+  <rect x="660" y="120" width="15" height="15" fill="url(#dhiGrad)"/>
+  <text x="680" y="132" fill="#f8fafc" font-size="12">dhi</text>
+  <rect x="720" y="120" width="15" height="15" fill="url(#zodGrad)"/>
+  <text x="740" y="132" fill="#f8fafc" font-size="12">Zod</text>
+</svg>
