@@ -1,6 +1,6 @@
 # dhi
 
-**136x faster than Pydantic. 78x faster than Zod. Same API.**
+**136x faster than Pydantic. 20x faster than Zod. Same API.**
 
 One validation core. Three ecosystems. Zero compromise.
 
@@ -9,8 +9,8 @@ One validation core. Three ecosystems. Zero compromise.
 [![MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ```
-Python:     27,300,000 validations/sec
-TypeScript: 78x faster than Zod 4
+Python:     27,300,000 validations/sec (136x faster than Pydantic)
+TypeScript: 20x faster than Zod 4 (avg), up to 50x on number formats
 Zig:        Zero-cost. Comptime. No runtime.
 ```
 
@@ -42,12 +42,14 @@ user.model_dump()   # {'name': 'Alice', 'email': 'alice@example.com', 'age': 28}
 
 ```typescript
 const User = z.object({
+  id: z.string().uuid(),
   name: z.string().min(1).max(100),
-  email: z.string().email(),
-  age: z.number().int().positive().lte(150),
+  email: z.email(),              // Zod 4 top-level shortcuts
+  age: z.int().positive(),       // Zod 4 number formats
+  createdAt: z.iso.datetime(),   // Zod 4 ISO namespace
 });
 
-const user = User.parse(data); // same API, 78x faster
+const user = User.parse(data); // same API, 20x faster
 ```
 
 ### Zig — compile-time validated, zero overhead
@@ -75,6 +77,24 @@ const user = try User.parse(.{
 
 ## The Numbers
 
+### TypeScript (vs Zod 4)
+
+<p align="center">
+  <img src="docs/benchmarks/speedup-all.svg" alt="dhi vs Zod Performance" width="800"/>
+</p>
+
+| Category | Speedup vs Zod 4 |
+|----------|------------------|
+| Number Formats | **30-50x faster** |
+| StringBool | **32x faster** |
+| Coercion | **23-56x faster** |
+| String Formats | **12-27x faster** |
+| ISO Formats | **12-22x faster** |
+| Objects | **4-7x faster** |
+| Arrays | **8x faster** |
+
+> Benchmarks auto-generated via CI. See [raw data](docs/benchmarks/benchmark-results.json).
+
 ### Python
 
 | Library | Throughput | vs dhi |
@@ -86,20 +106,6 @@ const user = try User.parse(.{
 
 BaseModel layer: 546K model_validate/sec | 6.4M model_dump/sec
 
-### TypeScript
-
-| Scenario | dhi vs Zod 4 |
-|----------|-------------|
-| Email (invalid) | **78x faster** |
-| Number constraints | **49x faster** |
-| Coercion | **40x faster** |
-| Invalid objects | **15x faster** |
-| Arrays | **9x faster** |
-| Nested objects | **7x faster** |
-| Transforms | **5x faster** |
-
-32 of 33 benchmarks faster. Full Zod 4 API parity.
-
 ---
 
 ## Install
@@ -110,6 +116,44 @@ npm install dhi          # TypeScript (Node 18+ / Bun / Deno)
 ```
 
 Pure Python fallback included — no native extension required to get started.
+
+---
+
+## Full Zod 4 Feature Parity
+
+dhi implements **100% of the Zod 4 API**, including all new Zod 4 features:
+
+### Top-Level String Format Shortcuts (New in Zod 4)
+
+```typescript
+z.email()      z.uuid()       z.url()        z.ipv4()       z.ipv6()
+z.jwt()        z.nanoid()     z.ulid()       z.cuid()       z.cuid2()
+z.base64()     z.e164()       z.mac()        z.cidrv4()     z.cidrv6()
+z.hex()        z.hostname()   z.hash('sha256')
+```
+
+### ISO Namespace & Number Formats (New in Zod 4)
+
+```typescript
+// ISO namespace
+z.iso.datetime()  z.iso.date()  z.iso.time()  z.iso.duration()
+
+// Number formats
+z.int()     z.float()    z.float32()   z.float64()
+z.int8()    z.uint8()    z.int16()     z.uint16()
+z.int32()   z.uint32()   z.int64()     z.uint64()
+```
+
+### Additional Zod 4 Features
+
+```typescript
+z.stringbool()                           // "true"/"yes"/"1" → true
+z.templateLiteral(['user-', z.number()]) // Template literal types
+z.json()                                 // Recursive JSON schema
+z.file().mime('image/png').max(5_000_000) // File validation
+z.registry()                             // Schema registry
+z.prettifyError(error)                   // Pretty error formatting
+```
 
 ---
 
@@ -189,7 +233,7 @@ The hypothesis: Zig's `comptime` can generate the same validation semantics that
 |-------|--------|
 | Pydantic-level DX in Zig | `Model("User", .{ .name = Str(.{}) })` — yes |
 | One core, three ecosystems | Python FFI + WASM + native Zig — yes |
-| 10-100x faster | 136x (Python), 78x (TypeScript) — yes |
+| 10-100x faster | 136x (Python), 20x avg (TypeScript) — yes |
 | Reasonable binary size | 28KB WASM, ~200KB native — yes |
 | Comptime replaces reflection | No runtime type inspection needed — yes |
 
