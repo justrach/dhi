@@ -73,7 +73,8 @@
     "@types/bun": "latest",
     "@types/node": "^20.19.19",
     "typescript": "^5.9.3",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.1"
   },
   "peerDependencies": {
     "typescript": "^5"
