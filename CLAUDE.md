@@ -89,6 +89,35 @@ TypeScript → dhi.wasm (Zig→WASM) → SIMD validators
 - Full Zod 4 API compatibility
 - 28KB bundle, works in browsers + edge runtimes
 
+### JSON Schema Generation (TypeScript)
+dhi has **built-in** JSON Schema generation - no external library needed!
+
+```typescript
+import { z } from 'dhi';
+
+const UserSchema = z.object({
+  name: z.string().min(1).describe("User's name"),
+  age: z.number().int().positive(),
+  email: z.string().email(),
+  role: z.enum(["admin", "user", "guest"]),
+});
+
+// Generate JSON Schema
+const jsonSchema = UserSchema.toJsonSchema();
+// or: UserSchema.json()
+
+// Use for OpenAI function calling, tool definitions, etc.
+const tool = {
+  name: "create_user",
+  description: "Create a new user",
+  parameters: UserSchema.json(),
+};
+```
+
+**Comparison with Zod:**
+- dhi: Built-in `.toJsonSchema()` / `.json()`
+- Zod: Requires `zod-to-json-schema` library (~50KB extra dep)
+
 ## Testing
 
 ```bash
