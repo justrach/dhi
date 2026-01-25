@@ -1,0 +1,17 @@
+{
+  "name": "hono-dhi-example",
+  "version": "1.0.0",
+  "description": "Hono API server with dhi validation",
+  "scripts": {
+    "dev": "bun run --watch server.ts",
+    "start": "bun run server.ts",
+    "test": "bun run test.ts"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "dhi": "^1.1.16"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
