@@ -2,5 +2,5 @@
   <rect width="180" height="50" rx="8" fill="#1e293b"/>
   <rect x="2" y="2" width="176" height="46" rx="6" fill="none" stroke="#10b981" stroke-width="2"/>
   <text x="90" y="22" fill="#94a3b8" font-size="11" font-family="sans-serif" text-anchor="middle">avg speedup vs Zod</text>
-  <text x="90" y="40" fill="#10b981" font-size="18" font-weight="bold" font-family="sans-serif" text-anchor="middle">20.8x faster</text>
+  <text x="90" y="40" fill="#10b981" font-size="18" font-weight="bold" font-family="sans-serif" text-anchor="middle">29.7x faster</text>
 </svg>

@@ -4,11 +4,11 @@
   <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle" font-family="sans-serif">Operations per second (higher is better)</text>
   <text x="170" y="85" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Array<number></text>
   <rect x="180" y="60" width="470" height="18" fill="#059669" rx="3"/>
-  <text x="655" y="74" fill="#059669" font-size="11" font-family="sans-serif">71.4M/s</text>
-  <rect x="180" y="80" width="58" height="18" fill="#4f46e5" rx="3"/>
-  <text x="243" y="94" fill="#4f46e5" font-size="11" font-family="sans-serif">8.8M/s</text>
+  <text x="655" y="74" fill="#059669" font-size="11" font-family="sans-serif">33.1M/s</text>
+  <rect x="180" y="80" width="54" height="18" fill="#4f46e5" rx="3"/>
+  <text x="239" y="94" fill="#4f46e5" font-size="11" font-family="sans-serif">3.8M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#eab308" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">8.1x</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">8.7x</text>
   <rect x="660" y="120" width="15" height="15" fill="#059669"/>
   <text x="680" y="132" fill="#1f2937" font-size="12" font-family="sans-serif">dhi</text>
   <rect x="720" y="120" width="15" height="15" fill="#4f46e5"/>
