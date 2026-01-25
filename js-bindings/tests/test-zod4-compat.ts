@@ -2,7 +2,7 @@
  * Comprehensive test: dhi as Zod 4 drop-in replacement
  * Tests SIMD-powered validators + full type inference + Zod API parity
  */
-import { z, ZodError } from './schema';
+import { z, ZodError } from '../schema';
 
 let passed = 0;
 let failed = 0;

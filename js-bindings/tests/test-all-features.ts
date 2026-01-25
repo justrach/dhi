@@ -3,7 +3,7 @@
  * Tests all Zod-compatible features
  */
 
-import { z, infer as zodInfer } from "./schema";
+import { z, infer as zodInfer } from "../schema";
 
 console.log("🧪 Testing All Features");
 console.log("=".repeat(80));

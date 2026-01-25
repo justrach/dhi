@@ -102,7 +102,7 @@ jobs:
             // Before
             import { z } from 'zod';
             // After
-            import { z } from 'dhi/schema';
+            import { z } from 'dhi';
             // That's it — same API, faster runtime
             ```
           draft: false

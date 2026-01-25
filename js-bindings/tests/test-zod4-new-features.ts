@@ -2,7 +2,7 @@
  * Tests for new Zod 4 features added to dhi
  */
 
-import { z } from './schema.ts';
+import { z } from '../schema.ts';
 
 let passed = 0;
 let failed = 0;
