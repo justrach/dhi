@@ -654,6 +654,15 @@ class BaseModel(metaclass=_ModelMeta):
 
         Matches Pydantic's model_validate() classmethod.
         """
+        # Fast path: bypass __init__, call C directly with dict
+        compiled = cls.__dhi_compiled_specs__
+        if compiled is not None and not cls.__dhi_has_custom_validators__:
+            obj = object.__new__(cls)
+            result = _dhi_native.init_model_compiled(obj, data, compiled)
+            if result is None:
+                return obj
+            errors = [ValidationError(f, m) for f, m in result]
+            raise ValidationErrors(errors)
         return cls(**data)
 
     def model_dump(self, *, exclude: Optional[Set[str]] = None, include: Optional[Set[str]] = None) -> Dict[str, Any]:
