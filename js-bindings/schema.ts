@@ -404,6 +404,25 @@ export abstract class DhiType<Output = any, Input = Output> {
     Object.assign(clone, this);
     return clone;
   }
+
+  // JSON Schema generation - override in subclasses
+  toJsonSchema(): Record<string, any> {
+    const schema: Record<string, any> = this._toJsonSchemaCore();
+    if (this._description) {
+      schema.description = this._description;
+    }
+    return schema;
+  }
+
+  // Alias for toJsonSchema (for compatibility)
+  json(): Record<string, any> {
+    return this.toJsonSchema();
+  }
+
+  // Override in subclasses to provide type-specific schema
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return {};
+  }
 }
 
 // ============================================================================
@@ -637,6 +656,28 @@ export class DhiString extends DhiType<string, string> {
   // Zod 4 aliases
   minLength(length: number, message?: string): this { return this.min(length, message); }
   maxLength(length: number, message?: string): this { return this.max(length, message); }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    const schema: Record<string, any> = { type: 'string' };
+    for (const check of this.checks) {
+      switch (check.type) {
+        case 'min': schema.minLength = check.value; break;
+        case 'max': schema.maxLength = check.value; break;
+        case 'length': schema.minLength = schema.maxLength = check.value; break;
+        case 'email': schema.format = 'email'; break;
+        case 'url': schema.format = 'uri'; break;
+        case 'uuid': schema.format = 'uuid'; break;
+        case 'datetime': schema.format = 'date-time'; break;
+        case 'date': schema.format = 'date'; break;
+        case 'time': schema.format = 'time'; break;
+        case 'duration': schema.format = 'duration'; break;
+        case 'ipv4': schema.format = 'ipv4'; break;
+        case 'ipv6': schema.format = 'ipv6'; break;
+        case 'regex': schema.pattern = check.value.source; break;
+      }
+    }
+    return schema;
+  }
 }
 
 export class DhiNumber extends DhiType<number, number> {
@@ -727,6 +768,27 @@ export class DhiNumber extends DhiType<number, number> {
   // Zod 4 aliases
   minimum(value: number, message?: string): this { return this.gte(value, message); }
   maximum(value: number, message?: string): this { return this.lte(value, message); }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    let isInt = false;
+    const schema: Record<string, any> = { type: 'number' };
+    for (const check of this.checks) {
+      switch (check.type) {
+        case 'int': case 'safe': isInt = true; break;
+        case 'min': case 'gte': schema.minimum = check.value; break;
+        case 'max': case 'lte': schema.maximum = check.value; break;
+        case 'gt': schema.exclusiveMinimum = check.value; break;
+        case 'lt': schema.exclusiveMaximum = check.value; break;
+        case 'positive': schema.exclusiveMinimum = 0; break;
+        case 'negative': schema.exclusiveMaximum = 0; break;
+        case 'nonnegative': schema.minimum = 0; break;
+        case 'nonpositive': schema.maximum = 0; break;
+        case 'multipleOf': case 'step': schema.multipleOf = check.value; break;
+      }
+    }
+    if (isInt) schema.type = 'integer';
+    return schema;
+  }
 }
 
 export class DhiBigInt extends DhiType<bigint, bigint> {
@@ -794,6 +856,10 @@ export class DhiBoolean extends DhiType<boolean, boolean> {
     }
     return { success: true, data: value };
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { type: 'boolean' };
+  }
 }
 
 export class DhiDate extends DhiType<Date, Date> {
@@ -822,6 +888,10 @@ export class DhiDate extends DhiType<Date, Date> {
 
   min(date: Date, message?: string): this { this.checks.push({ type: 'min', value: date, message }); return this; }
   max(date: Date, message?: string): this { this.checks.push({ type: 'max', value: date, message }); return this; }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { type: 'string', format: 'date-time' };
+  }
 }
 
 export class DhiSymbol extends DhiType<symbol, symbol> {
@@ -849,6 +919,10 @@ export class DhiNull extends DhiType<null, null> {
     }
     return { success: true, data: null };
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { type: 'null' };
+  }
 }
 
 export class DhiVoid extends DhiType<void, void> {
@@ -870,11 +944,19 @@ export class DhiAny extends DhiType<any, any> {
   _parse(value: unknown, _path: (string | number)[]): SafeParseResult<any> {
     return { success: true, data: value };
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return {}; // Empty schema accepts anything
+  }
 }
 
 export class DhiUnknown extends DhiType<unknown, unknown> {
   _parse(value: unknown, _path: (string | number)[]): SafeParseResult<unknown> {
     return { success: true, data: value };
+  }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return {}; // Empty schema accepts anything
   }
 }
 
@@ -914,6 +996,13 @@ export class DhiLiteral<T extends string | number | boolean | bigint | null | un
     }
     return { success: true, data: input as T };
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    if (this._values.length === 1) {
+      return { const: this._values[0] };
+    }
+    return { enum: this._values };
+  }
 }
 
 export class DhiEnum<T extends readonly [string, ...string[]]> extends DhiType<T[number], T[number]> {
@@ -946,6 +1035,10 @@ export class DhiEnum<T extends readonly [string, ...string[]]> extends DhiType<T
     const remaining = this.options.filter(v => !values.includes(v as any));
     return new DhiEnum(remaining as any);
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { type: 'string', enum: [...this.options] };
+  }
 }
 
 export class DhiNativeEnum<T extends Record<string, string | number>> extends DhiType<T[keyof T], T[keyof T]> {
@@ -961,6 +1054,10 @@ export class DhiNativeEnum<T extends Record<string, string | number>> extends Dh
       return { success: false, error: new ZodError([{ code: 'invalid_enum_value', path, message: 'Invalid enum value' }]) };
     }
     return { success: true, data: value as T[keyof T] };
+  }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { enum: [...this._values] };
   }
 }
 
@@ -1367,6 +1464,37 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     clone._catchall = this._catchall;
     return clone;
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    const properties: Record<string, any> = {};
+    const required: string[] = [];
+
+    for (const key of this._keys) {
+      const fieldSchema = this.shape[key];
+      properties[key] = fieldSchema.toJsonSchema();
+      // Check if field is optional
+      if (!fieldSchema.isOptional()) {
+        required.push(key);
+      }
+    }
+
+    const schema: Record<string, any> = {
+      type: 'object',
+      properties,
+    };
+
+    if (required.length > 0) {
+      schema.required = required;
+    }
+
+    if (this._unknownKeys === 'strict') {
+      schema.additionalProperties = false;
+    } else if (this._catchall) {
+      schema.additionalProperties = this._catchall.toJsonSchema();
+    }
+
+    return schema;
+  }
 }
 
 // ============================================================================
@@ -1459,6 +1587,21 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
   minSize(length: number, message?: string): this { return this.min(length, message); }
   maxSize(length: number, message?: string): this { return this.max(length, message); }
   size(length: number, message?: string): this { return this.length(length, message); }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    const schema: Record<string, any> = {
+      type: 'array',
+      items: this.element.toJsonSchema(),
+    };
+    for (const check of this.checks) {
+      switch (check.type) {
+        case 'min': case 'nonempty': schema.minItems = check.value ?? 1; break;
+        case 'max': schema.maxItems = check.value; break;
+        case 'length': schema.minItems = schema.maxItems = check.value; break;
+      }
+    }
+    return schema;
+  }
 }
 
 // ============================================================================
@@ -1632,6 +1775,10 @@ export class DhiUnion<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
     }
     return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input' }]) };
   }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { anyOf: this.options.map(opt => opt.toJsonSchema()) };
+  }
 }
 
 export class DhiDiscriminatedUnion<
@@ -1786,6 +1933,10 @@ export class DhiOptional<T extends DhiType<any, any>> extends DhiType<T["_output
 
   unwrap(): T { return this._inner; }
   isOptional() { return true; }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return this._inner.toJsonSchema();
+  }
 }
 
 export class DhiNullable<T extends DhiType<any, any>> extends DhiType<T["_output"] | null, T["_input"] | null> {
@@ -1798,6 +1949,11 @@ export class DhiNullable<T extends DhiType<any, any>> extends DhiType<T["_output
 
   unwrap(): T { return this._inner; }
   isNullable() { return true; }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    const inner = this._inner.toJsonSchema();
+    return { anyOf: [inner, { type: 'null' }] };
+  }
 }
 
 export class DhiDefault<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"] | undefined> {
@@ -1812,6 +1968,13 @@ export class DhiDefault<T extends DhiType<any, any>> extends DhiType<T["_output"
   }
 
   removeDefault(): T { return this._inner; }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    const schema = this._inner.toJsonSchema();
+    const def = typeof this._default === 'function' ? (this._default as Function)() : this._default;
+    if (def !== undefined) schema.default = def;
+    return schema;
+  }
 }
 
 export class DhiCatch<T extends DhiType<any, any>> extends DhiType<T["_output"], unknown> {
