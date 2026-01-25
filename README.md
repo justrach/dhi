@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="dhi logo" width="200"/>
+</p>
+
 # dhi
 
 **136x faster than Pydantic. 20x faster than Zod. Same API.**
