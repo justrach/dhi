@@ -31,14 +31,14 @@ if (!existsSync('charts')) {
   mkdirSync('charts');
 }
 
-// Color palette
+// Color palette (light theme for GitHub compatibility)
 const colors = {
-  dhi: '#10b981',      // Emerald green
-  zod: '#6366f1',      // Indigo
-  bg: '#0f172a',       // Slate 900
-  text: '#f8fafc',     // Slate 50
-  grid: '#334155',     // Slate 700
-  accent: '#22d3ee',   // Cyan
+  dhi: '#059669',      // Emerald 600
+  zod: '#4f46e5',      // Indigo 600
+  bg: '#ffffff',       // White
+  text: '#1f2937',     // Gray 800
+  grid: '#9ca3af',     // Gray 400
+  accent: '#0891b2',   // Cyan 600
 };
 
 function generateBarChart(results: BenchmarkResult[], title: string, filename: string) {

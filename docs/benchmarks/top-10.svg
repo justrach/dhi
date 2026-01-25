@@ -1,89 +1,89 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" style="font-family: system-ui, sans-serif;">
   <defs>
     <linearGradient id="dhiGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#059669;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#34d399;stop-opacity:1" />
     </linearGradient>
     <linearGradient id="zodGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#4f46e5;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#818cf8;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <rect width="800" height="600" fill="#0f172a"/>
-  <text x="400" y="35" fill="#f8fafc" font-size="20" font-weight="bold" text-anchor="middle">Top 10 Performance Gains</text>
-  <text x="400" y="55" fill="#334155" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
-  <text x="170" y="85" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.boolean()</text>
-  <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="655" y="74" fill="#10b981" font-size="11">39.2M/s</text>
-  <rect x="180" y="80" width="6.122740991140071" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="191.12274099114006" y="94" fill="#6366f1" font-size="11">0.5M/s</text>
+  <rect width="800" height="600" fill="#ffffff"/>
+  <text x="400" y="35" fill="#1f2937" font-size="20" font-weight="bold" text-anchor="middle">Top 10 Performance Gains</text>
+  <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
+  <text x="170" y="85" fill="#1f2937" font-size="13" text-anchor="end">z.coerce.string()</text>
+  <rect x="180" y="60" width="204.0370818894081" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="389.0370818894081" y="74" fill="#059669" font-size="11">34.3M/s</text>
+  <rect x="180" y="80" width="4.201155228650548" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="189.20115522865055" y="94" fill="#4f46e5" font-size="11">0.7M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">76.8x</text>
-  <text x="170" y="135" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.string()</text>
-  <rect x="180" y="110" width="206.2753111274855" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="391.2753111274855" y="124" fill="#10b981" font-size="11">17.2M/s</text>
-  <rect x="180" y="130" width="3.3197528340269686" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="188.31975283402696" y="144" fill="#6366f1" font-size="11">0.3M/s</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">48.6x</text>
+  <text x="170" y="135" fill="#1f2937" font-size="13" text-anchor="end">z.coerce.boolean()</text>
+  <rect x="180" y="110" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="655" y="124" fill="#059669" font-size="11">79.1M/s</text>
+  <rect x="180" y="130" width="9.772651858973202" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="194.7726518589732" y="144" fill="#4f46e5" font-size="11">1.6M/s</text>
   <rect x="670" y="115" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">62.1x</text>
-  <text x="170" y="185" fill="#f8fafc" font-size="13" text-anchor="end">z.int()</text>
-  <rect x="180" y="160" width="281.2639886623775" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="466.2639886623775" y="174" fill="#10b981" font-size="11">23.5M/s</text>
-  <rect x="180" y="180" width="4.697774703628722" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.6977747036287" y="194" fill="#6366f1" font-size="11">0.4M/s</text>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">48.1x</text>
+  <text x="170" y="185" fill="#1f2937" font-size="13" text-anchor="end">z.int()</text>
+  <rect x="180" y="160" width="272.30913195260706" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="457.30913195260706" y="174" fill="#059669" font-size="11">45.8M/s</text>
+  <rect x="180" y="180" width="6.173225346932305" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="191.1732253469323" y="194" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="165" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="185" fill="white" font-size="13" font-weight="bold" text-anchor="middle">59.9x</text>
-  <text x="170" y="235" fill="#f8fafc" font-size="13" text-anchor="end">z.float64()</text>
-  <rect x="180" y="210" width="285.2068690717348" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="470.2068690717348" y="224" fill="#10b981" font-size="11">23.8M/s</text>
-  <rect x="180" y="230" width="4.819863410182424" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.81986341018242" y="244" fill="#6366f1" font-size="11">0.4M/s</text>
+  <text x="705" y="185" fill="white" font-size="13" font-weight="bold" text-anchor="middle">44.1x</text>
+  <text x="170" y="235" fill="#1f2937" font-size="13" text-anchor="end">z.float64()</text>
+  <rect x="180" y="210" width="268.5833144160853" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="453.5833144160853" y="224" fill="#059669" font-size="11">45.2M/s</text>
+  <rect x="180" y="230" width="6.239724950292312" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="191.2397249502923" y="244" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="215" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="235" fill="white" font-size="13" font-weight="bold" text-anchor="middle">59.2x</text>
-  <text x="170" y="285" fill="#f8fafc" font-size="13" text-anchor="end">z.int32()</text>
-  <rect x="180" y="260" width="211.27771453927778" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="396.2777145392778" y="274" fill="#10b981" font-size="11">17.6M/s</text>
-  <rect x="180" y="280" width="4.916664023015013" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.91666402301502" y="294" fill="#6366f1" font-size="11">0.4M/s</text>
+  <text x="705" y="235" fill="white" font-size="13" font-weight="bold" text-anchor="middle">43.0x</text>
+  <text x="170" y="285" fill="#1f2937" font-size="13" text-anchor="end">z.stringbool()</text>
+  <rect x="180" y="260" width="46.689112259882535" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="231.68911225988253" y="274" fill="#059669" font-size="11">7.9M/s</text>
+  <rect x="180" y="280" width="1.322981611250219" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="186.3229816112502" y="294" fill="#4f46e5" font-size="11">0.2M/s</text>
   <rect x="670" y="265" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="285" fill="white" font-size="13" font-weight="bold" text-anchor="middle">43.0x</text>
-  <text x="170" y="335" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.date()</text>
-  <rect x="180" y="310" width="173.11110037177488" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="358.1111003717749" y="324" fill="#10b981" font-size="11">14.4M/s</text>
-  <rect x="180" y="330" width="4.150925899312894" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.15092589931288" y="344" fill="#6366f1" font-size="11">0.3M/s</text>
+  <text x="705" y="285" fill="white" font-size="13" font-weight="bold" text-anchor="middle">35.3x</text>
+  <text x="170" y="335" fill="#1f2937" font-size="13" text-anchor="end">z.base64()</text>
+  <rect x="180" y="310" width="162.88387906616893" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="347.8838790661689" y="324" fill="#059669" font-size="11">27.4M/s</text>
+  <rect x="180" y="330" width="5.116476917255929" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="190.11647691725594" y="344" fill="#4f46e5" font-size="11">0.9M/s</text>
   <rect x="670" y="315" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="335" fill="white" font-size="13" font-weight="bold" text-anchor="middle">41.7x</text>
-  <text x="170" y="385" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.time()</text>
-  <rect x="180" y="360" width="164.25427567395366" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="349.25427567395366" y="374" fill="#10b981" font-size="11">13.7M/s</text>
-  <rect x="180" y="380" width="4.043136981828814" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.0431369818288" y="394" fill="#6366f1" font-size="11">0.3M/s</text>
+  <text x="705" y="335" fill="white" font-size="13" font-weight="bold" text-anchor="middle">31.8x</text>
+  <text x="170" y="385" fill="#1f2937" font-size="13" text-anchor="end">z.iso.time()</text>
+  <rect x="180" y="360" width="173.714711934777" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="358.71471193477703" y="374" fill="#059669" font-size="11">29.2M/s</text>
+  <rect x="180" y="380" width="5.733113922353105" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="190.7331139223531" y="394" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="365" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="385" fill="white" font-size="13" font-weight="bold" text-anchor="middle">40.6x</text>
-  <text x="170" y="435" fill="#f8fafc" font-size="13" text-anchor="end">z.base64()</text>
-  <rect x="180" y="410" width="168.6917478203928" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="353.69174782039283" y="424" fill="#10b981" font-size="11">14.1M/s</text>
-  <rect x="180" y="430" width="4.172704113587776" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.17270411358777" y="444" fill="#6366f1" font-size="11">0.3M/s</text>
+  <text x="705" y="385" fill="white" font-size="13" font-weight="bold" text-anchor="middle">30.3x</text>
+  <text x="170" y="435" fill="#1f2937" font-size="13" text-anchor="end">z.int32()</text>
+  <rect x="180" y="410" width="188.90958970733766" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="373.90958970733766" y="424" fill="#059669" font-size="11">31.8M/s</text>
+  <rect x="180" y="430" width="6.402901068216362" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="191.40290106821635" y="444" fill="#4f46e5" font-size="11">1.1M/s</text>
   <rect x="670" y="415" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="435" fill="white" font-size="13" font-weight="bold" text-anchor="middle">40.4x</text>
-  <text x="170" y="485" fill="#f8fafc" font-size="13" text-anchor="end">z.ulid()</text>
-  <rect x="180" y="460" width="179.4375162545344" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="364.4375162545344" y="474" fill="#10b981" font-size="11">15.0M/s</text>
-  <rect x="180" y="480" width="4.539679467734375" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="189.53967946773437" y="494" fill="#6366f1" font-size="11">0.4M/s</text>
+  <text x="705" y="435" fill="white" font-size="13" font-weight="bold" text-anchor="middle">29.5x</text>
+  <text x="170" y="485" fill="#1f2937" font-size="13" text-anchor="end">z.ulid()</text>
+  <rect x="180" y="460" width="158.79530557579452" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="343.7953055757945" y="474" fill="#059669" font-size="11">26.7M/s</text>
+  <rect x="180" y="480" width="5.779830804652739" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="190.77983080465273" y="494" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="465" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="485" fill="white" font-size="13" font-weight="bold" text-anchor="middle">39.5x</text>
-  <text x="170" y="535" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.number()</text>
-  <rect x="180" y="510" width="210.02407172366185" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="395.02407172366185" y="524" fill="#10b981" font-size="11">17.5M/s</text>
-  <rect x="180" y="530" width="5.31373918796049" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="190.3137391879605" y="544" fill="#6366f1" font-size="11">0.4M/s</text>
+  <text x="705" y="485" fill="white" font-size="13" font-weight="bold" text-anchor="middle">27.5x</text>
+  <text x="170" y="535" fill="#1f2937" font-size="13" text-anchor="end">z.iso.date()</text>
+  <rect x="180" y="510" width="148.54646199607907" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="333.5464619960791" y="524" fill="#059669" font-size="11">25.0M/s</text>
+  <rect x="180" y="530" width="5.843550592179053" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="190.84355059217904" y="544" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="515" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="535" fill="white" font-size="13" font-weight="bold" text-anchor="middle">39.5x</text>
+  <text x="705" y="535" fill="white" font-size="13" font-weight="bold" text-anchor="middle">25.4x</text>
   <rect x="660" y="570" width="15" height="15" fill="url(#dhiGrad)"/>
-  <text x="680" y="582" fill="#f8fafc" font-size="12">dhi</text>
+  <text x="680" y="582" fill="#1f2937" font-size="12">dhi</text>
   <rect x="720" y="570" width="15" height="15" fill="url(#zodGrad)"/>
-  <text x="740" y="582" fill="#f8fafc" font-size="12">Zod</text>
+  <text x="740" y="582" fill="#1f2937" font-size="12">Zod</text>
 </svg>
