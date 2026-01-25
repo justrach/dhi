@@ -1175,9 +1175,187 @@ static PyObject* py_init_model(PyObject* self_unused, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+// =============================================================================
+// dump_json_compiled: Ultra-fast JSON serialization using pre-compiled specs
+// Builds JSON string directly in C, no intermediate Python dict
+// =============================================================================
+
+// Helper: escape a string for JSON and append to buffer
+static int json_escape_string(char **buf, size_t *buf_size, size_t *pos, const char *str, Py_ssize_t len) {
+    // Worst case: every char needs escaping (\uXXXX = 6 chars) + quotes
+    size_t needed = *pos + len * 6 + 3;
+    if (needed > *buf_size) {
+        size_t new_size = needed * 2;
+        char *new_buf = realloc(*buf, new_size);
+        if (!new_buf) return -1;
+        *buf = new_buf;
+        *buf_size = new_size;
+    }
+
+    char *p = *buf + *pos;
+    *p++ = '"';
+
+    for (Py_ssize_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        switch (c) {
+            case '"':  *p++ = '\\'; *p++ = '"'; break;
+            case '\\': *p++ = '\\'; *p++ = '\\'; break;
+            case '\b': *p++ = '\\'; *p++ = 'b'; break;
+            case '\f': *p++ = '\\'; *p++ = 'f'; break;
+            case '\n': *p++ = '\\'; *p++ = 'n'; break;
+            case '\r': *p++ = '\\'; *p++ = 'r'; break;
+            case '\t': *p++ = '\\'; *p++ = 't'; break;
+            default:
+                if (c < 32) {
+                    p += sprintf(p, "\\u%04x", c);
+                } else {
+                    *p++ = c;
+                }
+        }
+    }
+
+    *p++ = '"';
+    *pos = p - *buf;
+    return 0;
+}
+
+// Helper: append raw string to buffer
+static int json_append(char **buf, size_t *buf_size, size_t *pos, const char *str, size_t len) {
+    size_t needed = *pos + len + 1;
+    if (needed > *buf_size) {
+        size_t new_size = needed * 2;
+        char *new_buf = realloc(*buf, new_size);
+        if (!new_buf) return -1;
+        *buf = new_buf;
+        *buf_size = new_size;
+    }
+    memcpy(*buf + *pos, str, len);
+    *pos += len;
+    return 0;
+}
+
+static PyObject* py_dump_json_compiled(PyObject* self_unused, PyObject* args) {
+    PyObject *model_self, *capsule;
+
+    if (!PyArg_ParseTuple(args, "OO", &model_self, &capsule)) {
+        return NULL;
+    }
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) return NULL;
+
+    PyObject *obj_dict = PyObject_GenericGetDict(model_self, NULL);
+    if (!obj_dict) return NULL;
+
+    // Initial buffer
+    size_t buf_size = 256;
+    char *buf = malloc(buf_size);
+    if (!buf) { Py_DECREF(obj_dict); return PyErr_NoMemory(); }
+    size_t pos = 0;
+
+    buf[pos++] = '{';
+
+    int first = 1;
+    for (Py_ssize_t i = 0; i < ms->n_fields; i++) {
+        CompiledFieldSpec *fs = &ms->specs[i];
+        PyObject *value = PyDict_GetItem(obj_dict, fs->name_obj);
+        if (!value) continue;
+
+        // Comma separator
+        if (!first) {
+            if (json_append(&buf, &buf_size, &pos, ", ", 2) < 0) {
+                free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+        }
+        first = 0;
+
+        // Field name
+        const char *field_name = PyUnicode_AsUTF8(fs->name_obj);
+        Py_ssize_t name_len = strlen(field_name);
+        if (json_escape_string(&buf, &buf_size, &pos, field_name, name_len) < 0) {
+            free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+        }
+        if (json_append(&buf, &buf_size, &pos, ": ", 2) < 0) {
+            free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+        }
+
+        // Value serialization
+        if (value == Py_None) {
+            if (json_append(&buf, &buf_size, &pos, "null", 4) < 0) {
+                free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+        } else if (PyBool_Check(value)) {
+            if (value == Py_True) {
+                if (json_append(&buf, &buf_size, &pos, "true", 4) < 0) {
+                    free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+                }
+            } else {
+                if (json_append(&buf, &buf_size, &pos, "false", 5) < 0) {
+                    free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+                }
+            }
+        } else if (PyLong_Check(value)) {
+            long val = PyLong_AsLong(value);
+            char num_buf[32];
+            int num_len = snprintf(num_buf, sizeof(num_buf), "%ld", val);
+            if (json_append(&buf, &buf_size, &pos, num_buf, num_len) < 0) {
+                free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+        } else if (PyFloat_Check(value)) {
+            double val = PyFloat_AsDouble(value);
+            char num_buf[64];
+            int num_len;
+            // Handle special floats
+            if (isinf(val)) {
+                num_len = snprintf(num_buf, sizeof(num_buf), "null"); // JSON doesn't support Infinity
+            } else if (isnan(val)) {
+                num_len = snprintf(num_buf, sizeof(num_buf), "null"); // JSON doesn't support NaN
+            } else {
+                num_len = snprintf(num_buf, sizeof(num_buf), "%.17g", val);
+            }
+            if (json_append(&buf, &buf_size, &pos, num_buf, num_len) < 0) {
+                free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+        } else if (PyUnicode_Check(value)) {
+            Py_ssize_t str_len;
+            const char *str = PyUnicode_AsUTF8AndSize(value, &str_len);
+            if (!str) { free(buf); Py_DECREF(obj_dict); return NULL; }
+            if (json_escape_string(&buf, &buf_size, &pos, str, str_len) < 0) {
+                free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+        } else if (PyBytes_Check(value)) {
+            // Encode bytes as base64 or just the raw bytes as string
+            Py_ssize_t bytes_len = PyBytes_GET_SIZE(value);
+            const char *bytes_data = PyBytes_AS_STRING(value);
+            if (json_escape_string(&buf, &buf_size, &pos, bytes_data, bytes_len) < 0) {
+                free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+        } else {
+            // Fallback: use Python's repr or str
+            PyObject *str_obj = PyObject_Str(value);
+            if (!str_obj) { free(buf); Py_DECREF(obj_dict); return NULL; }
+            Py_ssize_t str_len;
+            const char *str = PyUnicode_AsUTF8AndSize(str_obj, &str_len);
+            if (!str) { Py_DECREF(str_obj); free(buf); Py_DECREF(obj_dict); return NULL; }
+            if (json_escape_string(&buf, &buf_size, &pos, str, str_len) < 0) {
+                Py_DECREF(str_obj); free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
+            }
+            Py_DECREF(str_obj);
+        }
+    }
+
+    buf[pos++] = '}';
+
+    Py_DECREF(obj_dict);
+
+    PyObject *result = PyUnicode_FromStringAndSize(buf, pos);
+    free(buf);
+    return result;
+}
+
 // Method definitions
 static PyMethodDef DhiNativeMethods[] = {
-    {"validate_int", py_validate_int, METH_VARARGS, 
+    {"validate_int", py_validate_int, METH_VARARGS,
      "Validate integer bounds (value, min, max) -> bool"},
     {"validate_string_length", py_validate_string_length, METH_VARARGS,
      "Validate string length (str, min_len, max_len) -> bool"},
@@ -1193,6 +1371,8 @@ static PyMethodDef DhiNativeMethods[] = {
      "Pre-compile field specs into C structs: (specs_tuple) -> PyCapsule"},
     {"init_model_compiled", py_init_model_compiled, METH_VARARGS,
      "Ultra-fast init with pre-compiled specs: (self, kwargs, capsule) -> None or errors"},
+    {"dump_json_compiled", py_dump_json_compiled, METH_VARARGS,
+     "Ultra-fast JSON dump with pre-compiled specs: (self, capsule) -> JSON string"},
     {NULL, NULL, 0, NULL}
 };
 

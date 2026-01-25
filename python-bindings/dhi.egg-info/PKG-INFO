@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: dhi
-Version: 1.0.11
+Version: 1.1.2
 Summary: Ultra-fast data validation for Python - 28M validations/sec, 3x faster than Rust alternatives
 Author-email: Rach Pradhan <rach@rachpradhan.com>
 License: MIT

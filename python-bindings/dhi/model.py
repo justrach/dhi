@@ -681,6 +681,12 @@ class BaseModel(metaclass=_ModelMeta):
 
     def model_dump_json(self) -> str:
         """Convert model to JSON string."""
+        # Fast path: native C JSON serialization
+        cls = type(self)
+        compiled = getattr(cls, '__dhi_compiled_specs__', None)
+        if compiled is not None:
+            return _dhi_native.dump_json_compiled(self, compiled)
+        # Fallback to Python json
         import json
         return json.dumps(self.model_dump())
 
