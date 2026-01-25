@@ -15,24 +15,24 @@
   <text x="170" y="85" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.date()</text>
   <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
   <text x="655" y="74" fill="#10b981" font-size="11">14.4M/s</text>
-  <rect x="180" y="80" width="10.927351225845511" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="195.9273512258455" y="94" fill="#6366f1" font-size="11">0.3M/s</text>
+  <rect x="180" y="80" width="11.269844443754415" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="196.2698444437544" y="94" fill="#6366f1" font-size="11">0.3M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">43.0x</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">41.7x</text>
   <text x="170" y="135" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.time()</text>
-  <rect x="180" y="110" width="446.4581834046436" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="631.4581834046436" y="124" fill="#10b981" font-size="11">13.7M/s</text>
-  <rect x="180" y="130" width="10.747494647574742" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="195.74749464757474" y="144" fill="#6366f1" font-size="11">0.3M/s</text>
+  <rect x="180" y="110" width="445.95354891144405" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="630.953548911444" y="124" fill="#10b981" font-size="11">13.7M/s</text>
+  <rect x="180" y="130" width="10.977195439105275" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="195.9771954391053" y="144" fill="#6366f1" font-size="11">0.3M/s</text>
   <rect x="670" y="115" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">41.5x</text>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">40.6x</text>
   <text x="170" y="185" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.datetime()</text>
-  <rect x="180" y="160" width="124.31432630761093" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="309.31432630761094" y="174" fill="#10b981" font-size="11">3.8M/s</text>
-  <rect x="180" y="180" width="8.979807783101231" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="193.97980778310122" y="194" fill="#6366f1" font-size="11">0.3M/s</text>
+  <rect x="180" y="160" width="121.46544747145862" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="306.4654474714586" y="174" fill="#10b981" font-size="11">3.7M/s</text>
+  <rect x="180" y="180" width="9.169605585739752" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="194.16960558573976" y="194" fill="#6366f1" font-size="11">0.3M/s</text>
   <rect x="670" y="165" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="185" fill="white" font-size="13" font-weight="bold" text-anchor="middle">13.8x</text>
+  <text x="705" y="185" fill="white" font-size="13" font-weight="bold" text-anchor="middle">13.2x</text>
   <rect x="660" y="220" width="15" height="15" fill="url(#dhiGrad)"/>
   <text x="680" y="232" fill="#f8fafc" font-size="12">dhi</text>
   <rect x="720" y="220" width="15" height="15" fill="url(#zodGrad)"/>

@@ -11,79 +11,79 @@
   <text x="400" y="55" fill="#334155" font-size="12" text-anchor="middle">Speedup factor (higher is better)</text>
   <text x="170" y="82.5" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.boolean()</text>
   <rect x="180" y="60" width="520" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="708" y="82.5" fill="#f8fafc" font-size="13" font-weight="bold">73.6x faster</text>
-  <text x="170" y="125.5" fill="#f8fafc" font-size="13" text-anchor="end">z.float64()</text>
-  <rect x="180" y="103" width="449.85722968659627" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="637.8572296865963" y="125.5" fill="#f8fafc" font-size="13" font-weight="bold">63.7x faster</text>
+  <text x="708" y="82.5" fill="#f8fafc" font-size="13" font-weight="bold">76.8x faster</text>
+  <text x="170" y="125.5" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.string()</text>
+  <rect x="180" y="103" width="420.9135184522666" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="608.9135184522665" y="125.5" fill="#f8fafc" font-size="13" font-weight="bold">62.1x faster</text>
   <text x="170" y="168.5" fill="#f8fafc" font-size="13" text-anchor="end">z.int()</text>
-  <rect x="180" y="146" width="422.58098104012475" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="610.5809810401247" y="168.5" fill="#f8fafc" font-size="13" font-weight="bold">59.8x faster</text>
-  <text x="170" y="211.5" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.string()</text>
-  <rect x="180" y="189" width="409.9158165347292" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="597.9158165347292" y="211.5" fill="#f8fafc" font-size="13" font-weight="bold">58.0x faster</text>
-  <text x="170" y="254.5" fill="#f8fafc" font-size="13" text-anchor="end">z.base64()</text>
-  <rect x="180" y="232" width="321.5099022163253" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="509.5099022163253" y="254.5" fill="#f8fafc" font-size="13" font-weight="bold">45.5x faster</text>
-  <text x="170" y="297.5" fill="#f8fafc" font-size="13" text-anchor="end">z.int32()</text>
-  <rect x="180" y="275" width="321.1916059057576" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="509.1916059057576" y="297.5" fill="#f8fafc" font-size="13" font-weight="bold">45.5x faster</text>
-  <text x="170" y="340.5" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.date()</text>
-  <rect x="180" y="318" width="303.8836558140678" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="491.8836558140678" y="340.5" fill="#f8fafc" font-size="13" font-weight="bold">43.0x faster</text>
-  <text x="170" y="383.5" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.time()</text>
-  <rect x="180" y="361" width="293.4931281945569" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="481.4931281945569" y="383.5" fill="#f8fafc" font-size="13" font-weight="bold">41.5x faster</text>
+  <rect x="180" y="146" width="405.57700138319774" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="593.5770013831977" y="168.5" fill="#f8fafc" font-size="13" font-weight="bold">59.9x faster</text>
+  <text x="170" y="211.5" fill="#f8fafc" font-size="13" text-anchor="end">z.float64()</text>
+  <rect x="180" y="189" width="400.8451412624431" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="588.8451412624431" y="211.5" fill="#f8fafc" font-size="13" font-weight="bold">59.2x faster</text>
+  <text x="170" y="254.5" fill="#f8fafc" font-size="13" text-anchor="end">z.int32()</text>
+  <rect x="180" y="232" width="291.0948566110024" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="479.0948566110024" y="254.5" fill="#f8fafc" font-size="13" font-weight="bold">43.0x faster</text>
+  <text x="170" y="297.5" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.date()</text>
+  <rect x="180" y="275" width="282.5083639159959" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="470.5083639159959" y="297.5" fill="#f8fafc" font-size="13" font-weight="bold">41.7x faster</text>
+  <text x="170" y="340.5" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.time()</text>
+  <rect x="180" y="318" width="275.20074266884563" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="463.20074266884563" y="340.5" fill="#f8fafc" font-size="13" font-weight="bold">40.6x faster</text>
+  <text x="170" y="383.5" fill="#f8fafc" font-size="13" text-anchor="end">z.base64()</text>
+  <rect x="180" y="361" width="273.8593806716651" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
+  <text x="461.8593806716651" y="383.5" fill="#f8fafc" font-size="13" font-weight="bold">40.4x faster</text>
   <text x="170" y="426.5" fill="#f8fafc" font-size="13" text-anchor="end">z.ulid()</text>
-  <rect x="180" y="404" width="284.9989178999421" height="31" fill="hsl(160, 80%, 50%)" rx="4"/>
-  <text x="472.9989178999421" y="426.5" fill="#f8fafc" font-size="13" font-weight="bold">40.3x faster</text>
-  <text x="170" y="469.5" fill="#f8fafc" font-size="13" text-anchor="end">z.nanoid()</text>
-  <rect x="180" y="447" width="279.2935705462913" height="31" fill="hsl(158.1235451178197, 80%, 50%)" rx="4"/>
-  <text x="467.2935705462913" y="469.5" fill="#f8fafc" font-size="13" font-weight="bold">39.5x faster</text>
-  <text x="170" y="512.5" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.number()</text>
-  <rect x="180" y="490" width="274.23829310319144" height="31" fill="hsl(155.2614728212983, 80%, 50%)" rx="4"/>
-  <text x="462.23829310319144" y="512.5" fill="#f8fafc" font-size="13" font-weight="bold">38.8x faster</text>
+  <rect x="180" y="404" width="267.75613660536027" height="31" fill="hsl(158.10589054128664, 80%, 50%)" rx="4"/>
+  <text x="455.75613660536027" y="426.5" fill="#f8fafc" font-size="13" font-weight="bold">39.5x faster</text>
+  <text x="170" y="469.5" fill="#f8fafc" font-size="13" text-anchor="end">z.coerce.number()</text>
+  <rect x="180" y="447" width="267.7442872438434" height="31" fill="hsl(158.09889367511312, 80%, 50%)" rx="4"/>
+  <text x="455.7442872438434" y="469.5" fill="#f8fafc" font-size="13" font-weight="bold">39.5x faster</text>
+  <text x="170" y="512.5" fill="#f8fafc" font-size="13" text-anchor="end">z.nanoid()</text>
+  <rect x="180" y="490" width="250.26200480589893" height="31" fill="hsl(147.7758741223647, 80%, 50%)" rx="4"/>
+  <text x="438.2620048058989" y="512.5" fill="#f8fafc" font-size="13" font-weight="bold">36.9x faster</text>
   <text x="170" y="555.5" fill="#f8fafc" font-size="13" text-anchor="end">z.stringbool()</text>
-  <rect x="180" y="533" width="253.49892961041942" height="31" fill="hsl(143.51977152631392, 80%, 50%)" rx="4"/>
-  <text x="441.4989296104194" y="555.5" fill="#f8fafc" font-size="13" font-weight="bold">35.9x faster</text>
+  <rect x="180" y="533" width="247.73692901909152" height="31" fill="hsl(146.28485561194364, 80%, 50%)" rx="4"/>
+  <text x="435.7369290190915" y="555.5" fill="#f8fafc" font-size="13" font-weight="bold">36.6x faster</text>
   <text x="170" y="598.5" fill="#f8fafc" font-size="13" text-anchor="end">z.jwt()</text>
-  <rect x="180" y="576" width="152.42144874124324" height="31" fill="hsl(86.2942164397757, 80%, 50%)" rx="4"/>
-  <text x="340.42144874124324" y="598.5" fill="#f8fafc" font-size="13" font-weight="bold">21.6x faster</text>
-  <text x="170" y="641.5" fill="#f8fafc" font-size="13" text-anchor="end">z.email()</text>
-  <rect x="180" y="619" width="138.04074682116124" height="31" fill="hsl(78.15250532040314, 80%, 50%)" rx="4"/>
-  <text x="326.04074682116124" y="641.5" fill="#f8fafc" font-size="13" font-weight="bold">19.5x faster</text>
-  <text x="170" y="684.5" fill="#f8fafc" font-size="13" text-anchor="end">z.url()</text>
-  <rect x="180" y="662" width="99.09066858325413" height="31" fill="hsl(56.100710710353184, 80%, 50%)" rx="4"/>
-  <text x="287.0906685832541" y="684.5" fill="#f8fafc" font-size="13" font-weight="bold">14.0x faster</text>
-  <text x="170" y="727.5" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.datetime()</text>
-  <rect x="180" y="705" width="97.80893433648234" height="31" fill="hsl(55.37505002793199, 80%, 50%)" rx="4"/>
-  <text x="285.80893433648237" y="727.5" fill="#f8fafc" font-size="13" font-weight="bold">13.8x faster</text>
-  <text x="170" y="770.5" fill="#f8fafc" font-size="13" text-anchor="end">z.uuid()</text>
-  <rect x="180" y="748" width="96.34734051125488" height="31" fill="hsl(54.54756088553881, 80%, 50%)" rx="4"/>
-  <text x="284.34734051125486" y="770.5" fill="#f8fafc" font-size="13" font-weight="bold">13.6x faster</text>
-  <text x="170" y="813.5" fill="#f8fafc" font-size="13" text-anchor="end">z.ipv4()</text>
-  <rect x="180" y="791" width="94.73890124015155" height="31" fill="hsl(53.63693441047848, 80%, 50%)" rx="4"/>
-  <text x="282.73890124015156" y="813.5" fill="#f8fafc" font-size="13" font-weight="bold">13.4x faster</text>
+  <rect x="180" y="576" width="141.0304726492675" height="31" fill="hsl(83.2763302995186, 80%, 50%)" rx="4"/>
+  <text x="329.0304726492675" y="598.5" fill="#f8fafc" font-size="13" font-weight="bold">20.8x faster</text>
+  <text x="170" y="641.5" fill="#f8fafc" font-size="13" text-anchor="end">z.uuid()</text>
+  <rect x="180" y="619" width="129.67850825037308" height="31" fill="hsl(76.57316949269267, 80%, 50%)" rx="4"/>
+  <text x="317.67850825037306" y="641.5" fill="#f8fafc" font-size="13" font-weight="bold">19.1x faster</text>
+  <text x="170" y="684.5" fill="#f8fafc" font-size="13" text-anchor="end">z.email()</text>
+  <rect x="180" y="662" width="125.88252983767121" height="31" fill="hsl(74.33170248086354, 80%, 50%)" rx="4"/>
+  <text x="313.8825298376712" y="684.5" fill="#f8fafc" font-size="13" font-weight="bold">18.6x faster</text>
+  <text x="170" y="727.5" fill="#f8fafc" font-size="13" text-anchor="end">z.ipv4()</text>
+  <rect x="180" y="705" width="100.70283080255257" height="31" fill="hsl(59.46347652727278, 80%, 50%)" rx="4"/>
+  <text x="288.70283080255257" y="727.5" fill="#f8fafc" font-size="13" font-weight="bold">14.9x faster</text>
+  <text x="170" y="770.5" fill="#f8fafc" font-size="13" text-anchor="end">z.url()</text>
+  <rect x="180" y="748" width="92.4377113727922" height="31" fill="hsl(54.58305031392939, 80%, 50%)" rx="4"/>
+  <text x="280.4377113727922" y="770.5" fill="#f8fafc" font-size="13" font-weight="bold">13.6x faster</text>
+  <text x="170" y="813.5" fill="#f8fafc" font-size="13" text-anchor="end">z.iso.datetime()</text>
+  <rect x="180" y="791" width="89.73326547774302" height="31" fill="hsl(52.986116506628115, 80%, 50%)" rx="4"/>
+  <text x="277.73326547774303" y="813.5" fill="#f8fafc" font-size="13" font-weight="bold">13.2x faster</text>
   <text x="170" y="856.5" fill="#f8fafc" font-size="13" text-anchor="end">Array<number></text>
-  <rect x="180" y="834" width="59.09175602494641" height="31" fill="hsl(33.455112953819786, 80%, 50%)" rx="4"/>
-  <text x="247.09175602494642" y="856.5" fill="#f8fafc" font-size="13" font-weight="bold">8.4x faster</text>
+  <rect x="180" y="834" width="56.51762679136278" height="31" fill="hsl(33.37279148264199, 80%, 50%)" rx="4"/>
+  <text x="244.51762679136277" y="856.5" fill="#f8fafc" font-size="13" font-weight="bold">8.3x faster</text>
   <text x="170" y="899.5" fill="#f8fafc" font-size="13" text-anchor="end">Object (valid)</text>
-  <rect x="180" y="877" width="33.02636346109953" height="31" fill="hsl(18.698051883557866, 80%, 50%)" rx="4"/>
-  <text x="221.02636346109952" y="899.5" fill="#f8fafc" font-size="13" font-weight="bold">4.7x faster</text>
+  <rect x="180" y="877" width="32.599336785477774" height="31" fill="hsl(19.249408207289267, 80%, 50%)" rx="4"/>
+  <text x="220.59933678547776" y="899.5" fill="#f8fafc" font-size="13" font-weight="bold">4.8x faster</text>
   <text x="170" y="942.5" fill="#f8fafc" font-size="13" text-anchor="end">Nested Object</text>
-  <rect x="180" y="920" width="26.003061343060935" height="31" fill="hsl(14.721771917049697, 80%, 50%)" rx="4"/>
-  <text x="214.00306134306095" y="942.5" fill="#f8fafc" font-size="13" font-weight="bold">3.7x faster</text>
-  <text x="170" y="985.5" fill="#f8fafc" font-size="13" text-anchor="end">Nullable</text>
-  <rect x="180" y="963" width="15.618083738203786" height="31" fill="hsl(8.842261437673995, 80%, 50%)" rx="4"/>
-  <text x="203.61808373820378" y="985.5" fill="#f8fafc" font-size="13" font-weight="bold">2.2x faster</text>
-  <text x="170" y="1028.5" fill="#f8fafc" font-size="13" text-anchor="end">DiscriminatedUnion</text>
-  <rect x="180" y="1006" width="14.359565186839557" height="31" fill="hsl(8.129744445073653, 80%, 50%)" rx="4"/>
-  <text x="202.35956518683955" y="1028.5" fill="#f8fafc" font-size="13" font-weight="bold">2.0x faster</text>
-  <text x="170" y="1071.5" fill="#f8fafc" font-size="13" text-anchor="end">Optional</text>
-  <rect x="180" y="1049" width="14.033756337217032" height="31" fill="hsl(7.945286026527518, 80%, 50%)" rx="4"/>
-  <text x="202.03375633721703" y="1071.5" fill="#f8fafc" font-size="13" font-weight="bold">2.0x faster</text>
+  <rect x="180" y="920" width="25.44349511241517" height="31" fill="hsl(15.023993489868506, 80%, 50%)" rx="4"/>
+  <text x="213.44349511241518" y="942.5" fill="#f8fafc" font-size="13" font-weight="bold">3.8x faster</text>
+  <text x="170" y="985.5" fill="#f8fafc" font-size="13" text-anchor="end">DiscriminatedUnion</text>
+  <rect x="180" y="963" width="14.836221030137969" height="31" fill="hsl(8.76056088938344, 80%, 50%)" rx="4"/>
+  <text x="202.83622103013798" y="985.5" fill="#f8fafc" font-size="13" font-weight="bold">2.2x faster</text>
+  <text x="170" y="1028.5" fill="#f8fafc" font-size="13" text-anchor="end">Optional</text>
+  <rect x="180" y="1006" width="14.719308884073216" height="31" fill="hsl(8.691526060889837, 80%, 50%)" rx="4"/>
+  <text x="202.71930888407323" y="1028.5" fill="#f8fafc" font-size="13" font-weight="bold">2.2x faster</text>
+  <text x="170" y="1071.5" fill="#f8fafc" font-size="13" text-anchor="end">Nullable</text>
+  <rect x="180" y="1049" width="14.236352423636932" height="31" fill="hsl(8.406347680898161, 80%, 50%)" rx="4"/>
+  <text x="202.23635242363693" y="1071.5" fill="#f8fafc" font-size="13" font-weight="bold">2.1x faster</text>
   <text x="170" y="1114.5" fill="#f8fafc" font-size="13" text-anchor="end">Union</text>
-  <rect x="180" y="1092" width="11.355678880067279" height="31" fill="hsl(6.429078185450677, 80%, 50%)" rx="4"/>
-  <text x="199.35567888006727" y="1114.5" fill="#f8fafc" font-size="13" font-weight="bold">1.6x faster</text>
-  <line x1="379.45593343027934" y1="50" x2="379.45593343027934" y2="1145" stroke="#22d3ee" stroke-width="2" stroke-dasharray="5,5"/>
-  <text x="379.45593343027934" y="45" fill="#22d3ee" font-size="11" text-anchor="middle">Avg: 28.2x</text>
+  <rect x="180" y="1092" width="10.85440312479941" height="31" fill="hsl(6.409358508447269, 80%, 50%)" rx="4"/>
+  <text x="198.8544031247994" y="1114.5" fill="#f8fafc" font-size="13" font-weight="bold">1.6x faster</text>
+  <line x1="370.0868170072765" y1="50" x2="370.0868170072765" y2="1145" stroke="#22d3ee" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="370.0868170072765" y="45" fill="#22d3ee" font-size="11" text-anchor="middle">Avg: 28.1x</text>
 </svg>

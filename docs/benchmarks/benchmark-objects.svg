@@ -13,19 +13,19 @@
   <text x="400" y="35" fill="#f8fafc" font-size="20" font-weight="bold" text-anchor="middle">Objects Benchmarks</text>
   <text x="400" y="55" fill="#334155" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
   <text x="170" y="85" fill="#f8fafc" font-size="13" text-anchor="end">Object (valid)</text>
-  <rect x="180" y="60" width="350.4394506834247" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="535.4394506834246" y="74" fill="#10b981" font-size="11">8.4M/s</text>
-  <rect x="180" y="80" width="74.96812028670938" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="259.9681202867094" y="94" fill="#6366f1" font-size="11">1.8M/s</text>
+  <rect x="180" y="60" width="348.4905577074729" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="533.4905577074728" y="74" fill="#10b981" font-size="11">8.7M/s</text>
+  <rect x="180" y="80" width="72.41584862344146" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="257.41584862344143" y="94" fill="#6366f1" font-size="11">1.8M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#f97316" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">4.7x</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">4.8x</text>
   <text x="170" y="135" fill="#f8fafc" font-size="13" text-anchor="end">Nested Object</text>
-  <rect x="180" y="110" width="469.99999999999994" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="655" y="124" fill="#10b981" font-size="11">11.2M/s</text>
-  <rect x="180" y="130" width="127.70201919938178" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="312.70201919938177" y="144" fill="#6366f1" font-size="11">3.1M/s</text>
+  <rect x="180" y="110" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="655" y="124" fill="#10b981" font-size="11">11.7M/s</text>
+  <rect x="180" y="130" width="125.13317456292737" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="310.13317456292737" y="144" fill="#6366f1" font-size="11">3.1M/s</text>
   <rect x="670" y="115" width="70" height="30" fill="#f97316" rx="15"/>
-  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">3.7x</text>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">3.8x</text>
   <rect x="660" y="170" width="15" height="15" fill="url(#dhiGrad)"/>
   <text x="680" y="182" fill="#f8fafc" font-size="12">dhi</text>
   <rect x="720" y="170" width="15" height="15" fill="url(#zodGrad)"/>
