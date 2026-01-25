@@ -1,6 +1,0 @@
-
-[dev]
-pytest>=7.0
-pytest-benchmark>=4.0
-black>=23.0
-mypy>=1.0

@@ -45,7 +45,7 @@
   ],
   "scripts": {
     "test": "bun test",
-    "bench": "bun run benchmark-final.ts",
+    "bench": "bun run benchmark-vs-zod.ts",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
     "prepublishOnly": "npm run build",
     "test:nextjs": "cd examples/nextjs-app && npm install && npm run build"

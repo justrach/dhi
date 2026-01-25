@@ -11,3 +11,6 @@ zig-out/
 __pycache__/
 *.pyc
 *.pyo
+
+# Social media drafts (not for version control)
+Socials.md
