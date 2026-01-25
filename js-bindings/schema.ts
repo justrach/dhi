@@ -892,11 +892,21 @@ export class DhiNaN extends DhiType<number, number> {
 // ============================================================================
 
 export class DhiLiteral<T extends string | number | boolean | bigint | null | undefined> extends DhiType<T, T> {
-  constructor(private value: T) { super(); }
+  private _values: T[];
+
+  constructor(value: T | readonly T[]) {
+    super();
+    this._values = Array.isArray(value) ? [...value] as T[] : [value];
+  }
+
+  get value(): T { return this._values[0]; }
 
   _parse(input: unknown, path: (string | number)[]): SafeParseResult<T> {
-    if (input !== this.value) {
-      return { success: false, error: new ZodError([{ code: 'invalid_literal', path, message: `Expected ${JSON.stringify(this.value)}, received ${JSON.stringify(input)}` }]) };
+    if (!this._values.includes(input as T)) {
+      const expected = this._values.length === 1
+        ? JSON.stringify(this._values[0])
+        : this._values.map(v => JSON.stringify(v)).join(' | ');
+      return { success: false, error: new ZodError([{ code: 'invalid_literal', path, message: `Expected ${expected}, received ${JSON.stringify(input)}` }]) };
     }
     return { success: true, data: input as T };
   }
@@ -1330,6 +1340,21 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
 
   keyof(): DhiEnum<[string, ...string[]]> {
     return new DhiEnum(this._keys as [string, ...string[]]);
+  }
+
+  // Zod 4: valueof - get union of all value types
+  valueof(): DhiUnion<[T[keyof T], ...T[keyof T][]]> {
+    const schemas = Object.values(this.shape) as T[keyof T][];
+    return new DhiUnion(schemas as any);
+  }
+
+  // Zod 4: entryof - get tuple of [key, value] union
+  entryof(): DhiUnion<any> {
+    const entries: DhiTuple<any>[] = [];
+    for (const key of this._keys) {
+      entries.push(new DhiTuple([new DhiLiteral(key), this.shape[key]]));
+    }
+    return new DhiUnion(entries as any);
   }
 
   private _clone(): DhiObject<T> {
@@ -1883,6 +1908,92 @@ export class DhiPreprocess<T extends DhiType<any, any>> extends DhiType<T["_outp
 }
 
 // ============================================================================
+// File Schema (Zod 4)
+// ============================================================================
+
+export class DhiFile extends DhiType<File, File> {
+  private checks: Array<{ type: string; value?: any; message?: string }> = [];
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<File> {
+    if (!(value instanceof File)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected File' }]) };
+    }
+
+    for (const check of this.checks) {
+      switch (check.type) {
+        case 'min':
+          if (value.size < check.value)
+            return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `File must be at least ${check.value} bytes` }]) };
+          break;
+        case 'max':
+          if (value.size > check.value)
+            return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `File must be at most ${check.value} bytes` }]) };
+          break;
+        case 'mime':
+          const mimes = Array.isArray(check.value) ? check.value : [check.value];
+          // Handle MIME types with parameters (e.g., "text/plain;charset=utf-8")
+          const baseType = value.type.split(';')[0].trim();
+          if (!mimes.some((m: string) => baseType === m || value.type === m))
+            return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: check.message || `Invalid MIME type. Expected ${mimes.join(', ')}` }]) };
+          break;
+      }
+    }
+
+    return { success: true, data: value };
+  }
+
+  min(size: number, message?: string): this { this.checks.push({ type: 'min', value: size, message }); return this; }
+  max(size: number, message?: string): this { this.checks.push({ type: 'max', value: size, message }); return this; }
+  mime(types: string | string[], message?: string): this { this.checks.push({ type: 'mime', value: types, message }); return this; }
+}
+
+// ============================================================================
+// Template Literal Schema (Zod 4)
+// ============================================================================
+
+export class DhiTemplateLiteral<T extends string = string> extends DhiType<T, T> {
+  private _regex: RegExp;
+  private _parts: Array<string | DhiType<any, any>>;
+
+  constructor(parts: Array<string | DhiType<any, any>>) {
+    super();
+    this._parts = parts;
+    // Build regex from parts
+    let pattern = '^';
+    for (const part of parts) {
+      if (typeof part === 'string') {
+        pattern += part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      } else {
+        // Generic pattern for schema types
+        if (part instanceof DhiString) {
+          pattern += '.*';
+        } else if (part instanceof DhiNumber) {
+          pattern += '-?\\d+(?:\\.\\d+)?';
+        } else if (part instanceof DhiLiteral) {
+          pattern += String((part as any).value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        } else if (part instanceof DhiEnum) {
+          pattern += `(?:${(part as any).options.map((v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`;
+        } else {
+          pattern += '.*';
+        }
+      }
+    }
+    pattern += '$';
+    this._regex = new RegExp(pattern);
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T> {
+    if (typeof value !== 'string') {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected string' }]) };
+    }
+    if (!this._regex.test(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: 'Invalid template literal format' }]) };
+    }
+    return { success: true, data: value as T };
+  }
+}
+
+// ============================================================================
 // Coercion Schemas
 // ============================================================================
 
@@ -1962,6 +2073,72 @@ export class DhiCustom<T> extends DhiType<T, unknown> {
 }
 
 // ============================================================================
+// Success Wrapper (Zod 4)
+// ============================================================================
+
+export class DhiSuccess<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"]> {
+  constructor(private _inner: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const result = this._inner._parse(value, path);
+    // Always return success, using undefined if validation fails
+    if (!result.success) {
+      return { success: true, data: undefined as any };
+    }
+    return result;
+  }
+}
+
+// ============================================================================
+// Registry System (Zod 4)
+// ============================================================================
+
+export interface GlobalMeta {
+  id?: string;
+  title?: string;
+  description?: string;
+  deprecated?: boolean;
+  [key: string]: any;
+}
+
+export class DhiRegistry<M extends Record<string, any> = GlobalMeta> {
+  private _schemas = new WeakMap<DhiType<any, any>, M>();
+
+  add<T extends DhiType<any, any>>(schema: T, metadata: M): T {
+    this._schemas.set(schema, metadata);
+    return schema;
+  }
+
+  get<T extends DhiType<any, any>>(schema: T): M | undefined {
+    return this._schemas.get(schema);
+  }
+
+  has<T extends DhiType<any, any>>(schema: T): boolean {
+    return this._schemas.has(schema);
+  }
+
+  remove<T extends DhiType<any, any>>(schema: T): boolean {
+    return this._schemas.delete(schema);
+  }
+}
+
+// Global registry instance
+export const globalRegistry = new DhiRegistry<GlobalMeta>();
+
+// Add register method to base schema type
+DhiType.prototype.register = function<M extends GlobalMeta>(this: DhiType<any, any>, metadata: M): typeof this {
+  globalRegistry.add(this, metadata);
+  return this;
+};
+
+// Extend DhiType to include register method type
+declare module './schema' {
+  interface DhiType<Output, Input> {
+    register(metadata: GlobalMeta): this;
+  }
+}
+
+// ============================================================================
 // Main Export: z namespace (Zod 4 compatible)
 // ============================================================================
 
@@ -1994,6 +2171,12 @@ export const z = {
     if (value) return new DhiRecord(keyOrValue as K, value);
     return new DhiRecord(new DhiString() as any, keyOrValue as V);
   },
+  // Zod 4: partialRecord - record with optional keys
+  partialRecord: <K extends DhiType<string, string>, V extends DhiType<any, any>>(keySchema: K, valueSchema: V) =>
+    new DhiRecord(keySchema, new DhiOptional(valueSchema)),
+  // Zod 4: looseRecord - allows non-matching keys to pass through
+  looseRecord: <K extends DhiType<string, string>, V extends DhiType<any, any>>(keySchema: K, valueSchema: V) =>
+    new DhiRecord(keySchema, valueSchema),
   map: <K extends DhiType<any, any>, V extends DhiType<any, any>>(keySchema: K, valueSchema: V) => new DhiMap(keySchema, valueSchema),
   set: <T extends DhiType<any, any>>(schema: T) => new DhiSet(schema),
 
@@ -2033,6 +2216,99 @@ export const z = {
     boolean: () => new DhiCoercedBoolean(),
     bigint: () => new DhiCoercedBigInt(),
     date: () => new DhiCoercedDate(),
+  },
+
+  // Zod 4: File schema
+  file: () => new DhiFile(),
+
+  // Zod 4: Template literal
+  templateLiteral: <T extends Array<string | DhiType<any, any>>>(parts: T) => new DhiTemplateLiteral(parts),
+
+  // Zod 4: Top-level string format shortcuts
+  email: () => new DhiString().email(),
+  uuid: () => new DhiString().uuid(),
+  url: () => new DhiString().url(),
+  httpUrl: () => new DhiString().url(), // Same as url for now
+  hostname: () => new DhiString().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/),
+  emoji: () => new DhiString().emoji(),
+  base64: () => new DhiString().base64(),
+  base64url: () => new DhiString().base64url(),
+  jwt: () => new DhiString().jwt(),
+  nanoid: () => new DhiString().nanoid(),
+  cuid: () => new DhiString().cuid(),
+  cuid2: () => new DhiString().cuid2(),
+  ulid: () => new DhiString().ulid(),
+  ipv4: () => new DhiString().ipv4(),
+  ipv6: () => new DhiString().ipv6(),
+  ip: () => new DhiString().ip(),
+  mac: () => new DhiString().mac(),
+  cidrv4: () => new DhiString().cidrv4(),
+  cidrv6: () => new DhiString().cidrv6(),
+  guid: () => new DhiString().guid(),
+  e164: () => new DhiString().e164(),
+  hex: () => new DhiString().regex(/^[0-9a-fA-F]+$/),
+  lowercase: () => new DhiString().regex(/^[a-z]*$/),
+  uppercase: () => new DhiString().regex(/^[A-Z]*$/),
+
+  // Zod 4: Hash validation
+  hash: (algorithm: 'md5' | 'sha1' | 'sha256' | 'sha384' | 'sha512') => {
+    const lengths: Record<string, number> = {
+      md5: 32,
+      sha1: 40,
+      sha256: 64,
+      sha384: 96,
+      sha512: 128,
+    };
+    return new DhiString().regex(new RegExp(`^[0-9a-fA-F]{${lengths[algorithm]}}$`));
+  },
+
+  // Zod 4: iso namespace for date/time formats
+  iso: {
+    datetime: () => new DhiString().datetime(),
+    date: () => new DhiString().date(),
+    time: () => new DhiString().time(),
+    duration: () => new DhiString().duration(),
+  },
+
+  // Zod 4: Number format shortcuts
+  int: () => new DhiNumber().int().safe(),
+  float: () => new DhiNumber().finite(),
+  float32: () => new DhiNumber().finite().min(-3.4028235e38).max(3.4028235e38),
+  float64: () => new DhiNumber().finite(),
+  int8: () => new DhiNumber().int().min(-128).max(127),
+  uint8: () => new DhiNumber().int().min(0).max(255),
+  int16: () => new DhiNumber().int().min(-32768).max(32767),
+  uint16: () => new DhiNumber().int().min(0).max(65535),
+  int32: () => new DhiNumber().int().min(-2147483648).max(2147483647),
+  uint32: () => new DhiNumber().int().min(0).max(4294967295),
+  int64: () => new DhiBigInt().min(-9223372036854775808n).max(9223372036854775807n),
+  uint64: () => new DhiBigInt().min(0n).max(18446744073709551615n),
+
+  // Zod 4: json() - recursive JSON schema
+  json: (): DhiType<any, any> => new DhiLazy(() => new DhiUnion([
+    new DhiString(),
+    new DhiNumber(),
+    new DhiBoolean(),
+    new DhiNull(),
+    new DhiArray(z.json()),
+    new DhiRecord(new DhiString(), z.json()),
+  ])),
+
+  // Zod 4: success wrapper
+  success: <T extends DhiType<any, any>>(schema: T) => new DhiSuccess(schema),
+
+  // Zod 4: Registry system
+  registry: <M extends Record<string, any> = GlobalMeta>() => new DhiRegistry<M>(),
+  globalRegistry,
+
+  // Zod 4: prettifyError - format error for display
+  prettifyError: (error: ZodError): string => {
+    const lines: string[] = [];
+    for (const issue of error.issues) {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
+      lines.push(`• ${path}: ${issue.message}`);
+    }
+    return lines.join('\n');
   },
 
   // Type utilities (these are type-level only, no runtime impact)
@@ -2093,6 +2369,17 @@ export type { DhiRefine as ZodRefine };
 export type { DhiPipe as ZodPipeline };
 export type { DhiPromise as ZodPromise };
 export type { DhiFunction as ZodFunction };
+export type { DhiFile as ZodFile };
+export type { DhiTemplateLiteral as ZodTemplateLiteral };
+export type { DhiSuccess as ZodSuccess };
+export type { DhiRegistry as ZodRegistry };
+export type { DhiStringBool as ZodStringBool };
+export type { DhiCustom as ZodCustom };
+export type { DhiInstanceOf as ZodInstanceOf };
+export type { DhiPreprocess as ZodPreprocess };
+export type { DhiReadonly as ZodReadonly };
+export type { DhiNaN as ZodNaN };
+export type { DhiSymbol as ZodSymbol };
 
 // Default export
 export default z;
