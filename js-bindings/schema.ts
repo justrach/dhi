@@ -896,7 +896,11 @@ export class DhiLiteral<T extends string | number | boolean | bigint | null | un
 
   constructor(value: T | readonly T[]) {
     super();
-    this._values = Array.isArray(value) ? [...value] as T[] : [value];
+    if (Array.isArray(value)) {
+      this._values = (value as readonly T[]).slice() as T[];
+    } else {
+      this._values = [value as T];
+    }
   }
 
   get value(): T { return this._values[0]; }
