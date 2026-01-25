@@ -14,11 +14,11 @@
   <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
   <text x="170" y="85" fill="#1f2937" font-size="13" text-anchor="end">Array<number></text>
   <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="655" y="74" fill="#059669" font-size="11">71.4M/s</text>
-  <rect x="180" y="80" width="58.016835390308984" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="243.01683539030898" y="94" fill="#4f46e5" font-size="11">8.8M/s</text>
+  <text x="655" y="74" fill="#059669" font-size="11">35.3M/s</text>
+  <rect x="180" y="80" width="60.684050371501414" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="245.68405037150143" y="94" fill="#4f46e5" font-size="11">4.6M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#eab308" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">8.1x</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">7.7x</text>
   <rect x="660" y="120" width="15" height="15" fill="url(#dhiGrad)"/>
   <text x="680" y="132" fill="#1f2937" font-size="12">dhi</text>
   <rect x="720" y="120" width="15" height="15" fill="url(#zodGrad)"/>

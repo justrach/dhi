@@ -13,19 +13,19 @@
   <text x="400" y="35" fill="#1f2937" font-size="20" font-weight="bold" text-anchor="middle">Modifiers Benchmarks</text>
   <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
   <text x="170" y="85" fill="#1f2937" font-size="13" text-anchor="end">Optional</text>
-  <rect x="180" y="60" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="655" y="74" fill="#059669" font-size="11">165.5M/s</text>
-  <rect x="180" y="80" width="218.40765935888493" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="403.4076593588849" y="94" fill="#4f46e5" font-size="11">76.9M/s</text>
+  <rect x="180" y="60" width="447.27152831674044" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="632.2715283167404" y="74" fill="#059669" font-size="11">83.3M/s</text>
+  <rect x="180" y="80" width="217.9922393151921" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="402.99223931519214" y="94" fill="#4f46e5" font-size="11">40.6M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#f97316" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.2x</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.1x</text>
   <text x="170" y="135" fill="#1f2937" font-size="13" text-anchor="end">Nullable</text>
-  <rect x="180" y="110" width="469.2071128739289" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="654.207112873929" y="124" fill="#059669" font-size="11">165.3M/s</text>
-  <rect x="180" y="130" width="202.0835075981137" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="387.08350759811367" y="144" fill="#4f46e5" font-size="11">71.2M/s</text>
+  <rect x="180" y="110" width="470" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="655" y="124" fill="#059669" font-size="11">87.5M/s</text>
+  <rect x="180" y="130" width="218.92515466465767" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="403.92515466465767" y="144" fill="#4f46e5" font-size="11">40.8M/s</text>
   <rect x="670" y="115" width="70" height="30" fill="#f97316" rx="15"/>
-  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.3x</text>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">2.1x</text>
   <rect x="660" y="170" width="15" height="15" fill="url(#dhiGrad)"/>
   <text x="680" y="182" fill="#1f2937" font-size="12">dhi</text>
   <rect x="720" y="170" width="15" height="15" fill="url(#zodGrad)"/>
