@@ -15,6 +15,7 @@
     "allowSyntheticDefaultImports": true
   },
   "include": [
+    "types.d.ts",
     "schema.ts",
     "schema-nextjs.ts",
     "schema-turbo.ts",

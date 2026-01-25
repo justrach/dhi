@@ -3,7 +3,7 @@
  * Full TypeScript type inference, complete Zod 4 API parity
  *
  * Usage:
- *   import { z } from 'dhi/schema';
+ *   import { z } from 'dhi';
  *   const schema = z.object({ name: z.string(), age: z.number() });
  *   type User = z.infer<typeof schema>;
  */
