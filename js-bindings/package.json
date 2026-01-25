@@ -1,6 +1,6 @@
 {
   "name": "dhi",
-  "version": "1.1.5",
+  "version": "1.1.14",
   "description": "Ultra-fast Zod 4 drop-in replacement - 20x faster average, full API parity, SIMD WASM, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
