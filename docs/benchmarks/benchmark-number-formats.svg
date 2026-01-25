@@ -13,26 +13,26 @@
   <text x="400" y="35" fill="#1f2937" font-size="20" font-weight="bold" text-anchor="middle">Number Formats Benchmarks</text>
   <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle">Operations per second (higher is better)</text>
   <text x="170" y="85" fill="#1f2937" font-size="13" text-anchor="end">z.int()</text>
-  <rect x="180" y="60" width="442.6003295755567" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="627.6003295755568" y="74" fill="#059669" font-size="11">22.3M/s</text>
-  <rect x="180" y="80" width="7.628575607400695" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="192.6285756074007" y="94" fill="#4f46e5" font-size="11">0.4M/s</text>
+  <rect x="180" y="60" width="470.00000000000006" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="655" y="74" fill="#059669" font-size="11">45.8M/s</text>
+  <rect x="180" y="80" width="10.654860864391242" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="195.65486086439125" y="94" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="65" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">58.0x</text>
+  <text x="705" y="85" fill="white" font-size="13" font-weight="bold" text-anchor="middle">44.1x</text>
   <text x="170" y="135" fill="#1f2937" font-size="13" text-anchor="end">z.int32()</text>
-  <rect x="180" y="110" width="342.50342191091255" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="527.5034219109125" y="124" fill="#059669" font-size="11">17.3M/s</text>
-  <rect x="180" y="130" width="7.400991796178458" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="192.40099179617846" y="144" fill="#4f46e5" font-size="11">0.4M/s</text>
+  <rect x="180" y="110" width="326.0540934701425" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="511.0540934701425" y="124" fill="#059669" font-size="11">31.8M/s</text>
+  <rect x="180" y="130" width="11.051276468339092" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="196.0512764683391" y="144" fill="#4f46e5" font-size="11">1.1M/s</text>
   <rect x="670" y="115" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">46.3x</text>
+  <text x="705" y="135" fill="white" font-size="13" font-weight="bold" text-anchor="middle">29.5x</text>
   <text x="170" y="185" fill="#1f2937" font-size="13" text-anchor="end">z.float64()</text>
-  <rect x="180" y="160" width="470.00000000000006" height="18" fill="url(#dhiGrad)" rx="3"/>
-  <text x="655" y="174" fill="#059669" font-size="11">23.7M/s</text>
-  <rect x="180" y="180" width="7.373071858823124" height="18" fill="url(#zodGrad)" rx="3"/>
-  <text x="192.37307185882312" y="194" fill="#4f46e5" font-size="11">0.4M/s</text>
+  <rect x="180" y="160" width="463.56931502954524" height="18" fill="url(#dhiGrad)" rx="3"/>
+  <text x="648.5693150295452" y="174" fill="#059669" font-size="11">45.2M/s</text>
+  <rect x="180" y="180" width="10.769637821576222" height="18" fill="url(#zodGrad)" rx="3"/>
+  <text x="195.76963782157623" y="194" fill="#4f46e5" font-size="11">1.0M/s</text>
   <rect x="670" y="165" width="70" height="30" fill="#22c55e" rx="15"/>
-  <text x="705" y="185" fill="white" font-size="13" font-weight="bold" text-anchor="middle">63.7x</text>
+  <text x="705" y="185" fill="white" font-size="13" font-weight="bold" text-anchor="middle">43.0x</text>
   <rect x="660" y="220" width="15" height="15" fill="url(#dhiGrad)"/>
   <text x="680" y="232" fill="#1f2937" font-size="12">dhi</text>
   <rect x="720" y="220" width="15" height="15" fill="url(#zodGrad)"/>

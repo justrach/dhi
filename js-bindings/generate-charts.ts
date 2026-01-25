@@ -41,6 +41,16 @@ const colors = {
   accent: '#0891b2',   // Cyan 600
 };
 
+// Get bar color based on speedup (GitHub doesn't support hsl() in SVGs)
+function getSpeedupColor(speedup: number, maxSpeedup: number): string {
+  const ratio = speedup / maxSpeedup;
+  if (ratio > 0.7) return '#10b981';  // Emerald 500
+  if (ratio > 0.5) return '#22c55e';  // Green 500
+  if (ratio > 0.3) return '#84cc16';  // Lime 500
+  if (ratio > 0.15) return '#eab308'; // Yellow 500
+  return '#f97316';                   // Orange 500
+}
+
 function generateBarChart(results: BenchmarkResult[], title: string, filename: string) {
   const width = 800;
   const barHeight = 40;
@@ -132,16 +142,16 @@ function generateSpeedupChart(results: BenchmarkResult[], filename: string) {
     // Label
     svg += `  <text x="${padding.left - 10}" y="${y + barHeight/2 + 5}" fill="${colors.text}" font-size="13" text-anchor="end">${r.name}</text>\n`;
 
-    // Bar with gradient based on speedup
-    const hue = Math.min(r.speedup * 4, 160); // Green to cyan
-    svg += `  <rect x="${padding.left}" y="${y}" width="${barWidth}" height="${barHeight - 4}" fill="hsl(${hue}, 80%, 50%)" rx="4"/>\n`;
+    // Bar with hex color based on speedup (GitHub doesn't support hsl)
+    const barColor = getSpeedupColor(r.speedup, maxSpeedup);
+    svg += `  <rect x="${padding.left}" y="${y}" width="${Math.round(barWidth)}" height="${barHeight - 4}" fill="${barColor}" rx="4"/>\n`;
 
     // Speedup label
-    svg += `  <text x="${padding.left + barWidth + 8}" y="${y + barHeight/2 + 5}" fill="${colors.text}" font-size="13" font-weight="bold">${r.speedup.toFixed(1)}x faster</text>\n`;
+    svg += `  <text x="${padding.left + Math.round(barWidth) + 8}" y="${y + barHeight/2 + 5}" fill="${colors.text}" font-size="13" font-weight="bold">${r.speedup.toFixed(1)}x faster</text>\n`;
   });
 
   // Average line
-  const avgX = padding.left + data.summary.averageSpeedup * scale;
+  const avgX = Math.round(padding.left + data.summary.averageSpeedup * scale);
   svg += `  <line x1="${avgX}" y1="${padding.top - 10}" x2="${avgX}" y2="${height - padding.bottom + 10}" stroke="${colors.accent}" stroke-width="2" stroke-dasharray="5,5"/>\n`;
   svg += `  <text x="${avgX}" y="${padding.top - 15}" fill="${colors.accent}" font-size="11" text-anchor="middle">Avg: ${data.summary.averageSpeedup.toFixed(1)}x</text>\n`;
 
