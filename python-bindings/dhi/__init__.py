@@ -90,7 +90,11 @@ from .datetime_types import (
 # --- Functional validators ---
 from .functional_validators import (
     field_validator, model_validator, validator,
+    PrivateAttr, ComputedFieldInfo, computed_field,
 )
+
+# --- Config ---
+from .config import ConfigDict
 
 # --- Secret types ---
 from .secret import SecretStr, SecretBytes
@@ -161,6 +165,10 @@ __all__ = [
 
     # Functional validators
     "field_validator", "model_validator", "validator",
+    "PrivateAttr", "ComputedFieldInfo", "computed_field",
+
+    # Config
+    "ConfigDict",
 
     # Secret types
     "SecretStr", "SecretBytes",
