@@ -35,11 +35,11 @@ jobs:
 
       - name: Run compatibility tests
         working-directory: js-bindings
-        run: bun run test-zod4-compat.ts
+        run: bun run tests/test-zod4-compat.ts
 
       - name: Run feature tests
         working-directory: js-bindings
-        run: bun run test-all-features.ts
+        run: bun run tests/test-all-features.ts
 
       - name: Verify WASM exists
         run: |
