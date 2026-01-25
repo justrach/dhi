@@ -1,89 +1,82 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1175" style="font-family: system-ui, sans-serif;">
-  <defs>
-    <linearGradient id="speedupGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
-      <stop offset="50%" style="stop-color:#22d3ee;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1175">
   <rect width="800" height="1175" fill="#ffffff"/>
-  <text x="400" y="35" fill="#1f2937" font-size="20" font-weight="bold" text-anchor="middle">dhi vs Zod 4 — Performance Comparison</text>
-  <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle">Speedup factor (higher is better)</text>
-  <text x="170" y="82.5" fill="#1f2937" font-size="13" text-anchor="end">z.coerce.string()</text>
+  <text x="400" y="35" fill="#1f2937" font-size="20" font-weight="bold" text-anchor="middle" font-family="sans-serif">dhi vs Zod 4 — Performance Comparison</text>
+  <text x="400" y="55" fill="#9ca3af" font-size="12" text-anchor="middle" font-family="sans-serif">Speedup factor (higher is better)</text>
+  <text x="170" y="82.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.coerce.string()</text>
   <rect x="180" y="60" width="520" height="31" fill="#10b981" rx="4"/>
-  <text x="708" y="82.5" fill="#1f2937" font-size="13" font-weight="bold">48.6x faster</text>
-  <text x="170" y="125.5" fill="#1f2937" font-size="13" text-anchor="end">z.coerce.boolean()</text>
+  <text x="708" y="82.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">48.6x faster</text>
+  <text x="170" y="125.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.coerce.boolean()</text>
   <rect x="180" y="103" width="515" height="31" fill="#10b981" rx="4"/>
-  <text x="703" y="125.5" fill="#1f2937" font-size="13" font-weight="bold">48.1x faster</text>
-  <text x="170" y="168.5" fill="#1f2937" font-size="13" text-anchor="end">z.int()</text>
+  <text x="703" y="125.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">48.1x faster</text>
+  <text x="170" y="168.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.int()</text>
   <rect x="180" y="146" width="472" height="31" fill="#10b981" rx="4"/>
-  <text x="660" y="168.5" fill="#1f2937" font-size="13" font-weight="bold">44.1x faster</text>
-  <text x="170" y="211.5" fill="#1f2937" font-size="13" text-anchor="end">z.float64()</text>
+  <text x="660" y="168.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">44.1x faster</text>
+  <text x="170" y="211.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.float64()</text>
   <rect x="180" y="189" width="461" height="31" fill="#10b981" rx="4"/>
-  <text x="649" y="211.5" fill="#1f2937" font-size="13" font-weight="bold">43.0x faster</text>
-  <text x="170" y="254.5" fill="#1f2937" font-size="13" text-anchor="end">z.stringbool()</text>
+  <text x="649" y="211.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">43.0x faster</text>
+  <text x="170" y="254.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.stringbool()</text>
   <rect x="180" y="232" width="378" height="31" fill="#10b981" rx="4"/>
-  <text x="566" y="254.5" fill="#1f2937" font-size="13" font-weight="bold">35.3x faster</text>
-  <text x="170" y="297.5" fill="#1f2937" font-size="13" text-anchor="end">z.base64()</text>
+  <text x="566" y="254.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">35.3x faster</text>
+  <text x="170" y="297.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.base64()</text>
   <rect x="180" y="275" width="341" height="31" fill="#22c55e" rx="4"/>
-  <text x="529" y="297.5" fill="#1f2937" font-size="13" font-weight="bold">31.8x faster</text>
-  <text x="170" y="340.5" fill="#1f2937" font-size="13" text-anchor="end">z.iso.time()</text>
+  <text x="529" y="297.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">31.8x faster</text>
+  <text x="170" y="340.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.iso.time()</text>
   <rect x="180" y="318" width="324" height="31" fill="#22c55e" rx="4"/>
-  <text x="512" y="340.5" fill="#1f2937" font-size="13" font-weight="bold">30.3x faster</text>
-  <text x="170" y="383.5" fill="#1f2937" font-size="13" text-anchor="end">z.int32()</text>
+  <text x="512" y="340.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">30.3x faster</text>
+  <text x="170" y="383.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.int32()</text>
   <rect x="180" y="361" width="316" height="31" fill="#22c55e" rx="4"/>
-  <text x="504" y="383.5" fill="#1f2937" font-size="13" font-weight="bold">29.5x faster</text>
-  <text x="170" y="426.5" fill="#1f2937" font-size="13" text-anchor="end">z.ulid()</text>
+  <text x="504" y="383.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">29.5x faster</text>
+  <text x="170" y="426.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.ulid()</text>
   <rect x="180" y="404" width="294" height="31" fill="#22c55e" rx="4"/>
-  <text x="482" y="426.5" fill="#1f2937" font-size="13" font-weight="bold">27.5x faster</text>
-  <text x="170" y="469.5" fill="#1f2937" font-size="13" text-anchor="end">z.iso.date()</text>
+  <text x="482" y="426.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">27.5x faster</text>
+  <text x="170" y="469.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.iso.date()</text>
   <rect x="180" y="447" width="272" height="31" fill="#22c55e" rx="4"/>
-  <text x="460" y="469.5" fill="#1f2937" font-size="13" font-weight="bold">25.4x faster</text>
-  <text x="170" y="512.5" fill="#1f2937" font-size="13" text-anchor="end">z.nanoid()</text>
+  <text x="460" y="469.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">25.4x faster</text>
+  <text x="170" y="512.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.nanoid()</text>
   <rect x="180" y="490" width="270" height="31" fill="#22c55e" rx="4"/>
-  <text x="458" y="512.5" fill="#1f2937" font-size="13" font-weight="bold">25.3x faster</text>
-  <text x="170" y="555.5" fill="#1f2937" font-size="13" text-anchor="end">z.coerce.number()</text>
+  <text x="458" y="512.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">25.3x faster</text>
+  <text x="170" y="555.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.coerce.number()</text>
   <rect x="180" y="533" width="267" height="31" fill="#22c55e" rx="4"/>
-  <text x="455" y="555.5" fill="#1f2937" font-size="13" font-weight="bold">24.9x faster</text>
-  <text x="170" y="598.5" fill="#1f2937" font-size="13" text-anchor="end">z.jwt()</text>
+  <text x="455" y="555.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">24.9x faster</text>
+  <text x="170" y="598.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.jwt()</text>
   <rect x="180" y="576" width="180" height="31" fill="#84cc16" rx="4"/>
-  <text x="368" y="598.5" fill="#1f2937" font-size="13" font-weight="bold">16.8x faster</text>
-  <text x="170" y="641.5" fill="#1f2937" font-size="13" text-anchor="end">z.uuid()</text>
+  <text x="368" y="598.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">16.8x faster</text>
+  <text x="170" y="641.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.uuid()</text>
   <rect x="180" y="619" width="158" height="31" fill="#84cc16" rx="4"/>
-  <text x="346" y="641.5" fill="#1f2937" font-size="13" font-weight="bold">14.8x faster</text>
-  <text x="170" y="684.5" fill="#1f2937" font-size="13" text-anchor="end">z.email()</text>
+  <text x="346" y="641.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">14.8x faster</text>
+  <text x="170" y="684.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.email()</text>
   <rect x="180" y="662" width="149" height="31" fill="#eab308" rx="4"/>
-  <text x="337" y="684.5" fill="#1f2937" font-size="13" font-weight="bold">13.9x faster</text>
-  <text x="170" y="727.5" fill="#1f2937" font-size="13" text-anchor="end">z.iso.datetime()</text>
+  <text x="337" y="684.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">13.9x faster</text>
+  <text x="170" y="727.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.iso.datetime()</text>
   <rect x="180" y="705" width="139" height="31" fill="#eab308" rx="4"/>
-  <text x="327" y="727.5" fill="#1f2937" font-size="13" font-weight="bold">13.0x faster</text>
-  <text x="170" y="770.5" fill="#1f2937" font-size="13" text-anchor="end">z.url()</text>
+  <text x="327" y="727.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">13.0x faster</text>
+  <text x="170" y="770.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.url()</text>
   <rect x="180" y="748" width="127" height="31" fill="#eab308" rx="4"/>
-  <text x="315" y="770.5" fill="#1f2937" font-size="13" font-weight="bold">11.9x faster</text>
-  <text x="170" y="813.5" fill="#1f2937" font-size="13" text-anchor="end">z.ipv4()</text>
+  <text x="315" y="770.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">11.9x faster</text>
+  <text x="170" y="813.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">z.ipv4()</text>
   <rect x="180" y="791" width="121" height="31" fill="#eab308" rx="4"/>
-  <text x="309" y="813.5" fill="#1f2937" font-size="13" font-weight="bold">11.3x faster</text>
-  <text x="170" y="856.5" fill="#1f2937" font-size="13" text-anchor="end">Array<number></text>
+  <text x="309" y="813.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">11.3x faster</text>
+  <text x="170" y="856.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Array<number></text>
   <rect x="180" y="834" width="87" height="31" fill="#eab308" rx="4"/>
-  <text x="275" y="856.5" fill="#1f2937" font-size="13" font-weight="bold">8.1x faster</text>
-  <text x="170" y="899.5" fill="#1f2937" font-size="13" text-anchor="end">Object (valid)</text>
+  <text x="275" y="856.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">8.1x faster</text>
+  <text x="170" y="899.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Object (valid)</text>
   <rect x="180" y="877" width="51" height="31" fill="#f97316" rx="4"/>
-  <text x="239" y="899.5" fill="#1f2937" font-size="13" font-weight="bold">4.7x faster</text>
-  <text x="170" y="942.5" fill="#1f2937" font-size="13" text-anchor="end">Nested Object</text>
+  <text x="239" y="899.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">4.7x faster</text>
+  <text x="170" y="942.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Nested Object</text>
   <rect x="180" y="920" width="45" height="31" fill="#f97316" rx="4"/>
-  <text x="233" y="942.5" fill="#1f2937" font-size="13" font-weight="bold">4.2x faster</text>
-  <text x="170" y="985.5" fill="#1f2937" font-size="13" text-anchor="end">Nullable</text>
+  <text x="233" y="942.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">4.2x faster</text>
+  <text x="170" y="985.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Nullable</text>
   <rect x="180" y="963" width="25" height="31" fill="#f97316" rx="4"/>
-  <text x="213" y="985.5" fill="#1f2937" font-size="13" font-weight="bold">2.3x faster</text>
-  <text x="170" y="1028.5" fill="#1f2937" font-size="13" text-anchor="end">DiscriminatedUnion</text>
+  <text x="213" y="985.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">2.3x faster</text>
+  <text x="170" y="1028.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">DiscriminatedUnion</text>
   <rect x="180" y="1006" width="24" height="31" fill="#f97316" rx="4"/>
-  <text x="212" y="1028.5" fill="#1f2937" font-size="13" font-weight="bold">2.3x faster</text>
-  <text x="170" y="1071.5" fill="#1f2937" font-size="13" text-anchor="end">Optional</text>
+  <text x="212" y="1028.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">2.3x faster</text>
+  <text x="170" y="1071.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Optional</text>
   <rect x="180" y="1049" width="23" height="31" fill="#f97316" rx="4"/>
-  <text x="211" y="1071.5" fill="#1f2937" font-size="13" font-weight="bold">2.2x faster</text>
-  <text x="170" y="1114.5" fill="#1f2937" font-size="13" text-anchor="end">Union</text>
+  <text x="211" y="1071.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">2.2x faster</text>
+  <text x="170" y="1114.5" fill="#1f2937" font-size="13" text-anchor="end" font-family="sans-serif">Union</text>
   <rect x="180" y="1092" width="18" height="31" fill="#f97316" rx="4"/>
-  <text x="206" y="1114.5" fill="#1f2937" font-size="13" font-weight="bold">1.7x faster</text>
+  <text x="206" y="1114.5" fill="#1f2937" font-size="13" font-weight="bold" font-family="sans-serif">1.7x faster</text>
   <line x1="403" y1="50" x2="403" y2="1145" stroke="#0891b2" stroke-width="2" stroke-dasharray="5,5"/>
-  <text x="403" y="45" fill="#0891b2" font-size="11" text-anchor="middle">Avg: 20.8x</text>
+  <text x="403" y="45" fill="#0891b2" font-size="11" text-anchor="middle" font-family="sans-serif">Avg: 20.8x</text>
 </svg>
