@@ -143,40 +143,6 @@ export function createClient(config: ClientConfig) {
         return request<unknown>('GET', '/api/schemas', { ...options });
       },
     },
-    validatedQuery: {
-      /**
-       * GET validatedQuery
-       */
-      async list(options?: RequestOptions): Promise<ApiResponse<unknown>> {
-        return request<unknown>('GET', 'validatedQuery', { ...options });
-      },
-    },
-    validatedBody: {
-      /**
-       * GET validatedBody
-       */
-      async list(options?: RequestOptions): Promise<ApiResponse<unknown>> {
-        return request<unknown>('GET', 'validatedBody', { ...options });
-      },
-      /**
-       * GET validatedBody
-       */
-      async list(options?: RequestOptions): Promise<ApiResponse<unknown>> {
-        return request<unknown>('GET', 'validatedBody', { ...options });
-      },
-      /**
-       * GET validatedBody
-       */
-      async list(options?: RequestOptions): Promise<ApiResponse<unknown>> {
-        return request<unknown>('GET', 'validatedBody', { ...options });
-      },
-      /**
-       * GET validatedBody
-       */
-      async list(options?: RequestOptions): Promise<ApiResponse<unknown>> {
-        return request<unknown>('GET', 'validatedBody', { ...options });
-      },
-    },
   };
 }
 

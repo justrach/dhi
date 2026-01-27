@@ -55,40 +55,6 @@
         }
       }
     },
-    "validatedQuery": {
-      "get": {
-        "operationId": "list",
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "validatedBody": {
-      "get": {
-        "operationId": "list",
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/users/{id}": {
       "get": {
         "operationId": "getUsers",
