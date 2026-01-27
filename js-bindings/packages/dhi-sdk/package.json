@@ -12,7 +12,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "bun test",
-    "demo": "bun run src/cli.ts generate ../../../examples/hono-api/server.ts --output ./test-output"
+    "demo": "bun run src/cli.ts generate ../../examples/hono-api/server.ts --output ./test-output --openapi",
+    "demo:complex": "bun run src/cli.ts generate ../../examples/complex-api/server.ts --output ./complex-sdk --openapi",
+    "live-demo": "bun run live-demo.ts"
   },
   "keywords": [
     "sdk",
@@ -40,7 +42,7 @@
   },
   "peerDependencies": {
     "dhi": "^1.0.0",
-    "hono": "^4.0.0"
+    "hono": ""
   },
   "peerDependenciesMeta": {
     "hono": {
