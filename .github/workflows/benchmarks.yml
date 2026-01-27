@@ -26,11 +26,6 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install canvas system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
-
       - name: Install dependencies
         working-directory: js-bindings
         run: bun install
@@ -39,26 +34,19 @@ jobs:
         working-directory: js-bindings
         run: bun run benchmarks/benchmark-json.ts
 
-      - name: Generate charts
-        working-directory: js-bindings
-        run: bun run benchmarks/generate-charts.ts
-
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: |
-            js-bindings/benchmark-results.json
-            js-bindings/charts/
+          path: js-bindings/benchmark-results.json
 
-      - name: Commit charts to repository
+      - name: Commit benchmark results
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          # Copy charts to docs folder
+          # Copy results to docs folder
           mkdir -p docs/benchmarks
-          cp js-bindings/charts/*.png docs/benchmarks/
           cp js-bindings/benchmark-results.json docs/benchmarks/
 
           # Check if there are changes
@@ -66,6 +54,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: Update benchmark charts [skip ci]"
+            git commit -m "chore: Update benchmark results [skip ci]"
             git push
           fi
