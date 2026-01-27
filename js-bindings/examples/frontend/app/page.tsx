@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { z } from 'dhi/schema-nextjs';
+import { z } from 'dhi';
 
 // Define schema with dhi - 1.78x faster than Zod!
 const UserSchema = z.object({
