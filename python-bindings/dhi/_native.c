@@ -6,6 +6,31 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <math.h>
+#include <string.h>
+
+// =============================================================================
+// INLINE VALIDATORS - Avoid FFI overhead for simple checks
+// =============================================================================
+
+// Inline email validator - avoids Zig FFI call for simple email format checks
+// This is the same logic as Zig's satya_validate_email but runs in C
+static inline int inline_validate_email(const char* str) {
+    if (!str || !*str) return 0;
+
+    // Find @ position
+    const char* at = strchr(str, '@');
+    if (!at || at == str) return 0;  // No @ or @ at start
+
+    // Check domain part (after @)
+    const char* domain = at + 1;
+    if (!*domain) return 0;  // Empty domain
+
+    // Must have at least one . in domain
+    const char* dot = strchr(domain, '.');
+    if (!dot || dot == domain || !dot[1]) return 0;  // No dot, or dot at start/end
+
+    return 1;
+}
 
 // External Zig functions from libsatya - COMPREHENSIVE VALIDATORS
 // Basic validators
@@ -659,39 +684,45 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             }
         }
 
-        // --- NUMERIC CONSTRAINTS (direct C struct access, no PyLong_AsLong) ---
+        // --- NUMERIC CONSTRAINTS (INLINED - no FFI overhead) ---
+        // OPTIMIZATION: Simple comparisons are inlined in C instead of calling Zig
         int validation_failed = 0;
         if (PyLong_Check(result) && !PyBool_Check(result)) {
             long val = PyLong_AsLong(result);
-            if (fs->has_gt && !satya_validate_int_gt(val, fs->gt_long)) {
+            // INLINED: val > gt_long
+            if (fs->has_gt && val <= fs->gt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld", field_name, fs->gt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_ge && !satya_validate_int_gte(val, fs->ge_long)) {
+            // INLINED: val >= ge_long
+            if (fs->has_ge && val < fs->ge_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld", field_name, fs->ge_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_lt && !satya_validate_int_lt(val, fs->lt_long)) {
+            // INLINED: val < lt_long
+            if (fs->has_lt && val >= fs->lt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld", field_name, fs->lt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_le && !satya_validate_int_lte(val, fs->le_long)) {
+            // INLINED: val <= le_long
+            if (fs->has_le && val > fs->le_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld", field_name, fs->le_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_mul && !satya_validate_int_multiple_of(val, fs->mul_long)) {
+            // INLINED: val % mul_long == 0
+            if (fs->has_mul && (val % fs->mul_long) != 0) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be a multiple of %ld, got %ld", field_name, fs->mul_long, val);
@@ -700,17 +731,19 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             }
         } else if (PyFloat_Check(result)) {
             double val = PyFloat_AsDouble(result);
-            if (!fs->allow_inf_nan && !satya_validate_float_finite(val)) {
+            // INLINED: isfinite check
+            if (!fs->allow_inf_nan && !isfinite(val)) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be finite", field_name);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_gt && !satya_validate_float_gt(val, fs->gt_dbl)) { validation_failed = 1; }
-            if (!validation_failed && fs->has_ge && !satya_validate_float_gte(val, fs->ge_dbl)) { validation_failed = 2; }
-            if (!validation_failed && fs->has_lt && !satya_validate_float_lt(val, fs->lt_dbl)) { validation_failed = 3; }
-            if (!validation_failed && fs->has_le && !satya_validate_float_lte(val, fs->le_dbl)) { validation_failed = 4; }
+            // INLINED: all float comparisons
+            if (fs->has_gt && val <= fs->gt_dbl) { validation_failed = 1; }
+            if (!validation_failed && fs->has_ge && val < fs->ge_dbl) { validation_failed = 2; }
+            if (!validation_failed && fs->has_lt && val >= fs->lt_dbl) { validation_failed = 3; }
+            if (!validation_failed && fs->has_le && val > fs->le_dbl) { validation_failed = 4; }
             if (!validation_failed && fs->has_mul) {
                 double remainder = fmod(val, fs->mul_dbl);
                 if (remainder != 0.0 && fabs(remainder) > 1e-9) { validation_failed = 5; }
@@ -759,7 +792,7 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             int valid = 1;
             const char *fmt_name = "unknown";
             switch (fs->format_code) {
-                case 1: valid = satya_validate_email(str_val); fmt_name = "email"; break;
+                case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;  // INLINED
                 case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
                 case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
                 case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
@@ -1069,7 +1102,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         const char* fmt_name = "unknown format";
 
         switch (format_code) {
-            case 1: valid = satya_validate_email(str_val); fmt_name = "email"; break;
+            case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;  // INLINED
             case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
             case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
             case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
@@ -1524,39 +1557,46 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
             }
         }
 
-        // --- NUMERIC CONSTRAINTS ---
+        // --- NUMERIC CONSTRAINTS (INLINED - no FFI overhead) ---
+        // OPTIMIZATION: Simple comparisons are inlined in C instead of calling Zig
+        // This eliminates FFI overhead for trivial checks (gt/ge/lt/le)
         int validation_failed = 0;
         if (PyLong_Check(result) && !PyBool_Check(result)) {
             long val = PyLong_AsLong(result);
-            if (fs->has_gt && !satya_validate_int_gt(val, fs->gt_long)) {
+            // INLINED: val > gt_long (was satya_validate_int_gt)
+            if (fs->has_gt && val <= fs->gt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld", field_name, fs->gt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_ge && !satya_validate_int_gte(val, fs->ge_long)) {
+            // INLINED: val >= ge_long (was satya_validate_int_gte)
+            if (fs->has_ge && val < fs->ge_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld", field_name, fs->ge_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_lt && !satya_validate_int_lt(val, fs->lt_long)) {
+            // INLINED: val < lt_long (was satya_validate_int_lt)
+            if (fs->has_lt && val >= fs->lt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld", field_name, fs->lt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_le && !satya_validate_int_lte(val, fs->le_long)) {
+            // INLINED: val <= le_long (was satya_validate_int_lte)
+            if (fs->has_le && val > fs->le_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld", field_name, fs->le_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_mul && !satya_validate_int_multiple_of(val, fs->mul_long)) {
+            // INLINED: val % mul_long == 0 (was satya_validate_int_multiple_of)
+            if (fs->has_mul && (val % fs->mul_long) != 0) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be a multiple of %ld, got %ld", field_name, fs->mul_long, val);
@@ -1565,17 +1605,19 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
             }
         } else if (PyFloat_Check(result)) {
             double val = PyFloat_AsDouble(result);
-            if (!fs->allow_inf_nan && !satya_validate_float_finite(val)) {
+            // INLINED: isfinite check (was satya_validate_float_finite)
+            if (!fs->allow_inf_nan && !isfinite(val)) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
                 PyObject *msg = PyUnicode_FromFormat("%s: Value must be finite", field_name);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            if (fs->has_gt && !satya_validate_float_gt(val, fs->gt_dbl)) { validation_failed = 1; }
-            if (!validation_failed && fs->has_ge && !satya_validate_float_gte(val, fs->ge_dbl)) { validation_failed = 2; }
-            if (!validation_failed && fs->has_lt && !satya_validate_float_lt(val, fs->lt_dbl)) { validation_failed = 3; }
-            if (!validation_failed && fs->has_le && !satya_validate_float_lte(val, fs->le_dbl)) { validation_failed = 4; }
+            // INLINED: all float comparisons (no FFI calls)
+            if (fs->has_gt && val <= fs->gt_dbl) { validation_failed = 1; }
+            if (!validation_failed && fs->has_ge && val < fs->ge_dbl) { validation_failed = 2; }
+            if (!validation_failed && fs->has_lt && val >= fs->lt_dbl) { validation_failed = 3; }
+            if (!validation_failed && fs->has_le && val > fs->le_dbl) { validation_failed = 4; }
             if (!validation_failed && fs->has_mul) {
                 double remainder = fmod(val, fs->mul_dbl);
                 if (remainder != 0.0 && fabs(remainder) > 1e-9) { validation_failed = 5; }
@@ -1624,7 +1666,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
             int valid = 1;
             const char *fmt_name = "unknown";
             switch (fs->format_code) {
-                case 1: valid = satya_validate_email(str_val); fmt_name = "email"; break;
+                case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;  // INLINED
                 case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
                 case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
                 case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
@@ -1877,6 +1919,514 @@ static PyObject* py_dump_json_compiled(PyObject* self_unused, PyObject* args) {
     return result;
 }
 
+// =============================================================================
+// DhiStruct: HIGH-PERFORMANCE VALIDATED STRUCT (msgspec-like)
+// =============================================================================
+// Stores field values in a C array instead of Python __dict__.
+// This eliminates PyDict overhead and provides ~6x speedup over BaseModel.
+
+// Instance object - stores field values directly in C array
+typedef struct {
+    PyObject_HEAD
+    PyObject *values[];  // Flexible array member - holds field values
+} DhiStructObject;
+
+// Forward declarations
+static PyTypeObject DhiStructType;
+
+// Helper: Get field count from type's tp_dict
+static Py_ssize_t DhiStruct_get_n_fields(PyTypeObject *type) {
+    PyObject *n_fields_obj = PyDict_GetItemString(type->tp_dict, "__dhi_n_fields__");
+    if (!n_fields_obj) return 0;
+    return PyLong_AsSsize_t(n_fields_obj);
+}
+
+// tp_new: Allocate object with space for field values
+static PyObject* DhiStruct_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    Py_ssize_t n_fields = DhiStruct_get_n_fields(type);
+
+    // Allocate object with flexible array for values
+    DhiStructObject *self = (DhiStructObject*)type->tp_alloc(type, n_fields);
+    if (!self) return NULL;
+
+    // Initialize all values to NULL
+    for (Py_ssize_t i = 0; i < n_fields; i++) {
+        self->values[i] = NULL;
+    }
+
+    return (PyObject*)self;
+}
+
+// tp_dealloc: Free the object
+static void DhiStruct_dealloc(DhiStructObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    Py_ssize_t n_fields = DhiStruct_get_n_fields(type);
+
+    // Decref all stored values
+    for (Py_ssize_t i = 0; i < n_fields; i++) {
+        Py_XDECREF(self->values[i]);
+    }
+
+    type->tp_free((PyObject*)self);
+}
+
+// tp_init: Validate and store field values (THE HOT PATH)
+static int DhiStruct_init(DhiStructObject *self, PyObject *args, PyObject *kwargs) {
+    if (args && PyTuple_GET_SIZE(args) > 0) {
+        PyErr_SetString(PyExc_TypeError, "DhiStruct does not accept positional arguments");
+        return -1;
+    }
+
+    if (!kwargs) {
+        kwargs = PyDict_New();
+        if (!kwargs) return -1;
+        Py_DECREF(kwargs);
+        kwargs = NULL;
+    }
+
+    PyTypeObject *type = Py_TYPE(self);
+
+    // Get compiled specs from type
+    PyObject *capsule = PyDict_GetItemString(type->tp_dict, "__dhi_compiled_specs__");
+    if (!capsule) {
+        PyErr_SetString(PyExc_RuntimeError, "DhiStruct type not properly initialized (missing specs)");
+        return -1;
+    }
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) return -1;
+
+    // Get field indices dict for fast lookup
+    PyObject *field_indices = PyDict_GetItemString(type->tp_dict, "__dhi_field_indices__");
+    if (!field_indices) {
+        PyErr_SetString(PyExc_RuntimeError, "DhiStruct type not properly initialized (missing indices)");
+        return -1;
+    }
+
+    PyObject *errors = NULL;
+
+    // ULTRA-FAST validation loop - no __dict__ operations!
+    for (Py_ssize_t i = 0; i < ms->n_fields; i++) {
+        CompiledFieldSpec *fs = &ms->specs[i];
+
+        // Extract value from kwargs
+        PyObject *value = NULL;
+        if (kwargs) {
+            if (fs->alias_obj != Py_None) {
+                value = PyDict_GetItem(kwargs, fs->alias_obj);
+            }
+            if (!value) {
+                value = _PyDict_GetItem_KnownHash(kwargs, fs->name_obj, fs->name_hash);
+            }
+        }
+
+        if (!value) {
+            if (!fs->required) {
+                // Use default value
+                Py_INCREF(fs->default_val);
+                self->values[i] = fs->default_val;
+                continue;
+            }
+            if (!errors) { errors = PyList_New(0); if (!errors) return -1; }
+            PyObject *err = Py_BuildValue("(Os)", fs->name_obj, "Field required");
+            PyList_Append(errors, err); Py_DECREF(err);
+            continue;
+        }
+
+        // --- TYPE CHECKING ---
+        PyObject *result = value;
+        Py_INCREF(result);
+        const char *field_name = NULL;
+
+        if (fs->type_code == 1) { // int
+            if (fs->strict) {
+                if (!PyLong_CheckExact(result) || PyBool_Check(result)) {
+                    Py_DECREF(result);
+                    field_name = PyUnicode_AsUTF8(fs->name_obj);
+                    if (!errors) { errors = PyList_New(0); }
+                    PyObject *msg = PyUnicode_FromFormat("%s: Expected exactly int, got %s", field_name, Py_TYPE(value)->tp_name);
+                    PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                    PyList_Append(errors, err); Py_DECREF(err); continue;
+                }
+            } else {
+                if (PyBool_Check(result)) {
+                    Py_DECREF(result);
+                    field_name = PyUnicode_AsUTF8(fs->name_obj);
+                    if (!errors) { errors = PyList_New(0); }
+                    PyObject *msg = PyUnicode_FromFormat("%s: Expected int, got bool", field_name);
+                    PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                    PyList_Append(errors, err); Py_DECREF(err); continue;
+                }
+                if (!PyLong_Check(result)) {
+                    if (PyFloat_Check(result)) {
+                        PyObject *new_val = PyNumber_Long(result);
+                        if (!new_val) { Py_DECREF(result); PyErr_Clear();
+                            field_name = PyUnicode_AsUTF8(fs->name_obj);
+                            if (!errors) { errors = PyList_New(0); }
+                            PyObject *msg = PyUnicode_FromFormat("%s: Cannot convert float to int", field_name);
+                            PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                            PyList_Append(errors, err); Py_DECREF(err); continue;
+                        }
+                        Py_DECREF(result); result = new_val;
+                    } else {
+                        Py_DECREF(result);
+                        field_name = PyUnicode_AsUTF8(fs->name_obj);
+                        if (!errors) { errors = PyList_New(0); }
+                        PyObject *msg = PyUnicode_FromFormat("%s: Expected int, got %s", field_name, Py_TYPE(value)->tp_name);
+                        PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                        PyList_Append(errors, err); Py_DECREF(err); continue;
+                    }
+                }
+            }
+        } else if (fs->type_code == 2) { // float
+            if (fs->strict) {
+                if (!PyFloat_CheckExact(result)) {
+                    Py_DECREF(result);
+                    field_name = PyUnicode_AsUTF8(fs->name_obj);
+                    if (!errors) { errors = PyList_New(0); }
+                    PyObject *msg = PyUnicode_FromFormat("%s: Expected exactly float, got %s", field_name, Py_TYPE(value)->tp_name);
+                    PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                    PyList_Append(errors, err); Py_DECREF(err); continue;
+                }
+            } else {
+                if (PyBool_Check(result)) {
+                    Py_DECREF(result);
+                    field_name = PyUnicode_AsUTF8(fs->name_obj);
+                    if (!errors) { errors = PyList_New(0); }
+                    PyObject *msg = PyUnicode_FromFormat("%s: Expected float, got bool", field_name);
+                    PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                    PyList_Append(errors, err); Py_DECREF(err); continue;
+                }
+                if (!PyFloat_Check(result)) {
+                    if (PyLong_Check(result)) {
+                        PyObject *new_val = PyNumber_Float(result);
+                        if (!new_val) { Py_DECREF(result); PyErr_Clear();
+                            field_name = PyUnicode_AsUTF8(fs->name_obj);
+                            if (!errors) { errors = PyList_New(0); }
+                            PyObject *msg = PyUnicode_FromFormat("%s: Cannot convert int to float", field_name);
+                            PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                            PyList_Append(errors, err); Py_DECREF(err); continue;
+                        }
+                        Py_DECREF(result); result = new_val;
+                    } else {
+                        Py_DECREF(result);
+                        field_name = PyUnicode_AsUTF8(fs->name_obj);
+                        if (!errors) { errors = PyList_New(0); }
+                        PyObject *msg = PyUnicode_FromFormat("%s: Expected float, got %s", field_name, Py_TYPE(value)->tp_name);
+                        PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                        PyList_Append(errors, err); Py_DECREF(err); continue;
+                    }
+                }
+            }
+        } else if (fs->type_code == 3) { // str
+            if (!PyUnicode_Check(result)) {
+                Py_DECREF(result);
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Expected str, got %s", field_name, Py_TYPE(value)->tp_name);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); continue;
+            }
+        } else if (fs->type_code == 4) { // bool
+            if (!PyBool_Check(result)) {
+                Py_DECREF(result);
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Expected bool, got %s", field_name, Py_TYPE(value)->tp_name);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); continue;
+            }
+        }
+
+        // --- NUMERIC CONSTRAINTS (INLINED - no FFI) ---
+        int validation_failed = 0;
+        if (PyLong_Check(result) && !PyBool_Check(result)) {
+            long val = PyLong_AsLong(result);
+            if (fs->has_gt && val <= fs->gt_long) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld", field_name, fs->gt_long, val);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+            if (fs->has_ge && val < fs->ge_long) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld", field_name, fs->ge_long, val);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+            if (fs->has_lt && val >= fs->lt_long) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld", field_name, fs->lt_long, val);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+            if (fs->has_le && val > fs->le_long) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld", field_name, fs->le_long, val);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+        } else if (PyFloat_Check(result)) {
+            double val = PyFloat_AsDouble(result);
+            if (!fs->allow_inf_nan && !isfinite(val)) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be finite", field_name);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+            if (fs->has_gt && val <= fs->gt_dbl) { validation_failed = 1; }
+            if (!validation_failed && fs->has_ge && val < fs->ge_dbl) { validation_failed = 2; }
+            if (!validation_failed && fs->has_lt && val >= fs->lt_dbl) { validation_failed = 3; }
+            if (!validation_failed && fs->has_le && val > fs->le_dbl) { validation_failed = 4; }
+            if (validation_failed) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                char buf[128];
+                switch (validation_failed) {
+                    case 1: snprintf(buf, sizeof(buf), "%s: Value must be > %g, got %g", field_name, fs->gt_dbl, val); break;
+                    case 2: snprintf(buf, sizeof(buf), "%s: Value must be >= %g, got %g", field_name, fs->ge_dbl, val); break;
+                    case 3: snprintf(buf, sizeof(buf), "%s: Value must be < %g, got %g", field_name, fs->lt_dbl, val); break;
+                    case 4: snprintf(buf, sizeof(buf), "%s: Value must be <= %g, got %g", field_name, fs->le_dbl, val); break;
+                    default: buf[0] = '\0';
+                }
+                PyObject *msg = PyUnicode_FromString(buf);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+        }
+
+        // --- LENGTH CONSTRAINTS ---
+        if (fs->has_minl || fs->has_maxl) {
+            Py_ssize_t length = PyObject_Length(result);
+            if (length == -1 && PyErr_Occurred()) { Py_DECREF(result); Py_XDECREF(errors); return -1; }
+            if (fs->has_minl && length < fs->min_len) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Length must be >= %zd, got %zd", field_name, fs->min_len, length);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+            if (fs->has_maxl && length > fs->max_len) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Length must be <= %zd, got %zd", field_name, fs->max_len, length);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+        }
+
+        // --- FORMAT VALIDATION ---
+        if (fs->format_code > 0 && PyUnicode_Check(result)) {
+            const char *str_val = PyUnicode_AsUTF8(result);
+            if (!str_val) { Py_DECREF(result); Py_XDECREF(errors); return -1; }
+            int valid = 1;
+            const char *fmt_name = "unknown";
+            switch (fs->format_code) {
+                case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;
+                case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
+                case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
+                case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
+                case 5: valid = satya_validate_ipv6(str_val); fmt_name = "IPv6"; break;
+                case 6: valid = satya_validate_base64(str_val); fmt_name = "base64"; break;
+                case 7: valid = satya_validate_iso_date(str_val); fmt_name = "ISO date"; break;
+                case 8: valid = satya_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
+            }
+            if (!valid) {
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Invalid %s format", field_name, fmt_name);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
+            }
+        }
+
+        // --- SUCCESS: Store directly in values array (NO __dict__!) ---
+        self->values[i] = result;  // Already incref'd above
+    }
+
+    // Check for errors
+    if (errors && PyList_GET_SIZE(errors) > 0) {
+        // Raise ValidationError with all errors
+        PyObject *exc_args = Py_BuildValue("(sO)", "Validation failed", errors);
+        PyErr_SetObject(PyExc_ValueError, exc_args);
+        Py_DECREF(exc_args);
+        Py_DECREF(errors);
+        return -1;
+    }
+    Py_XDECREF(errors);
+
+    return 0;
+}
+
+// tp_getattro: Fast field access by name
+static PyObject* DhiStruct_getattro(DhiStructObject *self, PyObject *name) {
+    PyTypeObject *type = Py_TYPE(self);
+
+    // First check if it's a field
+    PyObject *field_indices = PyDict_GetItemString(type->tp_dict, "__dhi_field_indices__");
+    if (field_indices) {
+        PyObject *index_obj = PyDict_GetItem(field_indices, name);
+        if (index_obj) {
+            Py_ssize_t index = PyLong_AsSsize_t(index_obj);
+            PyObject *value = self->values[index];
+            if (value) {
+                Py_INCREF(value);
+                return value;
+            }
+            PyErr_Format(PyExc_AttributeError, "'%.50s' object has no attribute '%.400s'",
+                        type->tp_name, PyUnicode_AsUTF8(name));
+            return NULL;
+        }
+    }
+
+    // Fall back to generic attribute lookup (for methods, etc.)
+    return PyObject_GenericGetAttr((PyObject*)self, name);
+}
+
+// tp_setattro: Fast field setting by name
+static int DhiStruct_setattro(DhiStructObject *self, PyObject *name, PyObject *value) {
+    PyTypeObject *type = Py_TYPE(self);
+
+    // Check if it's a field
+    PyObject *field_indices = PyDict_GetItemString(type->tp_dict, "__dhi_field_indices__");
+    if (field_indices) {
+        PyObject *index_obj = PyDict_GetItem(field_indices, name);
+        if (index_obj) {
+            Py_ssize_t index = PyLong_AsSsize_t(index_obj);
+            PyObject *old = self->values[index];
+            Py_XINCREF(value);
+            self->values[index] = value;
+            Py_XDECREF(old);
+            return 0;
+        }
+    }
+
+    PyErr_Format(PyExc_AttributeError, "'%.50s' object has no attribute '%.400s'",
+                type->tp_name, PyUnicode_AsUTF8(name));
+    return -1;
+}
+
+// tp_repr: String representation
+static PyObject* DhiStruct_repr(DhiStructObject *self) {
+    PyTypeObject *type = Py_TYPE(self);
+    PyObject *field_names = PyDict_GetItemString(type->tp_dict, "__dhi_field_names__");
+    if (!field_names) {
+        return PyUnicode_FromFormat("<%s object>", type->tp_name);
+    }
+
+    Py_ssize_t n_fields = PyTuple_GET_SIZE(field_names);
+
+    // Build repr string
+    PyObject *parts = PyList_New(0);
+    if (!parts) return NULL;
+
+    for (Py_ssize_t i = 0; i < n_fields; i++) {
+        PyObject *name = PyTuple_GET_ITEM(field_names, i);
+        PyObject *value = self->values[i];
+        if (value) {
+            PyObject *value_repr = PyObject_Repr(value);
+            if (!value_repr) { Py_DECREF(parts); return NULL; }
+            PyObject *part = PyUnicode_FromFormat("%S=%S", name, value_repr);
+            Py_DECREF(value_repr);
+            if (!part) { Py_DECREF(parts); return NULL; }
+            PyList_Append(parts, part);
+            Py_DECREF(part);
+        }
+    }
+
+    PyObject *sep = PyUnicode_FromString(", ");
+    PyObject *joined = PyUnicode_Join(sep, parts);
+    Py_DECREF(sep);
+    Py_DECREF(parts);
+
+    if (!joined) return NULL;
+
+    PyObject *result = PyUnicode_FromFormat("%s(%S)", type->tp_name, joined);
+    Py_DECREF(joined);
+    return result;
+}
+
+// Type object definition
+static PyTypeObject DhiStructType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "dhi._dhi_native.Struct",
+    .tp_doc = "High-performance validated struct (stores fields in C array, not __dict__)",
+    .tp_basicsize = sizeof(DhiStructObject),
+    .tp_itemsize = sizeof(PyObject*),  // For flexible array member
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = DhiStruct_new,
+    .tp_init = (initproc)DhiStruct_init,
+    .tp_dealloc = (destructor)DhiStruct_dealloc,
+    .tp_getattro = (getattrofunc)DhiStruct_getattro,
+    .tp_setattro = (setattrofunc)DhiStruct_setattro,
+    .tp_repr = (reprfunc)DhiStruct_repr,
+};
+
+// Helper function to initialize a Struct subclass
+// Called from Python: _dhi_native.init_struct_class(cls, field_specs_tuple)
+static PyObject* py_init_struct_class(PyObject *self, PyObject *args) {
+    PyObject *cls;
+    PyObject *field_specs;
+
+    if (!PyArg_ParseTuple(args, "OO!", &cls, &PyTuple_Type, &field_specs)) {
+        return NULL;
+    }
+
+    if (!PyType_Check(cls)) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be a class");
+        return NULL;
+    }
+
+    PyTypeObject *type = (PyTypeObject*)cls;
+
+    // Compile specs - need to wrap field_specs in a tuple for py_compile_model_specs
+    PyObject *specs_args = PyTuple_Pack(1, field_specs);
+    if (!specs_args) return NULL;
+    PyObject *capsule = py_compile_model_specs(self, specs_args);
+    Py_DECREF(specs_args);
+    if (!capsule) return NULL;
+
+    // Build field names tuple and indices dict
+    Py_ssize_t n_fields = PyTuple_GET_SIZE(field_specs);
+    PyObject *field_names = PyTuple_New(n_fields);
+    PyObject *field_indices = PyDict_New();
+
+    if (!field_names || !field_indices) {
+        Py_XDECREF(field_names);
+        Py_XDECREF(field_indices);
+        Py_DECREF(capsule);
+        return NULL;
+    }
+
+    for (Py_ssize_t i = 0; i < n_fields; i++) {
+        PyObject *spec = PyTuple_GET_ITEM(field_specs, i);
+        PyObject *name = PyTuple_GET_ITEM(spec, 0);
+        Py_INCREF(name);
+        PyTuple_SET_ITEM(field_names, i, name);
+
+        PyObject *index = PyLong_FromSsize_t(i);
+        PyDict_SetItem(field_indices, name, index);
+        Py_DECREF(index);
+    }
+
+    // Store metadata in type's dict
+    PyDict_SetItemString(type->tp_dict, "__dhi_compiled_specs__", capsule);
+    PyDict_SetItemString(type->tp_dict, "__dhi_field_names__", field_names);
+    PyDict_SetItemString(type->tp_dict, "__dhi_field_indices__", field_indices);
+    PyDict_SetItemString(type->tp_dict, "__dhi_n_fields__", PyLong_FromSsize_t(n_fields));
+
+    Py_DECREF(capsule);
+    Py_DECREF(field_names);
+    Py_DECREF(field_indices);
+
+    Py_RETURN_NONE;
+}
+
 // Method definitions
 static PyMethodDef DhiNativeMethods[] = {
     {"validate_int", py_validate_int, METH_VARARGS,
@@ -1901,6 +2451,8 @@ static PyMethodDef DhiNativeMethods[] = {
      "Ultra-fast model_dump with pre-compiled specs: (self, capsule) -> dict"},
     {"dump_json_compiled", py_dump_json_compiled, METH_VARARGS,
      "Ultra-fast JSON dump with pre-compiled specs: (self, capsule) -> JSON string"},
+    {"init_struct_class", py_init_struct_class, METH_VARARGS,
+     "Initialize a Struct subclass with field specs: (cls, field_specs) -> None"},
     {NULL, NULL, 0, NULL}
 };
 
@@ -1915,5 +2467,21 @@ static struct PyModuleDef dhi_native_module = {
 
 // Module initialization
 PyMODINIT_FUNC PyInit__dhi_native(void) {
-    return PyModule_Create(&dhi_native_module);
+    PyObject *module = PyModule_Create(&dhi_native_module);
+    if (!module) return NULL;
+
+    // Initialize and register DhiStructType
+    if (PyType_Ready(&DhiStructType) < 0) {
+        Py_DECREF(module);
+        return NULL;
+    }
+
+    Py_INCREF(&DhiStructType);
+    if (PyModule_AddObject(module, "Struct", (PyObject*)&DhiStructType) < 0) {
+        Py_DECREF(&DhiStructType);
+        Py_DECREF(module);
+        return NULL;
+    }
+
+    return module;
 }

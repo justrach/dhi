@@ -17,7 +17,7 @@ Example:
     user = User(name="Alice", age=25, email="alice@example.com")
 """
 
-__version__ = "1.1.16"
+__version__ = "1.1.17"
 __author__ = "Rach Pradhan"
 
 # --- Core validators (original API) ---
@@ -68,6 +68,9 @@ from .types import (
 
 # --- BaseModel ---
 from .model import BaseModel
+
+# --- Struct (high-performance, msgspec-like) ---
+from .struct import Struct
 
 # --- Network types ---
 from .networks import (
@@ -148,6 +151,9 @@ __all__ = [
 
     # BaseModel
     "BaseModel",
+
+    # Struct (high-performance)
+    "Struct",
 
     # Network types
     "EmailStr", "NameEmail",
