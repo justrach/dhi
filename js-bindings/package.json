@@ -93,7 +93,6 @@
     "@types/bun": "^1.2.5",
     "@types/node": "^20.19.30",
     "arktype": "^2.1.29",
-    "canvas": "^2.11.2",
     "typescript": "^5.9.3",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.1"
