@@ -1,0 +1,21 @@
+{
+  "name": "dhi-ai-sdk-example",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Vercel AI SDK example with dhi for ultra-fast tool validation",
+  "scripts": {
+    "demo": "bun run demo.ts",
+    "benchmark": "bun run benchmark-tools.ts",
+    "agent": "bun run agent-example.ts"
+  },
+  "dependencies": {
+    "ai": "^4.3.0",
+    "@ai-sdk/anthropic": "^1.2.0",
+    "@ai-sdk/openai": "^1.3.0",
+    "dhi": "file:../.."
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "zod": "^4.3.6"
+  }
+}
