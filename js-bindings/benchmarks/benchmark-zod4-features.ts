@@ -1,7 +1,7 @@
 /**
  * Benchmark: dhi vs Zod 4 — New Zod 4 Features
  */
-import { z as dhi } from './schema';
+import { z as dhi } from '../schema';
 import { z as zod } from 'zod';
 
 function bench(fn: () => void, iterations: number = 1_000_000): number {
