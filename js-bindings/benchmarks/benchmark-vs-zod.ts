@@ -1,7 +1,7 @@
 /**
  * Head-to-head: dhi v0.6.0 (SIMD WASM) vs Zod 4.3.6
  */
-import { z as dhi } from './schema';
+import { z as dhi } from '../schema';
 import { z as zod } from 'zod';
 
 function bench(fn: () => void, iterations: number = 1_000_000): number {

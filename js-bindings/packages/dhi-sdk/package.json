@@ -1,0 +1,50 @@
+{
+  "name": "dhi-sdk",
+  "version": "0.1.0",
+  "description": "Generate TypeScript SDKs from Hono + dhi apps - like Stainless/Fern but code-first",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "dhi-sdk": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "bun test",
+    "demo": "bun run src/cli.ts generate ../../../examples/hono-api/server.ts --output ./test-output"
+  },
+  "keywords": [
+    "sdk",
+    "generator",
+    "hono",
+    "typescript",
+    "api",
+    "client",
+    "dhi",
+    "validation",
+    "openapi",
+    "stainless",
+    "fern"
+  ],
+  "author": "dhi team",
+  "license": "MIT",
+  "dependencies": {
+    "typescript": "^5.7.0",
+    "ts-morph": "^24.0.0",
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.0.0"
+  },
+  "peerDependencies": {
+    "dhi": "^1.0.0",
+    "hono": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
+    }
+  }
+}

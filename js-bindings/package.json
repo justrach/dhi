@@ -45,7 +45,8 @@
   ],
   "scripts": {
     "test": "bun test",
-    "bench": "bun run benchmark-vs-zod.ts",
+    "bench": "bun run benchmarks/benchmark-vs-zod.ts",
+    "bench:all": "bun run benchmarks/benchmark-vs-all.ts",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
     "prepublishOnly": "npm run build",
     "test:nextjs": "cd examples/nextjs-app && npm install && npm run build"
@@ -72,6 +73,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^20.19.19",
+    "arktype": "^2.1.29",
     "typescript": "^5.9.3",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.1"

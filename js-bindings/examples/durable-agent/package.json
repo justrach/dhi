@@ -1,0 +1,21 @@
+{
+  "name": "dhi-durable-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Cloudflare Durable Objects + dhi for long-running stateful AI agents",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
+  },
+  "dependencies": {
+    "dhi": "file:../..",
+    "ai": "^4.3.0",
+    "@ai-sdk/anthropic": "^1.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "wrangler": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
