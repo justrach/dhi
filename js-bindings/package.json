@@ -21,7 +21,10 @@
     "edge-runtime",
     "simd",
     "performance",
-    "zig"
+    "zig",
+    "cloudflare",
+    "cloudflare-workers",
+    "serverless"
   ],
   "author": "dhi team",
   "license": "MIT",
@@ -47,32 +50,48 @@
     "test": "bun test",
     "bench": "bun run benchmarks/benchmark-vs-zod.ts",
     "bench:all": "bun run benchmarks/benchmark-vs-all.ts",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
+    "build": "rm -rf dist && bun run scripts/generate-nextjs-edge.ts && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
     "prepublishOnly": "npm run build",
     "test:nextjs": "cd examples/nextjs-app && npm install && npm run build"
   },
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/schema.d.ts",
+      "workerd": "./dist/schema-cloudflare.js",
+      "edge-light": "./dist/schema-nextjs-edge.js",
+      "worker": "./dist/schema-cloudflare.js",
+      "browser": "./dist/schema-nextjs-edge.js",
+      "bun": "./dist/schema.js",
+      "deno": "./dist/schema-edge.js",
+      "node": "./dist/schema.js",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
     },
     "./schema": {
-      "import": "./dist/schema.js",
-      "types": "./dist/schema.d.ts"
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js"
     },
-    "./schema-nextjs": {
-      "import": "./dist/schema-nextjs.js",
-      "types": "./dist/schema-nextjs.d.ts"
+    "./edge": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema-edge.js"
     },
     "./turbo": {
-      "import": "./dist/schema-turbo.js",
-      "types": "./dist/schema-turbo.d.ts"
+      "types": "./dist/schema-turbo.d.ts",
+      "import": "./dist/schema-turbo.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema-cloudflare.js"
+    },
+    "./nextjs": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema-nextjs-edge.js"
     },
     "./dhi.wasm": "./dist/dhi.wasm"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "^20.19.19",
+    "@types/bun": "^1.2.5",
+    "@types/node": "^20.19.30",
     "arktype": "^2.1.29",
     "typescript": "^5.9.3",
     "zod": "^4.3.6",
@@ -88,8 +107,5 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "dependencies": {
-    "canvas": "^3.2.1"
   }
 }
