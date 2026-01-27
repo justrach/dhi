@@ -32,11 +32,11 @@ jobs:
 
       - name: Run benchmarks
         working-directory: js-bindings
-        run: bun run benchmark-json.ts
+        run: bun run benchmarks/benchmark-json.ts
 
       - name: Generate charts
         working-directory: js-bindings
-        run: bun run generate-charts.ts
+        run: bun run benchmarks/generate-charts.ts
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
