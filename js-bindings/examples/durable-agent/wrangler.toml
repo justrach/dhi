@@ -1,0 +1,19 @@
+# Durable Agent - Long-running AI agents with persistent state
+name = "dhi-durable-agent"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+
+# Durable Objects configuration
+[[durable_objects.bindings]]
+name = "AGENT"
+class_name = "AgentDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AgentDurableObject"]
+
+# Environment variables (set via wrangler secret)
+# ANTHROPIC_API_KEY - Your Anthropic API key
+
+[vars]
+ENVIRONMENT = "development"
