@@ -5,6 +5,13 @@ const std = @import("std");
 ///
 /// Reference: "SIMD-friendly algorithms for substring searching"
 /// by Wojciech Muła (http://0x80.pl/notesen/2016-11-28-simd-strfind.html)
+///
+/// AVX-512 Support: Uses std.simd.suggestVectorLength() to dynamically
+/// select optimal SIMD width (32 for AVX2, 64 for AVX-512).
+
+/// Optimal SIMD block size - auto-detected at compile time.
+/// Uses 64 bytes on AVX-512 capable CPUs, 32 bytes otherwise.
+const optimal_block_size = std.simd.suggestVectorLength(u8) orelse 32;
 
 /// Character frequency table for selecting rarest bytes in a needle.
 /// Lower values = rarer characters = fewer false positives in SIMD scan.
@@ -92,6 +99,7 @@ pub fn simdContains(haystack: []const u8, needle: []const u8) bool {
 }
 
 /// SIMD-based indexOf - returns the first index of needle in haystack.
+/// Uses dynamic block sizing: 64 bytes on AVX-512, 32 bytes on AVX2.
 pub fn simdIndexOf(haystack: []const u8, needle: []const u8) ?usize {
     const n = haystack.len;
     const k = needle.len;
@@ -100,7 +108,8 @@ pub fn simdIndexOf(haystack: []const u8, needle: []const u8) ?usize {
     if (k > n) return null;
     if (k == 1) return std.mem.indexOfScalar(u8, haystack, needle[0]);
 
-    const block_size = 32; // AVX2 width
+    // Dynamic block size: 64 on AVX-512, 32 on AVX2 (compile-time selected)
+    const block_size = optimal_block_size;
     const Block = @Vector(block_size, u8);
 
     // Select the two rarest characters for SIMD comparison
