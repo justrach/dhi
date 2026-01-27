@@ -17,8 +17,10 @@
   "include": [
     "types.d.ts",
     "schema.ts",
-    "schema-nextjs.ts",
     "schema-turbo.ts",
+    "schema-cloudflare.ts",
+    "schema-edge.ts",
+    "schema-nextjs-edge.ts",
     "index.ts"
   ],
   "exclude": [
