@@ -2,7 +2,7 @@
  * Benchmark: dhi vs Zod — JSON output for CI
  * Outputs results as JSON for chart generation
  */
-import { z as dhi } from './schema';
+import { z as dhi } from '../schema';
 import { z as zod } from 'zod';
 import { writeFileSync } from 'fs';
 
