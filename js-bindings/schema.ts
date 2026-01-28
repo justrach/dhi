@@ -425,6 +425,11 @@ export abstract class DhiType<Output = any, Input = Output> {
     return this.toJsonSchema();
   }
 
+  // Getter for AI SDK compatibility - Vercel AI SDK expects .jsonSchema property
+  get jsonSchema(): Record<string, any> {
+    return this.toJsonSchema();
+  }
+
   // Override in subclasses to provide type-specific schema
   protected _toJsonSchemaCore(): Record<string, any> {
     return {};
