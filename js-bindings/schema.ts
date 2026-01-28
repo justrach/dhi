@@ -430,6 +430,11 @@ export abstract class DhiType<Output = any, Input = Output> {
     return this.toJsonSchema();
   }
 
+  // AI SDK compatibility: validate function expected by isSchema() check
+  validate(value: unknown): SafeParseResult<Output> {
+    return this.safeParse(value);
+  }
+
   // Override in subclasses to provide type-specific schema
   protected _toJsonSchemaCore(): Record<string, any> {
     return {};
