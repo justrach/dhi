@@ -267,11 +267,17 @@ export type SafeParseResult<T> =
 // Base Schema Type
 // ============================================================================
 
+// AI SDK compatibility symbol - allows Vercel AI SDK to detect dhi schemas
+const schemaSymbol = Symbol.for("vercel.ai.schema");
+
 export abstract class DhiType<Output = any, Input = Output> {
   readonly _output!: Output;
   readonly _input!: Input;
   _description?: string;
   _metadata?: Record<string, any>;
+
+  // AI SDK compatibility marker - enables isSchema() detection
+  readonly [schemaSymbol] = true;
 
   abstract _parse(value: unknown, path: (string | number)[]): SafeParseResult<Output>;
 
