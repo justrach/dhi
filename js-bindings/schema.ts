@@ -267,11 +267,17 @@ export type SafeParseResult<T> =
 // Base Schema Type
 // ============================================================================
 
+// AI SDK compatibility symbol
+const schemaSymbol = Symbol.for("vercel.ai.schema");
+
 export abstract class DhiType<Output = any, Input = Output> {
   readonly _output!: Output;
   readonly _input!: Input;
   _description?: string;
   _metadata?: Record<string, any>;
+
+  // AI SDK compatibility marker - makes isSchema() return true
+  readonly [schemaSymbol] = true;
 
   abstract _parse(value: unknown, path: (string | number)[]): SafeParseResult<Output>;
 
@@ -417,6 +423,16 @@ export abstract class DhiType<Output = any, Input = Output> {
   // Alias for toJsonSchema (for compatibility)
   json(): Record<string, any> {
     return this.toJsonSchema();
+  }
+
+  // Getter for AI SDK compatibility (Vercel AI SDK expects .jsonSchema)
+  get jsonSchema(): Record<string, any> {
+    return this.toJsonSchema();
+  }
+
+  // AI SDK compatibility: validate function (expected by isSchema check)
+  validate(value: unknown): SafeParseResult<Output> {
+    return this.safeParse(value);
   }
 
   // Override in subclasses to provide type-specific schema
