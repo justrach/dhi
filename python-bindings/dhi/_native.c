@@ -70,6 +70,41 @@ extern int satya_validate_float_finite(double value);
 // IPv6 validator
 extern int satya_validate_ipv6(const char* str);
 
+// =============================================================================
+// SIMD JSON PARSING FUNCTIONS FROM ZIG
+// =============================================================================
+extern size_t satya_skip_whitespace(const char* json, size_t len, size_t start);
+extern int satya_extract_json_string(
+    const char* json, size_t len, size_t start,
+    const char** out_str_ptr, size_t* out_str_len,
+    int* out_has_escapes, size_t* out_end
+);
+extern int satya_parse_json_int(
+    const char* json, size_t len, size_t start,
+    long* out_value, size_t* out_end
+);
+extern int satya_parse_json_float(
+    const char* json, size_t len, size_t start,
+    double* out_value, size_t* out_end
+);
+extern int satya_skip_json_value(
+    const char* json, size_t len, size_t start,
+    size_t* out_end
+);
+extern unsigned long long satya_hash_field_name(const char* name, size_t len);
+
+// =============================================================================
+// FNV-1a HASH - Fast hash for JSON field matching (computed at compile time)
+// =============================================================================
+static inline uint64_t fnv1a_hash_inline(const char *str, size_t len) {
+    uint64_t hash = 14695981039346656037ULL;
+    for (size_t i = 0; i < len; i++) {
+        hash ^= (uint64_t)(unsigned char)str[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
 // Python wrapper: validate_int(value, min, max) -> bool
 static PyObject* py_validate_int(PyObject* self, PyObject* args) {
     long value, min, max;
@@ -417,6 +452,10 @@ typedef struct {
     int strip_ws, to_lower, to_upper;
     // Nested model support (type_code=6 for nested models)
     PyObject *nested_model_type;  // The nested BaseModel class (borrowed ref, or NULL)
+    // Cached JSON parsing fields (computed once, used for fast field matching)
+    const char *name_ptr;   // Cached UTF-8 pointer to name
+    size_t name_len;        // Cached length of name
+    uint64_t name_hash_fnv; // FNV-1a hash for JSON field matching
 } CompiledFieldSpec;
 
 // Global empty tuple for efficient PyObject_Call - reused across all calls
@@ -453,6 +492,10 @@ static PyObject* py_compile_model_specs(PyObject* self, PyObject* args) {
 
         fs->name_obj    = PyTuple_GET_ITEM(spec, 0);
         fs->name_hash   = PyObject_Hash(fs->name_obj);  // Pre-compute hash for fast dict ops
+        // Cache JSON parsing info (computed once, avoid strlen/hash per parse)
+        fs->name_ptr    = PyUnicode_AsUTF8(fs->name_obj);
+        fs->name_len    = fs->name_ptr ? strlen(fs->name_ptr) : 0;
+        fs->name_hash_fnv = fs->name_ptr ? fnv1a_hash_inline(fs->name_ptr, fs->name_len) : 0;
         fs->alias_obj   = PyTuple_GET_ITEM(spec, 1);
         fs->required    = PyObject_IsTrue(PyTuple_GET_ITEM(spec, 2));
         fs->default_val = PyTuple_GET_ITEM(spec, 3);
@@ -2427,6 +2470,1020 @@ static PyObject* py_init_struct_class(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+// =============================================================================
+// FAST JSON PARSER - Direct JSON -> Struct without intermediate dict
+// Uses Zig SIMD backend for maximum performance
+// =============================================================================
+
+// Skip whitespace using SIMD (via Zig)
+#define SKIP_WS_SIMD(json, pos, len) \
+    (pos) = satya_skip_whitespace((json), (len), (pos))
+
+// Fallback for simple cases
+#define SKIP_WS(json, pos, len) \
+    while ((pos) < (len) && ((json)[(pos)] == ' ' || (json)[(pos)] == '\t' || \
+           (json)[(pos)] == '\n' || (json)[(pos)] == '\r')) { (pos)++; }
+
+// Hybrid string parsing - inline for small strings, SIMD for larger ones
+// Returns pointer to string content and updates pos
+// Returns NULL on error
+__attribute__((always_inline))
+static inline char* json_parse_string_simd(const char *json, size_t *pos, size_t len,
+                                size_t *out_len, int *needs_unescape) {
+    size_t start = *pos;
+    if (start >= len || json[start] != '"') return NULL;
+    start++;
+
+    // For strings < 64 bytes, use inline C (avoid FFI overhead)
+    // Most field names and short values fall into this category
+    size_t end = start;
+    *needs_unescape = 0;
+
+    // Quick scan - if we find the closing quote within 64 bytes, use inline
+    while (end < len && end - start < 64) {
+        char c = json[end];
+        if (c == '"') {
+            // Found end - use inline result
+            *out_len = end - start;
+            *pos = end + 1;
+            return (char*)&json[start];
+        }
+        if (c == '\\') {
+            *needs_unescape = 1;
+            end += 2;
+        } else {
+            end++;
+        }
+    }
+
+    // Long string (>64 bytes) or didn't find quote yet - use SIMD
+    const char *str_ptr;
+    size_t str_len;
+    int has_escapes;
+    size_t simd_end;
+
+    int result = satya_extract_json_string(json, len, start, &str_ptr, &str_len, &has_escapes, &simd_end);
+    if (result != 0) return NULL;
+
+    *out_len = str_len;
+    *needs_unescape = has_escapes;
+    *pos = simd_end;
+    return (char*)str_ptr;
+}
+
+// Legacy C version for fallback
+__attribute__((always_inline))
+static inline char* json_parse_string(const char *json, size_t *pos, size_t len,
+                                size_t *out_len, int *needs_unescape) {
+    size_t start = *pos;
+    if (json[start] != '"') return NULL;
+    start++;
+
+    size_t end = start;
+    *needs_unescape = 0;
+
+    while (end < len) {
+        char c = json[end];
+        if (c == '"') {
+            *out_len = end - start;
+            *pos = end + 1;
+            return (char*)&json[start];
+        }
+        if (c == '\\') {
+            *needs_unescape = 1;
+            end += 2;  // Skip escape sequence
+        } else {
+            end++;
+        }
+    }
+    return NULL;  // Unterminated string
+}
+
+// Unescape JSON string into buffer
+static PyObject* json_unescape_string(const char *str, size_t len) {
+    char *buf = malloc(len + 1);
+    if (!buf) return PyErr_NoMemory();
+
+    size_t out = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (str[i] == '\\' && i + 1 < len) {
+            i++;
+            switch (str[i]) {
+                case '"': buf[out++] = '"'; break;
+                case '\\': buf[out++] = '\\'; break;
+                case '/': buf[out++] = '/'; break;
+                case 'b': buf[out++] = '\b'; break;
+                case 'f': buf[out++] = '\f'; break;
+                case 'n': buf[out++] = '\n'; break;
+                case 'r': buf[out++] = '\r'; break;
+                case 't': buf[out++] = '\t'; break;
+                case 'u': {
+                    // Parse 4 hex digits
+                    if (i + 4 < len) {
+                        unsigned int codepoint = 0;
+                        for (int j = 1; j <= 4; j++) {
+                            char h = str[i + j];
+                            codepoint <<= 4;
+                            if (h >= '0' && h <= '9') codepoint |= h - '0';
+                            else if (h >= 'a' && h <= 'f') codepoint |= h - 'a' + 10;
+                            else if (h >= 'A' && h <= 'F') codepoint |= h - 'A' + 10;
+                        }
+                        i += 4;
+                        // UTF-8 encode
+                        if (codepoint < 0x80) {
+                            buf[out++] = (char)codepoint;
+                        } else if (codepoint < 0x800) {
+                            buf[out++] = (char)(0xC0 | (codepoint >> 6));
+                            buf[out++] = (char)(0x80 | (codepoint & 0x3F));
+                        } else {
+                            buf[out++] = (char)(0xE0 | (codepoint >> 12));
+                            buf[out++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+                            buf[out++] = (char)(0x80 | (codepoint & 0x3F));
+                        }
+                    }
+                    break;
+                }
+                default: buf[out++] = str[i]; break;
+            }
+        } else {
+            buf[out++] = str[i];
+        }
+    }
+    buf[out] = '\0';
+
+    PyObject *result = PyUnicode_DecodeUTF8(buf, out, NULL);
+    free(buf);
+    return result;
+}
+
+// Parse JSON integer
+static int json_parse_integer(const char *json, size_t *pos, size_t len, long *out) {
+    size_t start = *pos;
+    int negative = 0;
+
+    if (start < len && json[start] == '-') {
+        negative = 1;
+        start++;
+    }
+
+    if (start >= len || json[start] < '0' || json[start] > '9') return 0;
+
+    long value = 0;
+    while (start < len && json[start] >= '0' && json[start] <= '9') {
+        value = value * 10 + (json[start] - '0');
+        start++;
+    }
+
+    *out = negative ? -value : value;
+    *pos = start;
+    return 1;
+}
+
+// Parse JSON number (int or float) - optimized for small integers
+__attribute__((always_inline))
+static inline PyObject* json_parse_number(const char *json, size_t *pos, size_t len) {
+    size_t i = *pos;
+    int is_negative = 0;
+    int is_float = 0;
+
+    // Check for negative sign
+    if (i < len && json[i] == '-') {
+        is_negative = 1;
+        i++;
+    }
+
+    // Fast path: parse small integer inline (up to 18 digits fits in int64)
+    if (i < len && json[i] >= '0' && json[i] <= '9') {
+        long value = 0;
+        int digit_count = 0;
+
+        while (i < len && json[i] >= '0' && json[i] <= '9') {
+            value = value * 10 + (json[i] - '0');
+            i++;
+            digit_count++;
+            if (digit_count > 18) break;  // Fall back for very large numbers
+        }
+
+        // Check if it's a float (has . or e/E)
+        if (i < len && (json[i] == '.' || json[i] == 'e' || json[i] == 'E')) {
+            is_float = 1;
+        } else if (digit_count <= 18) {
+            // It's a small integer - use fast path
+            *pos = i;
+            return PyLong_FromLong(is_negative ? -value : value);
+        }
+    }
+
+    // Slow path: parse as string (for floats and very large integers)
+    size_t start = *pos;
+    i = start;
+
+    // Re-scan the number
+    if (i < len && json[i] == '-') i++;
+    while (i < len && json[i] >= '0' && json[i] <= '9') i++;
+
+    if (i < len && json[i] == '.') {
+        is_float = 1;
+        i++;
+        while (i < len && json[i] >= '0' && json[i] <= '9') i++;
+    }
+
+    if (i < len && (json[i] == 'e' || json[i] == 'E')) {
+        is_float = 1;
+        i++;
+        if (i < len && (json[i] == '+' || json[i] == '-')) i++;
+        while (i < len && json[i] >= '0' && json[i] <= '9') i++;
+    }
+
+    size_t num_len = i - start;
+
+    // Use stack buffer for small numbers (avoid malloc)
+    char stack_buf[32];
+    char *num_str;
+    if (num_len < 32) {
+        num_str = stack_buf;
+    } else {
+        num_str = malloc(num_len + 1);
+        if (!num_str) return PyErr_NoMemory();
+    }
+    memcpy(num_str, &json[start], num_len);
+    num_str[num_len] = '\0';
+
+    PyObject *result;
+    if (is_float) {
+        result = PyFloat_FromDouble(strtod(num_str, NULL));
+    } else {
+        result = PyLong_FromString(num_str, NULL, 10);
+    }
+
+    if (num_len >= 32) free(num_str);
+    *pos = i;
+    return result;
+}
+
+// Hybrid number parsing - inline for small ints, SIMD for large numbers/floats
+__attribute__((always_inline))
+static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, size_t len) {
+    size_t i = *pos;
+    int is_negative = 0;
+
+    // Check for negative
+    if (i < len && json[i] == '-') {
+        is_negative = 1;
+        i++;
+    }
+
+    // Fast path: inline parsing for small integers (up to 18 digits)
+    // This avoids FFI overhead for common cases like "30", "100", etc.
+    if (i < len && json[i] >= '0' && json[i] <= '9') {
+        long value = 0;
+        int digit_count = 0;
+        size_t start_digits = i;
+
+        while (i < len && json[i] >= '0' && json[i] <= '9') {
+            value = value * 10 + (json[i] - '0');
+            i++;
+            digit_count++;
+            if (digit_count > 18) break;  // Fall back for very large numbers
+        }
+
+        // Check if it's a float
+        if (i < len && (json[i] == '.' || json[i] == 'e' || json[i] == 'E')) {
+            // Float - use Zig SIMD for accuracy
+            double fval;
+            size_t end;
+            int result = satya_parse_json_float(json, len, *pos, &fval, &end);
+            if (result != 0) {
+                PyErr_SetString(PyExc_ValueError, "Invalid float");
+                return NULL;
+            }
+            *pos = end;
+            return PyFloat_FromDouble(fval);
+        }
+
+        // Small integer - return directly (no FFI needed!)
+        if (digit_count <= 18) {
+            *pos = i;
+            return PyLong_FromLong(is_negative ? -value : value);
+        }
+
+        // Very large integer - fall back to Zig SIMD
+        long int_val;
+        size_t end;
+        int result = satya_parse_json_int(json, len, *pos, &int_val, &end);
+        if (result != 0) {
+            PyErr_SetString(PyExc_ValueError, "Invalid integer");
+            return NULL;
+        }
+        *pos = end;
+        return PyLong_FromLong(int_val);
+    }
+
+    // Invalid number
+    PyErr_SetString(PyExc_ValueError, "Invalid number");
+    return NULL;
+}
+
+// Skip a JSON value (for unknown fields)
+static int json_skip_value(const char *json, size_t *pos, size_t len) {
+    SKIP_WS(json, *pos, len);
+    if (*pos >= len) return 0;
+
+    char c = json[*pos];
+
+    if (c == '"') {
+        // Skip string
+        (*pos)++;
+        while (*pos < len) {
+            if (json[*pos] == '\\') (*pos) += 2;
+            else if (json[*pos] == '"') { (*pos)++; return 1; }
+            else (*pos)++;
+        }
+        return 0;
+    } else if (c == '{') {
+        // Skip object
+        (*pos)++;
+        int depth = 1;
+        while (*pos < len && depth > 0) {
+            if (json[*pos] == '{') depth++;
+            else if (json[*pos] == '}') depth--;
+            else if (json[*pos] == '"') {
+                (*pos)++;
+                while (*pos < len && json[*pos] != '"') {
+                    if (json[*pos] == '\\') (*pos)++;
+                    (*pos)++;
+                }
+            }
+            (*pos)++;
+        }
+        return depth == 0;
+    } else if (c == '[') {
+        // Skip array
+        (*pos)++;
+        int depth = 1;
+        while (*pos < len && depth > 0) {
+            if (json[*pos] == '[') depth++;
+            else if (json[*pos] == ']') depth--;
+            else if (json[*pos] == '"') {
+                (*pos)++;
+                while (*pos < len && json[*pos] != '"') {
+                    if (json[*pos] == '\\') (*pos)++;
+                    (*pos)++;
+                }
+            }
+            (*pos)++;
+        }
+        return depth == 0;
+    } else if (c == 't' && *pos + 4 <= len && memcmp(&json[*pos], "true", 4) == 0) {
+        *pos += 4; return 1;
+    } else if (c == 'f' && *pos + 5 <= len && memcmp(&json[*pos], "false", 5) == 0) {
+        *pos += 5; return 1;
+    } else if (c == 'n' && *pos + 4 <= len && memcmp(&json[*pos], "null", 4) == 0) {
+        *pos += 4; return 1;
+    } else if (c == '-' || (c >= '0' && c <= '9')) {
+        // Skip number
+        if (c == '-') (*pos)++;
+        while (*pos < len && json[*pos] >= '0' && json[*pos] <= '9') (*pos)++;
+        if (*pos < len && json[*pos] == '.') {
+            (*pos)++;
+            while (*pos < len && json[*pos] >= '0' && json[*pos] <= '9') (*pos)++;
+        }
+        if (*pos < len && (json[*pos] == 'e' || json[*pos] == 'E')) {
+            (*pos)++;
+            if (*pos < len && (json[*pos] == '+' || json[*pos] == '-')) (*pos)++;
+            while (*pos < len && json[*pos] >= '0' && json[*pos] <= '9') (*pos)++;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+// SIMD-accelerated skip value using Zig backend
+static int json_skip_value_simd(const char *json, size_t *pos, size_t len) {
+    size_t end;
+    int result = satya_skip_json_value(json, len, *pos, &end);
+    if (result != 0) return 0;
+    *pos = end;
+    return 1;
+}
+
+// Internal JSON parsing with validation into DhiStructObject
+// Returns 0 on success, -1 on error (with Python exception set)
+static int decoder_parse_json_internal(
+    DhiStructObject *self,
+    const char *json,
+    size_t len,
+    CompiledModelSpecs *ms
+) {
+    Py_ssize_t n_fields = ms->n_fields;
+
+    // Initialize all values to NULL first for safe cleanup on error
+    // Use memset for speed when n_fields > 0
+    if (n_fields > 0) {
+        memset(self->values, 0, n_fields * sizeof(PyObject*));
+    }
+
+    size_t pos = 0;
+    SKIP_WS(json, pos, len);
+
+    if (__builtin_expect(pos >= len || json[pos] != '{', 0)) {
+        PyErr_SetString(PyExc_ValueError, "Expected JSON object");
+        return -1;
+    }
+    pos++;
+
+    // Track which fields we've seen (no malloc needed - use cached specs)
+    Py_ssize_t expected_field = 0;  // For ordered field matching
+
+    PyObject *errors = NULL;
+
+    while (pos < len) {
+        SKIP_WS(json, pos, len);
+        if (__builtin_expect(pos >= len, 0)) {
+            PyErr_SetString(PyExc_ValueError, "Unexpected end of JSON");
+            goto error;
+        }
+        if (json[pos] == '}') { pos++; break; }
+        if (json[pos] == ',') { pos++; continue; }
+
+        // Parse field name
+        if (__builtin_expect(json[pos] != '"', 0)) {
+            PyErr_SetString(PyExc_ValueError, "Expected field name");
+            goto error;
+        }
+
+        size_t key_len;
+        int needs_unescape;
+        // Use SIMD-accelerated string parsing for field names
+        char *key_start = json_parse_string_simd(json, &pos, len, &key_len, &needs_unescape);
+        if (__builtin_expect(!key_start, 0)) {
+            PyErr_SetString(PyExc_ValueError, "Invalid field name");
+            goto error;
+        }
+
+        // Skip colon
+        SKIP_WS(json, pos, len);
+        if (__builtin_expect(pos >= len || json[pos] != ':', 0)) {
+            PyErr_SetString(PyExc_ValueError, "Expected ':'");
+            goto error;
+        }
+        pos++;
+        SKIP_WS(json, pos, len);
+        if (__builtin_expect(pos >= len, 0)) {
+            PyErr_SetString(PyExc_ValueError, "Unexpected end of JSON");
+            goto error;
+        }
+
+        // Match field name using cached hash and length (no malloc, no strlen!)
+        uint64_t key_hash = fnv1a_hash_inline(key_start, key_len);
+        Py_ssize_t field_idx = -1;
+
+        // Ordered matching: check expected field first (fast path for in-order JSON)
+        // Skip memcmp in fast path - FNV-1a hash + length match is sufficient
+        // (collision probability is ~1 in 2^64 for same-length strings)
+        if (expected_field < n_fields) {
+            CompiledFieldSpec *efs = &ms->specs[expected_field];
+            if (efs->name_hash_fnv == key_hash && efs->name_len == key_len) {
+                field_idx = expected_field;
+                expected_field++;
+                goto field_matched;
+            }
+        }
+
+        // Fall back to linear search - use memcmp for safety in edge cases
+        for (Py_ssize_t i = 0; i < n_fields; i++) {
+            CompiledFieldSpec *cfs = &ms->specs[i];
+            if (cfs->name_hash_fnv == key_hash && cfs->name_len == key_len) {
+                if (memcmp(cfs->name_ptr, key_start, key_len) == 0) {
+                    field_idx = i;
+                    break;
+                }
+            }
+        }
+
+field_matched:
+
+        // Unknown field - skip value using SIMD
+        if (field_idx < 0) {
+            if (!json_skip_value_simd(json, &pos, len)) {
+                PyErr_SetString(PyExc_ValueError, "Invalid JSON value");
+                goto error;
+            }
+            continue;
+        }
+
+        CompiledFieldSpec *fs = &ms->specs[field_idx];
+
+        // Parse value based on expected type
+        // Track JSON value type to skip redundant type checks
+        PyObject *value = NULL;
+        int json_type = 0;  // 1=int, 2=float, 3=str, 4=bool, 5=null
+        char c = json[pos];
+
+        if (c == '"') {
+            // String value - SIMD accelerated parsing
+            json_type = 3;
+            size_t str_len;
+            int needs_esc;
+            char *str_start = json_parse_string_simd(json, &pos, len, &str_len, &needs_esc);
+            if (__builtin_expect(!str_start, 0)) {
+                PyErr_SetString(PyExc_ValueError, "Invalid string value");
+                goto error;
+            }
+
+            if (__builtin_expect(needs_esc, 0)) {
+                // Rare case: string has escapes
+                value = json_unescape_string(str_start, str_len);
+            } else {
+                // Common case: no escapes, use faster function
+                value = PyUnicode_FromStringAndSize(str_start, str_len);
+            }
+            if (__builtin_expect(!value, 0)) goto error;
+
+        } else if (c == '-' || (c >= '0' && c <= '9')) {
+            // Number value - SIMD accelerated parsing
+            value = json_parse_number_simd(json, &pos, len);
+            if (!value) goto error;
+            json_type = PyFloat_Check(value) ? 2 : 1;
+
+            // Convert int to float if needed
+            if (fs->type_code == 2 && json_type == 1) {
+                PyObject *fval = PyNumber_Float(value);
+                Py_DECREF(value);
+                value = fval;
+                if (!value) goto error;
+                json_type = 2;
+            }
+
+        } else if (c == 't' && pos + 4 <= len && memcmp(&json[pos], "true", 4) == 0) {
+            value = Py_True;
+            Py_INCREF(value);
+            pos += 4;
+            json_type = 4;
+        } else if (c == 'f' && pos + 5 <= len && memcmp(&json[pos], "false", 5) == 0) {
+            value = Py_False;
+            Py_INCREF(value);
+            pos += 5;
+            json_type = 4;
+        } else if (c == 'n' && pos + 4 <= len && memcmp(&json[pos], "null", 4) == 0) {
+            value = Py_None;
+            Py_INCREF(value);
+            pos += 4;
+            json_type = 5;
+        } else if (c == '[' || c == '{') {
+            // Array or nested object - skip using SIMD
+            if (!json_skip_value_simd(json, &pos, len)) {
+                PyErr_SetString(PyExc_ValueError, "Invalid nested value");
+                goto error;
+            }
+            value = Py_None;
+            Py_INCREF(value);
+            json_type = 5;
+        } else {
+            PyErr_SetString(PyExc_ValueError, "Invalid JSON value");
+            goto error;
+        }
+
+        // Type checking - only when JSON type doesn't match expected type
+        // This skips redundant checks when types align (common case)
+        const char *field_name = fs->name_ptr;
+        int type_mismatch = 0;
+
+        if (fs->type_code == 1) {  // int
+            if (json_type != 1) type_mismatch = 1;
+        } else if (fs->type_code == 2) {  // float
+            if (json_type != 1 && json_type != 2) type_mismatch = 1;
+        } else if (fs->type_code == 3) {  // str
+            if (json_type != 3) type_mismatch = 1;
+        } else if (fs->type_code == 4) {  // bool
+            if (json_type != 4) type_mismatch = 1;
+        }
+        // type_code == 0 (any) or 5 (bytes) - skip type checking
+
+        if (__builtin_expect(type_mismatch, 0)) {
+            if (!errors) errors = PyList_New(0);
+            const char *expected =
+                fs->type_code == 1 ? "int" :
+                fs->type_code == 2 ? "float" :
+                fs->type_code == 3 ? "str" :
+                fs->type_code == 4 ? "bool" : "unknown";
+            PyObject *msg = PyUnicode_FromFormat("%s: Expected %s, got %s",
+                field_name, expected, Py_TYPE(value)->tp_name);
+            PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+            Py_DECREF(msg);
+            PyList_Append(errors, err);
+            Py_DECREF(err);
+            Py_DECREF(value);
+            continue;
+        }
+
+        // Numeric constraint validation - combined check for happy path
+        if (PyLong_Check(value) && !PyBool_Check(value) &&
+            (fs->has_gt | fs->has_ge | fs->has_lt | fs->has_le)) {
+            long val = PyLong_AsLong(value);
+            // Combined validity check - single branch for happy path
+            int valid = (!fs->has_gt || val > fs->gt_long) &&
+                        (!fs->has_ge || val >= fs->ge_long) &&
+                        (!fs->has_lt || val < fs->lt_long) &&
+                        (!fs->has_le || val <= fs->le_long);
+            if (__builtin_expect(!valid, 0)) {
+                // Error path - figure out which constraint failed
+                if (!errors) errors = PyList_New(0);
+                PyObject *msg = NULL;
+                if (fs->has_gt && val <= fs->gt_long) {
+                    msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld",
+                        field_name, fs->gt_long, val);
+                } else if (fs->has_ge && val < fs->ge_long) {
+                    msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld",
+                        field_name, fs->ge_long, val);
+                } else if (fs->has_lt && val >= fs->lt_long) {
+                    msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld",
+                        field_name, fs->lt_long, val);
+                } else {
+                    msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld",
+                        field_name, fs->le_long, val);
+                }
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                Py_DECREF(msg);
+                PyList_Append(errors, err);
+                Py_DECREF(err);
+                Py_DECREF(value);
+                continue;
+            }
+        }
+
+        // String length validation - combined check for happy path
+        if (PyUnicode_Check(value) && (fs->has_minl | fs->has_maxl)) {
+            Py_ssize_t slen = PyUnicode_GET_LENGTH(value);
+            int valid = (!fs->has_minl || slen >= fs->min_len) &&
+                        (!fs->has_maxl || slen <= fs->max_len);
+            if (__builtin_expect(!valid, 0)) {
+                if (!errors) errors = PyList_New(0);
+                PyObject *msg;
+                if (fs->has_minl && slen < fs->min_len) {
+                    msg = PyUnicode_FromFormat("%s: Length must be >= %zd, got %zd",
+                        field_name, fs->min_len, slen);
+                } else {
+                    msg = PyUnicode_FromFormat("%s: Length must be <= %zd, got %zd",
+                        field_name, fs->max_len, slen);
+                }
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                Py_DECREF(msg);
+                PyList_Append(errors, err);
+                Py_DECREF(err);
+                Py_DECREF(value);
+                continue;
+            }
+        }
+
+        // Store value
+        self->values[field_idx] = value;
+    }
+
+    // Check required fields and apply defaults
+    for (Py_ssize_t i = 0; i < n_fields; i++) {
+        if (self->values[i] == NULL) {
+            CompiledFieldSpec *fs = &ms->specs[i];
+            if (fs->required) {
+                if (!errors) errors = PyList_New(0);
+                PyObject *msg = PyUnicode_FromFormat("Field '%s' is required",
+                    fs->name_ptr);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                Py_DECREF(msg);
+                PyList_Append(errors, err);
+                Py_DECREF(err);
+            } else if (fs->default_val && fs->default_val != Py_None) {
+                Py_INCREF(fs->default_val);
+                self->values[i] = fs->default_val;
+            } else {
+                Py_INCREF(Py_None);
+                self->values[i] = Py_None;
+            }
+        }
+    }
+
+    if (errors && PyList_GET_SIZE(errors) > 0) {
+        PyObject *exc_args = Py_BuildValue("(sO)", "Validation failed", errors);
+        PyErr_SetObject(PyExc_ValueError, exc_args);
+        Py_DECREF(exc_args);
+        Py_DECREF(errors);
+        return -1;
+    }
+    Py_XDECREF(errors);
+
+    return 0;
+
+error:
+    Py_XDECREF(errors);
+    return -1;
+}
+
+// struct_from_json(cls, json_bytes) -> Struct instance
+static PyObject* py_struct_from_json(PyObject *self, PyObject *args) {
+    PyObject *cls;
+    PyObject *json_data;
+
+    if (!PyArg_ParseTuple(args, "OO", &cls, &json_data)) {
+        return NULL;
+    }
+
+    if (!PyType_Check(cls)) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be a Struct class");
+        return NULL;
+    }
+
+    // Get JSON as UTF-8 bytes
+    const char *json;
+    Py_ssize_t len;
+    PyObject *bytes_obj = NULL;
+
+    if (PyBytes_Check(json_data)) {
+        json = PyBytes_AS_STRING(json_data);
+        len = PyBytes_GET_SIZE(json_data);
+    } else if (PyUnicode_Check(json_data)) {
+        bytes_obj = PyUnicode_AsUTF8String(json_data);
+        if (!bytes_obj) return NULL;
+        json = PyBytes_AS_STRING(bytes_obj);
+        len = PyBytes_GET_SIZE(bytes_obj);
+    } else {
+        PyErr_SetString(PyExc_TypeError, "JSON data must be bytes or str");
+        return NULL;
+    }
+
+    // Get compiled specs
+    PyTypeObject *type = (PyTypeObject*)cls;
+    PyObject *capsule = PyDict_GetItemString(type->tp_dict, "__dhi_compiled_specs__");
+    if (!capsule) {
+        Py_XDECREF(bytes_obj);
+        PyErr_SetString(PyExc_ValueError, "Struct class not initialized");
+        return NULL;
+    }
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) {
+        Py_XDECREF(bytes_obj);
+        return NULL;
+    }
+
+    // Allocate struct object
+    DhiStructObject *obj = (DhiStructObject*)type->tp_alloc(type, ms->n_fields);
+    if (!obj) {
+        Py_XDECREF(bytes_obj);
+        return NULL;
+    }
+
+    // Parse JSON and populate fields
+    int result = decoder_parse_json_internal(obj, json, len, ms);
+    Py_XDECREF(bytes_obj);
+
+    if (result < 0) {
+        Py_DECREF(obj);
+        return NULL;
+    }
+
+    return (PyObject*)obj;
+}
+
+// struct_from_json_batch(cls, json_bytes) -> list of Struct instances
+static PyObject* py_struct_from_json_batch(PyObject *self, PyObject *args) {
+    PyObject *cls;
+    PyObject *json_data;
+
+    if (!PyArg_ParseTuple(args, "OO", &cls, &json_data)) {
+        return NULL;
+    }
+
+    if (!PyType_Check(cls)) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be a Struct class");
+        return NULL;
+    }
+
+    // Get JSON as UTF-8 bytes
+    const char *json;
+    Py_ssize_t len;
+    PyObject *bytes_obj = NULL;
+
+    if (PyBytes_Check(json_data)) {
+        json = PyBytes_AS_STRING(json_data);
+        len = PyBytes_GET_SIZE(json_data);
+    } else if (PyUnicode_Check(json_data)) {
+        bytes_obj = PyUnicode_AsUTF8String(json_data);
+        if (!bytes_obj) return NULL;
+        json = PyBytes_AS_STRING(bytes_obj);
+        len = PyBytes_GET_SIZE(bytes_obj);
+    } else {
+        PyErr_SetString(PyExc_TypeError, "JSON data must be bytes or str");
+        return NULL;
+    }
+
+    // Get compiled specs
+    PyTypeObject *type = (PyTypeObject*)cls;
+    PyObject *capsule = PyDict_GetItemString(type->tp_dict, "__dhi_compiled_specs__");
+    if (!capsule) {
+        Py_XDECREF(bytes_obj);
+        PyErr_SetString(PyExc_ValueError, "Struct class not initialized");
+        return NULL;
+    }
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) {
+        Py_XDECREF(bytes_obj);
+        return NULL;
+    }
+
+    // Find array start
+    size_t pos = 0;
+    SKIP_WS(json, pos, (size_t)len);
+
+    if (pos >= (size_t)len || json[pos] != '[') {
+        Py_XDECREF(bytes_obj);
+        PyErr_SetString(PyExc_ValueError, "Expected JSON array");
+        return NULL;
+    }
+    pos++;
+
+    // Create result list
+    PyObject *result = PyList_New(0);
+    if (!result) {
+        Py_XDECREF(bytes_obj);
+        return NULL;
+    }
+
+    while (pos < (size_t)len) {
+        SKIP_WS(json, pos, (size_t)len);
+        if (json[pos] == ']') break;
+        if (json[pos] == ',') { pos++; continue; }
+
+        // Find object start
+        if (json[pos] != '{') {
+            Py_XDECREF(bytes_obj);
+            Py_DECREF(result);
+            PyErr_SetString(PyExc_ValueError, "Expected JSON object in array");
+            return NULL;
+        }
+
+        // Find object end to get substring
+        size_t obj_start = pos;
+        int depth = 0;
+        int in_string = 0;
+        while (pos < (size_t)len) {
+            char c = json[pos];
+            if (in_string) {
+                if (c == '\\') pos++;
+                else if (c == '"') in_string = 0;
+            } else {
+                if (c == '"') in_string = 1;
+                else if (c == '{') depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0) { pos++; break; }
+                }
+            }
+            pos++;
+        }
+
+        // Allocate and parse single object
+        DhiStructObject *obj = (DhiStructObject*)type->tp_alloc(type, ms->n_fields);
+        if (!obj) {
+            Py_XDECREF(bytes_obj);
+            Py_DECREF(result);
+            return NULL;
+        }
+
+        int parse_result = decoder_parse_json_internal(obj, &json[obj_start], pos - obj_start, ms);
+        if (parse_result < 0) {
+            Py_DECREF(obj);
+            Py_XDECREF(bytes_obj);
+            Py_DECREF(result);
+            return NULL;
+        }
+
+        PyList_Append(result, (PyObject*)obj);
+        Py_DECREF(obj);
+    }
+
+    Py_XDECREF(bytes_obj);
+    return result;
+}
+
+// =============================================================================
+// DECODER TYPE - Caches specs for faster repeated parsing
+// =============================================================================
+
+typedef struct {
+    PyObject_HEAD
+    PyTypeObject *struct_type;
+    CompiledModelSpecs *specs;
+} DhiDecoderObject;
+
+static void DhiDecoder_dealloc(DhiDecoderObject *self) {
+    Py_XDECREF(self->struct_type);
+    Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyObject* DhiDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    DhiDecoderObject *self = (DhiDecoderObject*)type->tp_alloc(type, 0);
+    if (self) {
+        self->struct_type = NULL;
+        self->specs = NULL;
+    }
+    return (PyObject*)self;
+}
+
+static int DhiDecoder_init(DhiDecoderObject *self, PyObject *args, PyObject *kwds) {
+    PyObject *cls;
+
+    if (!PyArg_ParseTuple(args, "O", &cls)) {
+        return -1;
+    }
+
+    if (!PyType_Check(cls)) {
+        PyErr_SetString(PyExc_TypeError, "Argument must be a Struct class");
+        return -1;
+    }
+
+    // Get compiled specs
+    PyTypeObject *type = (PyTypeObject*)cls;
+    PyObject *capsule = PyDict_GetItemString(type->tp_dict, "__dhi_compiled_specs__");
+    if (!capsule) {
+        PyErr_SetString(PyExc_ValueError, "Struct class not initialized");
+        return -1;
+    }
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) return -1;
+
+    Py_INCREF(cls);
+    self->struct_type = type;
+    self->specs = ms;
+
+    return 0;
+}
+
+static PyObject* DhiDecoder_decode(DhiDecoderObject *self, PyObject *args) {
+    PyObject *json_data;
+
+    if (!PyArg_ParseTuple(args, "O", &json_data)) {
+        return NULL;
+    }
+
+    // Get JSON as UTF-8 bytes
+    const char *json;
+    Py_ssize_t len;
+    PyObject *bytes_obj = NULL;
+
+    if (PyBytes_Check(json_data)) {
+        json = PyBytes_AS_STRING(json_data);
+        len = PyBytes_GET_SIZE(json_data);
+    } else if (PyUnicode_Check(json_data)) {
+        bytes_obj = PyUnicode_AsUTF8String(json_data);
+        if (!bytes_obj) return NULL;
+        json = PyBytes_AS_STRING(bytes_obj);
+        len = PyBytes_GET_SIZE(bytes_obj);
+    } else {
+        PyErr_SetString(PyExc_TypeError, "JSON data must be bytes or str");
+        return NULL;
+    }
+
+    // Allocate struct object
+    DhiStructObject *obj = (DhiStructObject*)self->struct_type->tp_alloc(
+        self->struct_type, self->specs->n_fields);
+    if (!obj) {
+        Py_XDECREF(bytes_obj);
+        return NULL;
+    }
+
+    // Parse JSON
+    int result = decoder_parse_json_internal(obj, json, len, self->specs);
+    Py_XDECREF(bytes_obj);
+
+    if (result < 0) {
+        Py_DECREF(obj);
+        return NULL;
+    }
+
+    return (PyObject*)obj;
+}
+
+static PyMethodDef DhiDecoder_methods[] = {
+    {"decode", (PyCFunction)DhiDecoder_decode, METH_VARARGS,
+     "Decode JSON bytes/str to a Struct instance"},
+    {NULL, NULL, 0, NULL}
+};
+
+static PyTypeObject DhiDecoderType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "dhi._dhi_native.Decoder",
+    .tp_doc = "High-performance JSON decoder for Struct classes",
+    .tp_basicsize = sizeof(DhiDecoderObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = DhiDecoder_new,
+    .tp_init = (initproc)DhiDecoder_init,
+    .tp_dealloc = (destructor)DhiDecoder_dealloc,
+    .tp_methods = DhiDecoder_methods,
+};
+
 // Method definitions
 static PyMethodDef DhiNativeMethods[] = {
     {"validate_int", py_validate_int, METH_VARARGS,
@@ -2453,6 +3510,10 @@ static PyMethodDef DhiNativeMethods[] = {
      "Ultra-fast JSON dump with pre-compiled specs: (self, capsule) -> JSON string"},
     {"init_struct_class", py_init_struct_class, METH_VARARGS,
      "Initialize a Struct subclass with field specs: (cls, field_specs) -> None"},
+    {"struct_from_json", py_struct_from_json, METH_VARARGS,
+     "Parse JSON directly to Struct: (cls, json_bytes) -> Struct instance"},
+    {"struct_from_json_batch", py_struct_from_json_batch, METH_VARARGS,
+     "Parse JSON array to list of Structs: (cls, json_bytes) -> list[Struct]"},
     {NULL, NULL, 0, NULL}
 };
 
@@ -2479,6 +3540,19 @@ PyMODINIT_FUNC PyInit__dhi_native(void) {
     Py_INCREF(&DhiStructType);
     if (PyModule_AddObject(module, "Struct", (PyObject*)&DhiStructType) < 0) {
         Py_DECREF(&DhiStructType);
+        Py_DECREF(module);
+        return NULL;
+    }
+
+    // Initialize and register DhiDecoderType
+    if (PyType_Ready(&DhiDecoderType) < 0) {
+        Py_DECREF(module);
+        return NULL;
+    }
+
+    Py_INCREF(&DhiDecoderType);
+    if (PyModule_AddObject(module, "Decoder", (PyObject*)&DhiDecoderType) < 0) {
+        Py_DECREF(&DhiDecoderType);
         Py_DECREF(module);
         return NULL;
     }
