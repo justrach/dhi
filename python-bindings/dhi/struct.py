@@ -210,6 +210,8 @@ class StructMeta(type):
 
 
 if HAS_NATIVE:
+    import json as _json
+
     # Use native Struct as base
     class Struct(_dhi_native.Struct, metaclass=StructMeta):
         """
@@ -220,6 +222,42 @@ if HAS_NATIVE:
         """
         __slots__ = ()  # Prevent __dict__ creation
 
+        @classmethod
+        def from_json(cls, data: bytes | str) -> 'Struct':
+            """Parse JSON directly to Struct instance.
+
+            This is the FASTEST path for JSON → Struct conversion:
+            - SIMD-accelerated JSON parsing in C
+            - Direct validation without intermediate dict
+            - Zero-copy string extraction where possible
+
+            Args:
+                data: JSON bytes or string
+
+            Returns:
+                New Struct instance with validated fields
+
+            Raises:
+                ValueError: If JSON is invalid or validation fails
+            """
+            # Use native SIMD JSON parser if available
+            return _dhi_native.struct_from_json(cls, data)
+
+        @classmethod
+        def from_json_batch(cls, data: bytes | str) -> list:
+            """Parse JSON array of objects to list of Struct instances.
+
+            Optimized for bulk parsing using SIMD-accelerated JSON parser.
+
+            Args:
+                data: JSON bytes or string containing an array of objects
+
+            Returns:
+                List of Struct instances
+            """
+            # Use native SIMD JSON parser if available
+            return _dhi_native.struct_from_json_batch(cls, data)
+
         def model_dump(self) -> dict:
             """Convert to dictionary."""
             result = {}
@@ -227,6 +265,10 @@ if HAS_NATIVE:
             for i, name in enumerate(field_names):
                 result[name] = self.values[i] if hasattr(self, 'values') else getattr(self, name, None)
             return result
+
+        def model_dump_json(self) -> str:
+            """Convert to JSON string."""
+            return _json.dumps(self.model_dump())
 
         def __iter__(self):
             """Iterate over field names."""
@@ -245,6 +287,8 @@ if HAS_NATIVE:
             field_names = getattr(type(self), '__dhi_field_names__', ())
             return hash(tuple(getattr(self, name, None) for name in field_names))
 else:
+    import json as _json
+
     # Fallback pure-Python implementation
     class Struct(metaclass=StructMeta):
         """
@@ -262,9 +306,72 @@ else:
                 else:
                     raise ValueError(f"Field '{name}' is required")
 
+        @classmethod
+        def from_json(cls, data: bytes | str) -> 'Struct':
+            """Parse JSON to Struct (pure Python fallback)."""
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+            obj = _json.loads(data)
+            if not isinstance(obj, dict):
+                raise ValueError("Expected JSON object")
+            return cls(**obj)
+
+        @classmethod
+        def from_json_batch(cls, data: bytes | str) -> list:
+            """Parse JSON array to list of Structs (pure Python fallback)."""
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+            items = _json.loads(data)
+            if not isinstance(items, list):
+                raise ValueError("Expected JSON array")
+            return [cls(**item) for item in items]
+
         def model_dump(self) -> dict:
             return {name: getattr(self, name) for name in self.__dhi_fields__}
 
 
+# High-performance Decoder - caches compiled specs for faster repeated parsing
+if HAS_NATIVE:
+    class Decoder:
+        """
+        High-performance JSON decoder for Struct classes.
+
+        Creating a Decoder once and reusing it for multiple parses is faster
+        than calling Struct.from_json() repeatedly, because the Decoder
+        caches the compiled field specs and avoids dict lookups.
+
+        Usage:
+            decoder = Decoder(User)
+            user1 = decoder.decode(json_bytes1)
+            user2 = decoder.decode(json_bytes2)
+        """
+        __slots__ = ('_decoder',)
+
+        def __init__(self, cls: type):
+            """Create a decoder for the given Struct class."""
+            self._decoder = _dhi_native.Decoder(cls)
+
+        def decode(self, data: bytes | str) -> Struct:
+            """Decode JSON bytes/str to a Struct instance."""
+            return self._decoder.decode(data)
+else:
+    import json as _fallback_json
+
+    class Decoder:
+        """Pure-Python fallback Decoder."""
+        __slots__ = ('_cls',)
+
+        def __init__(self, cls: type):
+            self._cls = cls
+
+        def decode(self, data: bytes | str) -> Struct:
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+            obj = _fallback_json.loads(data)
+            if not isinstance(obj, dict):
+                raise ValueError("Expected JSON object")
+            return self._cls(**obj)
+
+
 # Export
-__all__ = ['Struct', 'StructMeta']
+__all__ = ['Struct', 'StructMeta', 'Decoder']
