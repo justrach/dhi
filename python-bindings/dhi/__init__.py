@@ -70,7 +70,7 @@ from .types import (
 from .model import BaseModel
 
 # --- Struct (high-performance, msgspec-like) ---
-from .struct import Struct
+from .struct import Struct, Decoder
 
 # --- Network types ---
 from .networks import (
@@ -153,7 +153,7 @@ __all__ = [
     "BaseModel",
 
     # Struct (high-performance)
-    "Struct",
+    "Struct", "Decoder",
 
     # Network types
     "EmailStr", "NameEmail",

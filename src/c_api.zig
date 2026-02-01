@@ -4,6 +4,10 @@ const validator = @import("validator.zig");
 const batch = @import("batch_validator.zig");
 const validators_comp = @import("validators_comprehensive.zig");
 const json_validator = @import("json_batch_validator.zig");
+const simd_json = @import("simd_json_parser.zig");
+
+// Re-export CFieldSpec for C callers
+pub const CFieldSpec = simd_json.CFieldSpec;
 
 // Export C-compatible functions
 export fn satya_validate_int(value: i64, min: i64, max: i64) i32 {
@@ -336,4 +340,175 @@ export fn satya_validate_email_batch(
     const emails_slice = emails[0..count];
     const results_slice = results[0..count];
     return batch.validateEmailBatch(emails_slice, results_slice);
+}
+
+// ============================================================================
+// SIMD JSON PARSING API
+// ============================================================================
+
+/// Result codes for JSON parsing
+pub const JsonParseResult = enum(i32) {
+    success = 0,
+    invalid_json = -1,
+    missing_required_field = -2,
+    type_mismatch = -3,
+    constraint_violation = -4,
+    buffer_too_small = -5,
+    internal_error = -6,
+};
+
+/// Parsed value types (matches simd_json_parser.ParsedValue)
+pub const ParsedValueType = enum(i32) {
+    null_val = 0,
+    bool_val = 1,
+    int_val = 2,
+    float_val = 3,
+    string_val = 4,
+    string_escaped = 5,
+};
+
+/// Parsed value structure for C interop
+pub const CParsedValue = extern struct {
+    value_type: i32,
+    int_val: i64,
+    float_val: f64,
+    str_ptr: [*]const u8,
+    str_len: usize,
+    bool_val: i32,
+};
+
+/// FNV-1a hash for field names (exported for Python to pre-compute hashes)
+export fn satya_hash_field_name(name: [*]const u8, len: usize) u64 {
+    return simd_json.hashFieldName(name[0..len]);
+}
+
+/// Skip whitespace in JSON using SIMD
+export fn satya_skip_whitespace(json: [*]const u8, len: usize, start: usize) usize {
+    return simd_json.skipWhitespaceSIMD(json[0..len], start);
+}
+
+/// Parse a single JSON value
+/// Returns the value type and populates the output struct
+export fn satya_parse_json_value(
+    json: [*]const u8,
+    len: usize,
+    start: usize,
+    out_value: *CParsedValue,
+    out_end: *usize,
+) i32 {
+    const result = simd_json.parseValue(json[0..len], start) catch |err| {
+        return switch (err) {
+            error.UnexpectedEndOfInput, error.InvalidValue => @intFromEnum(JsonParseResult.invalid_json),
+            error.UnterminatedString => @intFromEnum(JsonParseResult.invalid_json),
+            error.InvalidNumber => @intFromEnum(JsonParseResult.invalid_json),
+            error.IntegerOverflow => @intFromEnum(JsonParseResult.constraint_violation),
+        };
+    };
+
+    out_end.* = result.end;
+
+    switch (result.value) {
+        .int => |v| {
+            out_value.value_type = @intFromEnum(ParsedValueType.int_val);
+            out_value.int_val = v;
+        },
+        .float => |v| {
+            out_value.value_type = @intFromEnum(ParsedValueType.float_val);
+            out_value.float_val = v;
+        },
+        .string => |s| {
+            out_value.value_type = @intFromEnum(ParsedValueType.string_val);
+            out_value.str_ptr = s.ptr;
+            out_value.str_len = s.len;
+        },
+        .string_escaped => |s| {
+            out_value.value_type = @intFromEnum(ParsedValueType.string_escaped);
+            out_value.str_ptr = s.ptr;
+            out_value.str_len = s.len;
+        },
+        .boolean => |v| {
+            out_value.value_type = @intFromEnum(ParsedValueType.bool_val);
+            out_value.bool_val = if (v) 1 else 0;
+        },
+        .null_val => {
+            out_value.value_type = @intFromEnum(ParsedValueType.null_val);
+        },
+    }
+
+    return @intFromEnum(JsonParseResult.success);
+}
+
+/// Extract a JSON string (starting after opening quote)
+/// Returns the string slice and end position
+export fn satya_extract_json_string(
+    json: [*]const u8,
+    len: usize,
+    start: usize,
+    out_str_ptr: *[*]const u8,
+    out_str_len: *usize,
+    out_has_escapes: *i32,
+    out_end: *usize,
+) i32 {
+    const result = simd_json.extractString(json[0..len], start) catch {
+        return @intFromEnum(JsonParseResult.invalid_json);
+    };
+
+    out_str_ptr.* = result.slice.ptr;
+    out_str_len.* = result.slice.len;
+    out_has_escapes.* = if (result.has_escapes) 1 else 0;
+    out_end.* = result.end;
+
+    return @intFromEnum(JsonParseResult.success);
+}
+
+/// Parse a JSON integer
+export fn satya_parse_json_int(
+    json: [*]const u8,
+    len: usize,
+    start: usize,
+    out_value: *i64,
+    out_end: *usize,
+) i32 {
+    const result = simd_json.parseInteger(json[0..len], start) catch |err| {
+        return switch (err) {
+            error.UnexpectedEndOfInput, error.InvalidNumber => @intFromEnum(JsonParseResult.invalid_json),
+            error.IntegerOverflow => @intFromEnum(JsonParseResult.constraint_violation),
+        };
+    };
+
+    out_value.* = result.value;
+    out_end.* = result.end;
+
+    return @intFromEnum(JsonParseResult.success);
+}
+
+/// Parse a JSON float
+export fn satya_parse_json_float(
+    json: [*]const u8,
+    len: usize,
+    start: usize,
+    out_value: *f64,
+    out_end: *usize,
+) i32 {
+    const result = simd_json.parseFloat(json[0..len], start) catch {
+        return @intFromEnum(JsonParseResult.invalid_json);
+    };
+
+    out_value.* = result.value;
+    out_end.* = result.end;
+
+    return @intFromEnum(JsonParseResult.success);
+}
+
+/// Skip a JSON value (for unknown fields)
+export fn satya_skip_json_value(
+    json: [*]const u8,
+    len: usize,
+    start: usize,
+    out_end: *usize,
+) i32 {
+    out_end.* = simd_json.skipValue(json[0..len], start) catch {
+        return @intFromEnum(JsonParseResult.invalid_json);
+    };
+    return @intFromEnum(JsonParseResult.success);
 }
