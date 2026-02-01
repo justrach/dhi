@@ -18,6 +18,11 @@ pub fn build(b: *std.Build) void {
     });
     json_validator_mod.addImport("validator", validator_mod);
 
+    // Create SIMD JSON parser module
+    const simd_json_mod = b.addModule("simd_json_parser", .{
+        .root_source_file = b.path("src/simd_json_parser.zig"),
+    });
+
     // Creates a step for building the library
     const lib = b.addLibrary(.{
         .name = "satya-zig",
@@ -45,6 +50,7 @@ pub fn build(b: *std.Build) void {
         .linkage = .dynamic,
     });
     c_lib.root_module.addImport("validator", validator_mod);
+    c_lib.root_module.addImport("simd_json_parser", simd_json_mod);
     b.installArtifact(c_lib);
 
     // Build WASM library for JavaScript bindings
@@ -195,12 +201,24 @@ pub fn build(b: *std.Build) void {
 
     const run_model_tests = b.addRunArtifact(model_tests);
 
+    // Tests for SIMD JSON parser module
+    const simd_json_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/simd_json_parser.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_simd_json_tests = b.addRunArtifact(simd_json_tests);
+
     // Test step runs all tests
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_validator_tests.step);
     test_step.dependOn(&run_combinators_tests.step);
     test_step.dependOn(&run_json_validator_tests.step);
     test_step.dependOn(&run_model_tests.step);
+    test_step.dependOn(&run_simd_json_tests.step);
 
     // Benchmark executable
     const benchmark = b.addExecutable(.{
