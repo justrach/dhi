@@ -227,8 +227,23 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
     # Handle generic types (List[int] -> list, Set[str] -> set, etc.)
     check_type = base_type
     type_origin = get_origin(base_type)
+    type_args = get_args(base_type) if type_origin is not None else ()
     if type_origin is not None:
         check_type = type_origin
+
+    # Extract item type for collection validation (List[int] -> int, etc.)
+    item_type = None
+    if type_origin in (list, set, frozenset) and type_args:
+        item_type = type_args[0]
+
+    # Handle Optional[T] = Union[T, None] - extract T if it's a BaseModel
+    optional_model = None
+    if type_origin is Union:
+        non_none_args = [a for a in type_args if a is not type(None)]
+        if len(non_none_args) == 1:
+            inner_type = non_none_args[0]
+            if _is_basemodel_subclass(inner_type):
+                optional_model = inner_type
 
     def validator(value: Any) -> Any:
         # Type checking
@@ -353,6 +368,70 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
                         f"List items must be unique, found duplicate: {item!r}"
                     )
                 seen.add(item_key)
+
+        # List/set item type validation (e.g., List[int] validates each item is int)
+        if item_type is not None and isinstance(value, (list, set, frozenset)):
+            validated_items = []
+            for i, item in enumerate(value):
+                # Check item type
+                if item_type is int:
+                    if not isinstance(item, int) or isinstance(item, bool):
+                        raise ValidationError(
+                            field_name,
+                            f"Item {i}: Expected int, got {type(item).__name__}"
+                        )
+                elif item_type is float:
+                    if isinstance(item, bool):
+                        raise ValidationError(
+                            field_name,
+                            f"Item {i}: Expected float, got bool"
+                        )
+                    if not isinstance(item, (int, float)):
+                        raise ValidationError(
+                            field_name,
+                            f"Item {i}: Expected float, got {type(item).__name__}"
+                        )
+                    item = float(item)  # Coerce int to float
+                elif item_type is str:
+                    if not isinstance(item, str):
+                        raise ValidationError(
+                            field_name,
+                            f"Item {i}: Expected str, got {type(item).__name__}"
+                        )
+                elif item_type is bool:
+                    if not isinstance(item, bool):
+                        raise ValidationError(
+                            field_name,
+                            f"Item {i}: Expected bool, got {type(item).__name__}"
+                        )
+                elif _is_basemodel_subclass(item_type):
+                    if isinstance(item, dict):
+                        item = item_type.model_validate(item)
+                    elif not isinstance(item, item_type):
+                        raise ValidationError(
+                            field_name,
+                            f"Item {i}: Expected {item_type.__name__} or dict, got {type(item).__name__}"
+                        )
+                validated_items.append(item)
+            # Reconstruct collection
+            if isinstance(value, list):
+                value = validated_items
+            elif isinstance(value, set):
+                value = set(validated_items)
+            elif isinstance(value, frozenset):
+                value = frozenset(validated_items)
+
+        # Optional[Model] validation - convert dict to model
+        if optional_model is not None and value is not None:
+            if isinstance(value, optional_model):
+                pass  # Already validated
+            elif isinstance(value, dict):
+                value = optional_model.model_validate(value)
+            else:
+                raise ValidationError(
+                    field_name,
+                    f"Expected {optional_model.__name__}, dict, or None, got {type(value).__name__}"
+                )
 
         # Nested BaseModel validation
         if nested_model is not None:
@@ -654,8 +733,12 @@ class _ModelMeta(type):
         # Track if we can use full native (no nested/complex fields)
         cls.__dhi_full_native__ = can_native_init and native_init_specs and not has_nested_or_complex
 
-        # Combined ultra-fast path flag (checked once in __init__)
-        cls.__dhi_use_ultra_fast__ = cls.__dhi_full_native__  # Will be updated in __init_subclass__
+        # Note: __dhi_use_ultra_fast__ will be set by __init_subclass__ which runs
+        # during super().__new__() before we reach this point. So we should NOT
+        # overwrite it here. However, for the BaseModel class itself (which doesn't
+        # have __init_subclass__ called), we need a default.
+        # The __init_subclass__ hook sets the correct value based on whether
+        # custom validators are present.
 
         return cls
 
@@ -1124,6 +1207,9 @@ class BaseModel(metaclass=_ModelMeta):
             json_data = json_data.decode('utf-8')
         data = _json.loads(json_data)
         return cls.model_validate(data, strict=strict, context=context)
+
+    # Alias for API consistency with Struct
+    from_json = model_validate_json
 
     @classmethod
     def model_validate_strings(
