@@ -6,6 +6,18 @@ import pytest
 from typing import Annotated
 from dhi import Struct, Field
 
+# Check if native module is available
+try:
+    from dhi import _dhi_native
+    HAS_NATIVE = True
+except ImportError:
+    HAS_NATIVE = False
+
+requires_native = pytest.mark.skipif(
+    not HAS_NATIVE,
+    reason="Test requires native library for constraint validation"
+)
+
 
 class UserStruct(Struct):
     name: Annotated[str, Field(min_length=1, max_length=100)]
@@ -102,6 +114,7 @@ class TestFromJson:
         assert user.email == "john@example.com"
         assert user.age == 30
 
+    @requires_native
     def test_type_coercion_int_to_float(self):
         """Test that integers are coerced to floats when needed."""
         json_str = '{"string_field": "test", "int_field": 42, "float_field": 100, "bool_field": true}'
@@ -146,6 +159,7 @@ class TestFromJsonValidation:
         with pytest.raises(ValueError, match="required"):
             UserStruct.from_json(json_str)
 
+    @requires_native
     def test_constraint_violation_min_length(self):
         """Test min_length constraint violation."""
         json_str = '{"name": "", "email": "john@example.com", "age": 30}'  # empty name
@@ -153,6 +167,7 @@ class TestFromJsonValidation:
         with pytest.raises(ValueError, match="[Ll]ength"):
             UserStruct.from_json(json_str)
 
+    @requires_native
     def test_constraint_violation_ge(self):
         """Test ge (greater than or equal) constraint violation."""
         json_str = '{"name": "John", "email": "john@example.com", "age": -1}'  # negative age
@@ -160,6 +175,7 @@ class TestFromJsonValidation:
         with pytest.raises(ValueError):
             UserStruct.from_json(json_str)
 
+    @requires_native
     def test_constraint_violation_le(self):
         """Test le (less than or equal) constraint violation."""
         json_str = '{"name": "John", "email": "john@example.com", "age": 200}'  # age > 150
@@ -257,6 +273,7 @@ class TestFromJsonBatchErrors:
         with pytest.raises(ValueError):
             UserStruct.from_json_batch('{"name": "John"}')
 
+    @requires_native
     def test_validation_error_in_batch(self):
         """Test that validation error in one item fails the whole batch."""
         json_str = '''[
