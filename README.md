@@ -105,10 +105,11 @@ const user = try User.parse(.{
 |---------|------------|--------|
 | **dhi** | **27.3M/sec** | — |
 | satya (Rust + PyO3) | 9.6M/sec | 2.8x slower |
-| msgspec (C) | 8.7M/sec | 3.1x slower |
 | Pydantic v2 | 0.2M/sec | **136x slower** |
 
 BaseModel layer: 546K model_validate/sec | 6.4M model_dump/sec
+
+> **Note on msgspec:** msgspec is excluded from these benchmarks as it does not have 1:1 feature parity with dhi for complex validations (min_length, max_length, gt, ge, lt, le constraints). For basic struct parsing without validation, msgspec performs at ~10M/sec, while dhi with validation performs at ~5.7M/sec. When comparing equivalent functionality (validated parsing), dhi provides a compelling alternative with its Pydantic-compatible API.
 
 ---
 
