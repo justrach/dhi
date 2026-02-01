@@ -6,16 +6,17 @@ import pytest
 from typing import Annotated
 from dhi import Struct, Field
 
-# Check if native module is available
+# Check if native module with struct_from_json is available
+# The native library must have struct_from_json for full constraint validation
 try:
     from dhi import _dhi_native
-    HAS_NATIVE = True
+    HAS_NATIVE_STRUCT_JSON = hasattr(_dhi_native, 'struct_from_json')
 except ImportError:
-    HAS_NATIVE = False
+    HAS_NATIVE_STRUCT_JSON = False
 
 requires_native = pytest.mark.skipif(
-    not HAS_NATIVE,
-    reason="Test requires native library for constraint validation"
+    not HAS_NATIVE_STRUCT_JSON,
+    reason="Test requires native library with struct_from_json for constraint validation"
 )
 
 
