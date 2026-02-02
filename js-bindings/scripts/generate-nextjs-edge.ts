@@ -55,8 +55,9 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 const wasmBytes = base64ToUint8Array(WASM_BASE64);
-const wasmModule = await WebAssembly.instantiate(wasmBytes, {});
-const wasm = wasmModule.instance.exports as any;
+const wasmResult = await WebAssembly.instantiate(wasmBytes, {}) as any;
+// instantiate with bytes returns { instance, module }
+const wasm = wasmResult.instance.exports;
 const encoder = new TextEncoder();
 `;
 

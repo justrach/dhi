@@ -1,0 +1,8 @@
+# dhi Cloudflare Workers Example
+# Demonstrates using dhi for ultra-fast validation in Workers
+name = "dhi-cloudflare-workers-example"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+
+[vars]
+ENVIRONMENT = "development"
