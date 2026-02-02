@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dhi"
-version = "1.1.18"
+version = "1.1.19"
 description = "Ultra-fast data validation for Python - 28M validations/sec, 3x faster than Rust alternatives"
 readme = "README.md"
 requires-python = ">=3.9"
