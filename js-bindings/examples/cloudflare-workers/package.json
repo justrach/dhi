@@ -1,0 +1,23 @@
+{
+  "name": "dhi-cloudflare-workers-example",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Example: Using dhi validation in Cloudflare Workers with wrangler 4.x",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "wrangler dev --test-scheduled",
+    "build:webpack": "webpack --config webpack.config.cjs"
+  },
+  "dependencies": {
+    "dhi": "file:../.."
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.7.0",
+    "webpack": "^5.104.1",
+    "webpack-cli": "^6.0.1",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -2501,6 +2501,22 @@ export const z = {
 
   // Error class
   ZodError,
+
+  // Zod 4: Top-level JSON Schema generation (alias for schema.toJsonSchema())
+  // Usage: z.toJSONSchema(schema) or z.toJSONSchema(schema, { target: 'draft-07' })
+  toJSONSchema: <T extends DhiType<any, any>>(
+    schema: T,
+    params?: {
+      target?: 'draft-2020-12' | 'draft-07' | 'draft-04' | 'openapi-3.0';
+      // Additional params for future compatibility
+      unrepresentable?: 'throw' | 'any';
+      io?: 'input' | 'output';
+    }
+  ): Record<string, any> => {
+    // For now we generate draft-2020-12 compatible schema
+    // The target param is accepted for API compatibility but doesn't change output yet
+    return schema.toJsonSchema();
+  },
 } as const;
 
 // Type-level utilities

@@ -35,8 +35,9 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 const wasmBytes = base64ToUint8Array(WASM_BASE64);
-const wasmModule = await WebAssembly.instantiate(wasmBytes, {});
-const wasm = wasmModule.instance.exports as any;
+const wasmResult = await WebAssembly.instantiate(wasmBytes, {}) as any;
+// instantiate with bytes returns { instance, module }
+const wasm = wasmResult.instance.exports;
 const encoder = new TextEncoder();
 
 function wasmValidateString(fn: string, value: string): boolean {
@@ -2499,6 +2500,22 @@ export const z = {
 
   // Error class
   ZodError,
+
+  // Zod 4: Top-level JSON Schema generation (alias for schema.toJsonSchema())
+  // Usage: z.toJSONSchema(schema) or z.toJSONSchema(schema, { target: 'draft-07' })
+  toJSONSchema: <T extends DhiType<any, any>>(
+    schema: T,
+    params?: {
+      target?: 'draft-2020-12' | 'draft-07' | 'draft-04' | 'openapi-3.0';
+      // Additional params for future compatibility
+      unrepresentable?: 'throw' | 'any';
+      io?: 'input' | 'output';
+    }
+  ): Record<string, any> => {
+    // For now we generate draft-2020-12 compatible schema
+    // The target param is accepted for API compatibility but doesn't change output yet
+    return schema.toJsonSchema();
+  },
 } as const;
 
 // Type-level utilities
