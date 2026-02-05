@@ -321,17 +321,23 @@ export abstract class DhiType<Output = any, Input = Output> {
 
   // Standard Schema v1 compatibility - allows AI SDK and other tools to use dhi schemas
   // See: https://github.com/standard-schema/standard-schema
+  // Implements both StandardSchemaV1 (validate) and StandardJSONSchemaV1 (jsonSchema)
   get '~standard'(): {
     version: 1;
     vendor: 'dhi';
     validate: (value: unknown) => Promise<{ value: Output } | { issues: Array<{ message: string; path?: Array<string | number> }> }>;
+    jsonSchema: {
+      input: (options: { target: string }) => Record<string, any>;
+      output: (options: { target: string }) => Record<string, any>;
+    };
     types?: { input: Input; output: Output };
   } {
+    const self = this;
     return {
       version: 1,
       vendor: 'dhi',
       validate: async (value: unknown) => {
-        const result = this.safeParse(value);
+        const result = self.safeParse(value);
         if (result.success) {
           return { value: result.data };
         }
@@ -341,6 +347,10 @@ export abstract class DhiType<Output = any, Input = Output> {
             path: issue.path,
           })),
         };
+      },
+      jsonSchema: {
+        input: (_options: { target: string }) => self.toJsonSchema(),
+        output: (_options: { target: string }) => self.toJsonSchema(),
       },
       types: undefined as any, // Type-level only, no runtime value needed
     };
