@@ -277,6 +277,31 @@ export abstract class DhiType<Output = any, Input = Output> {
   // AI SDK compatibility marker - enables isSchema() detection
   readonly [schemaSymbol] = true;
 
+  // Zod compatibility: _def property (schema definition)
+  // Returns a Zod-like definition object for compatibility with tools expecting Zod schemas
+  get _def(): { typeName: string; description?: string } {
+    return {
+      typeName: this.constructor.name.replace('Dhi', 'Zod'),
+      description: this._description,
+    };
+  }
+
+  // Zod v4 compatibility: def property (alias for _def)
+  get def(): { typeName: string; description?: string } {
+    return this._def;
+  }
+
+  // Zod compatibility: _type property (inferred output type marker)
+  // This is a type-level property in Zod, we provide it for structural compatibility
+  get _type(): Output {
+    return undefined as any;
+  }
+
+  // Zod compatibility: description getter
+  get description(): string | undefined {
+    return this._description;
+  }
+
   // Standard Schema v1 compatibility - allows AI SDK and other tools to use dhi schemas
   // See: https://github.com/standard-schema/standard-schema
   get '~standard'(): {
