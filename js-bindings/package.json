@@ -1,6 +1,6 @@
 {
   "name": "dhi",
-  "version": "1.1.20",
+  "version": "1.1.21",
   "description": "Ultra-fast Zod 4 drop-in replacement - 20x faster average, full API parity, SIMD WASM, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -90,8 +90,10 @@
     "./dhi.wasm": "./dist/dhi.wasm"
   },
   "devDependencies": {
+    "@ai-sdk/groq": "^3.0.21",
     "@types/bun": "^1.2.5",
     "@types/node": "^20.19.30",
+    "ai": "^6.0.71",
     "arktype": "^2.1.29",
     "typescript": "^5.9.3",
     "zod": "^4.3.6",
