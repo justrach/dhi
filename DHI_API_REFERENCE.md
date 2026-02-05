@@ -626,7 +626,7 @@ python benchmark.py
 ### TypeScript: Zod-like API
 
 ```typescript
-import { z } from "dhi/schema";
+import { z } from "dhi";
 
 const UserSchema = z.object({
   name: z.string().min(2).max(100),
@@ -710,7 +710,7 @@ const schema = z.object({
 });
 
 // After (dhi)
-import { z } from "dhi/schema";
+import { z } from "dhi";
 const schema = z.object({
   email: z.string().email(),
   age: z.number().positive()
@@ -760,7 +760,7 @@ results = bv.validate_batch([user_data], {
 ### Custom Validators (TypeScript)
 
 ```typescript
-import { z } from "dhi/schema";
+import { z } from "dhi";
 
 // Custom refinement
 const EvenNumberSchema = z.number().refine(

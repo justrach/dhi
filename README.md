@@ -41,7 +41,7 @@ user.model_dump()   # {'name': 'Alice', 'email': 'alice@example.com', 'age': 28}
 
 ```diff
 - import { z } from 'zod';
-+ import { z } from 'dhi/schema';
++ import { z } from 'dhi';
 ```
 
 ```typescript

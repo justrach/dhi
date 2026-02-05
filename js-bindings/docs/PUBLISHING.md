@@ -42,7 +42,7 @@ npm install /Users/rachpradhan/satya-zig/js-bindings
 
 # Test it works
 cat > test.ts << 'EOF'
-import { z } from "dhi/schema";
+import { z } from "dhi";
 
 const schema = z.object({
   name: z.string(),

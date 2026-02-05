@@ -39,7 +39,7 @@ Or manually add to `package.json`:
 Create `cases/dhi.ts`:
 
 ```typescript
-import { z } from 'dhi/schema';
+import { z } from 'dhi';
 import { createCase } from '../benchmarks';
 
 createCase('dhi', 'parseSafe', () => {

@@ -7,7 +7,7 @@
 
 ```diff
 - import { z } from 'zod';
-+ import { z } from 'dhi/schema';
++ import { z } from 'dhi';
 ```
 
 That's it. Same API. Same types. Full Zod 4 compatibility. Just faster.
@@ -55,7 +55,7 @@ pnpm add dhi
 ## Quick Start
 
 ```typescript
-import { z } from 'dhi/schema';
+import { z } from 'dhi';
 
 const User = z.object({
   id: z.string().uuid(),
@@ -208,13 +208,13 @@ Three things working together:
 import { z } from 'zod';
 
 // After
-import { z } from 'dhi/schema';
+import { z } from 'dhi';
 ```
 
 ### Full type inference works
 
 ```typescript
-import { z } from 'dhi/schema';
+import { z } from 'dhi';
 
 const PostSchema = z.object({
   title: z.string(),
