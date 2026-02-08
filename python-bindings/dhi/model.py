@@ -32,6 +32,7 @@ Example:
 import re
 import math
 import copy
+import sys
 import json as _json
 from typing import (
     Any, Callable, ClassVar, Dict, FrozenSet, Iterator, List, Literal, Mapping,
@@ -517,6 +518,244 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
     return validator
 
 
+def _resolve_hints(cls) -> dict:
+    """Resolve type hints for a class, handling forward references.
+
+    Passes the module's global namespace and includes the class itself
+    in localns so self-referencing models work.
+    """
+    # Build namespace: module globals + the class itself for self-references
+    module = sys.modules.get(cls.__module__, None)
+    globalns = getattr(module, '__dict__', {}) if module else {}
+    localns = {cls.__name__: cls}
+
+    try:
+        return get_type_hints(cls, globalns=globalns, localns=localns, include_extras=True)
+    except Exception:
+        # Forward references that can't be resolved yet (e.g., mutually recursive types)
+        # Return empty dict; user should call model_rebuild() after all types are defined
+        return {}
+
+
+def _compile_model_fields(cls, hints: dict) -> None:
+    """Compile fields, validators, and native specs for a model class.
+
+    This is the shared logic used by both _ModelMeta.__new__ and model_rebuild().
+    It expects cls to already have model_config, __dhi_private_attrs__, and
+    __dhi_computed_fields__ set.
+    """
+    model_config = cls.model_config
+
+    # Build field info and validators
+    fields: Dict[str, Dict[str, Any]] = {}
+    validators: Dict[str, Any] = {}
+    model_fields: Dict[str, FieldInfo] = {}
+
+    # Reserved attribute names that should not be treated as fields
+    reserved_names = {
+        'model_config', 'model_fields', 'model_computed_fields',
+        'model_fields_set', 'model_extra',
+    }
+
+    # Get the class namespace for defaults
+    namespace = {}
+    for klass in reversed(cls.__mro__):
+        namespace.update(klass.__dict__)
+
+    for field_name, annotation in hints.items():
+        if field_name.startswith('_'):
+            continue
+        if field_name in reserved_names:
+            continue
+
+        base_type, constraints = _extract_constraints(annotation)
+
+        # Check for class-level default
+        default = namespace.get(field_name, _MISSING)
+        default_factory = None
+
+        # Find the FieldInfo if present
+        field_info = None
+        for c in constraints:
+            if isinstance(c, FieldInfo):
+                field_info = c
+                if c.default is not _MISSING:
+                    default = c.default
+                if c.default_factory is not None:
+                    default_factory = c.default_factory
+                    default = default_factory  # Mark as not required
+                break
+
+        # Create FieldInfo if not present
+        if field_info is None:
+            field_info = FieldInfo(
+                default=default if default is not _MISSING else _MISSING,
+                default_factory=default_factory,
+                annotation=annotation,
+            )
+        else:
+            # Update annotation on existing FieldInfo
+            field_info.annotation = annotation
+
+        fields[field_name] = {
+            'annotation': annotation,
+            'base_type': base_type,
+            'constraints': constraints,
+            'default': default,
+            'default_factory': default_factory,
+            'required': default is _MISSING and default_factory is None,
+            'field_info': field_info,
+        }
+        validators[field_name] = _build_validator(field_name, base_type, constraints, model_config)
+        model_fields[field_name] = field_info
+
+    cls.__dhi_fields__ = fields
+    cls.__dhi_validators__ = validators
+    cls.__dhi_field_names__ = list(fields.keys())
+    cls.model_fields = model_fields
+
+    # Pre-compute flat field specs for fast __init__ (avoid dict lookups per-call)
+    fast_fields = []
+    for field_name, field_data in fields.items():
+        fi = field_data.get('field_info')
+        # Determine validation alias (validation_alias > alias)
+        validation_alias = None
+        if fi:
+            validation_alias = fi.validation_alias or fi.alias
+        if validation_alias is None:
+            for c in field_data['constraints']:
+                if isinstance(c, FieldInfo):
+                    validation_alias = c.validation_alias or c.alias
+                    break
+        fast_fields.append((
+            field_name,
+            field_data['required'],
+            field_data['default'],
+            field_data.get('default_factory'),
+            validation_alias,
+            validators[field_name],
+            fi,  # Include FieldInfo for frozen/exclude checks
+        ))
+    cls.__dhi_fast_fields__ = tuple(fast_fields)
+
+    # Try to build native init specs for batch C init (one Python->C call)
+    native_init_specs = []
+    nested_field_specs = []
+    can_native_init = HAS_NATIVE_EXT
+    has_nested_or_complex = False
+
+    _NESTED_DUMMY_CONSTRAINTS = (0, 0, None, None, None, None, None, None, None, 1, 0, 0, 0, 0)
+    # type_code 7 = list-of-models, type_code 8 = union of models
+    _LIST_OF_MODELS_CONSTRAINTS = (7, 0, None, None, None, None, None, None, None, 1, 0, 0, 0, 0)
+    _UNION_CONSTRAINTS = (8, 0, None, None, None, None, None, None, None, 1, 0, 0, 0, 0)
+
+    if can_native_init:
+        for field_name, required, default, default_factory, alias, validator, _fi in fast_fields:
+            constraints_attr = getattr(validator, '__dhi_native_constraints__', None)
+            field_data = fields[field_name]
+            base_type = field_data['base_type']
+            annotation = field_data['annotation']
+
+            is_nested = _is_basemodel_subclass(base_type)
+            has_mutable_default = default_factory is not None or isinstance(default, (list, dict, set))
+
+            # Detect List[Union[BaseModel...]] or List[BaseModel]
+            list_of_models_types = None
+            union_model_types = None
+            type_origin = get_origin(base_type)
+            if type_origin in (list, set, frozenset):
+                type_args = get_args(base_type)
+                if type_args:
+                    item_type = type_args[0]
+                    item_origin = get_origin(item_type)
+                    if item_origin is Union:
+                        union_args = get_args(item_type)
+                        non_none = [a for a in union_args if a is not type(None)]
+                        if non_none and all(_is_basemodel_subclass(a) for a in non_none):
+                            list_of_models_types = tuple(non_none)
+                    elif _is_basemodel_subclass(item_type):
+                        list_of_models_types = (item_type,)
+            # Detect Union[BaseModel...] (not Optional)
+            elif type_origin is Union:
+                type_args = get_args(base_type)
+                non_none = [a for a in type_args if a is not type(None)]
+                if len(non_none) > 1 and all(_is_basemodel_subclass(a) for a in non_none):
+                    union_model_types = tuple(non_none)
+
+            if is_nested and not has_mutable_default:
+                native_init_specs.append((
+                    field_name,
+                    alias,
+                    required,
+                    default if default is not _MISSING else None,
+                    _NESTED_DUMMY_CONSTRAINTS,
+                    base_type,
+                ))
+            elif list_of_models_types is not None:
+                # Extract length constraints from validator if present
+                lom_constraints = list(_LIST_OF_MODELS_CONSTRAINTS)
+                for c in field_data['constraints']:
+                    if isinstance(c, FieldInfo):
+                        if c.min_length is not None:
+                            lom_constraints[7] = c.min_length
+                        if c.max_length is not None:
+                            lom_constraints[8] = c.max_length
+                    elif hasattr(c, 'min_length') and hasattr(c, 'max_length'):
+                        if getattr(c, 'min_length', None) is not None:
+                            lom_constraints[7] = c.min_length
+                        if getattr(c, 'max_length', None) is not None:
+                            lom_constraints[8] = c.max_length
+                native_init_specs.append((
+                    field_name,
+                    alias,
+                    required,
+                    default if default is not _MISSING else None,
+                    tuple(lom_constraints),
+                    list_of_models_types,  # tuple of types passed as 6th element
+                ))
+            elif union_model_types is not None and not has_mutable_default:
+                native_init_specs.append((
+                    field_name,
+                    alias,
+                    required,
+                    default if default is not _MISSING else None,
+                    _UNION_CONSTRAINTS,
+                    union_model_types,  # tuple of types
+                ))
+            elif constraints_attr is not None and not is_nested and not has_mutable_default:
+                native_init_specs.append((
+                    field_name,
+                    alias,
+                    required,
+                    default if default is not _MISSING else None,
+                    constraints_attr,
+                    None,
+                ))
+            else:
+                has_nested_or_complex = True
+                nested_field_specs.append((
+                    field_name, alias, required, default, default_factory, validator, base_type, is_nested
+                ))
+
+    cls.__dhi_native_init_specs__ = tuple(native_init_specs) if can_native_init and native_init_specs else None
+    cls.__dhi_nested_field_specs__ = tuple(nested_field_specs) if nested_field_specs else None
+    cls.__dhi_has_nested_fields__ = has_nested_or_complex
+
+    # Pre-compile into C structs for zero-overhead constraint access
+    if can_native_init and native_init_specs:
+        cls.__dhi_compiled_specs__ = _dhi_native.compile_model_specs(
+            tuple(native_init_specs))
+    else:
+        cls.__dhi_compiled_specs__ = None
+
+    # Track if we can use full native (no nested/complex fields)
+    cls.__dhi_full_native__ = can_native_init and bool(native_init_specs) and not has_nested_or_complex
+
+    # Update ultra-fast flag
+    has_custom = getattr(cls, '__dhi_has_custom_validators__', False)
+    cls.__dhi_use_ultra_fast__ = cls.__dhi_full_native__ and not has_custom
+
+
 class _ModelMeta(type):
     """Metaclass for BaseModel that compiles validators at class creation."""
 
@@ -547,10 +786,8 @@ class _ModelMeta(type):
         cls.model_config = model_config
 
         # Get type hints including Annotated metadata
-        try:
-            hints = get_type_hints(cls, include_extras=True)
-        except Exception:
-            hints = {}
+        # Pass module globals + class itself as localns for forward/self references
+        hints = _resolve_hints(cls)
 
         # Collect private attributes (underscore-prefixed with PrivateAttr)
         private_attrs: Dict[str, PrivateAttr] = {}
@@ -570,146 +807,8 @@ class _ModelMeta(type):
         cls.__dhi_computed_fields__ = computed_fields
         cls.model_computed_fields = computed_fields
 
-        # Build field info and validators
-        fields: Dict[str, Dict[str, Any]] = {}
-        validators: Dict[str, Any] = {}
-        model_fields: Dict[str, FieldInfo] = {}
-
-        # Reserved attribute names that should not be treated as fields
-        reserved_names = {
-            'model_config', 'model_fields', 'model_computed_fields',
-            'model_fields_set', 'model_extra',
-        }
-
-        for field_name, annotation in hints.items():
-            if field_name.startswith('_'):
-                continue
-            if field_name in reserved_names:
-                continue
-
-            base_type, constraints = _extract_constraints(annotation)
-
-            # Check for class-level default
-            default = namespace.get(field_name, _MISSING)
-            default_factory = None
-
-            # Find the FieldInfo if present
-            field_info = None
-            for c in constraints:
-                if isinstance(c, FieldInfo):
-                    field_info = c
-                    if c.default is not _MISSING:
-                        default = c.default
-                    if c.default_factory is not None:
-                        default_factory = c.default_factory
-                        default = default_factory  # Mark as not required
-                    break
-
-            # Create FieldInfo if not present
-            if field_info is None:
-                field_info = FieldInfo(
-                    default=default if default is not _MISSING else _MISSING,
-                    default_factory=default_factory,
-                    annotation=annotation,
-                )
-            else:
-                # Update annotation on existing FieldInfo
-                field_info.annotation = annotation
-
-            fields[field_name] = {
-                'annotation': annotation,
-                'base_type': base_type,
-                'constraints': constraints,
-                'default': default,
-                'default_factory': default_factory,
-                'required': default is _MISSING and default_factory is None,
-                'field_info': field_info,
-            }
-            validators[field_name] = _build_validator(field_name, base_type, constraints, model_config)
-            model_fields[field_name] = field_info
-
-        cls.__dhi_fields__ = fields
-        cls.__dhi_validators__ = validators
-        cls.__dhi_field_names__ = list(fields.keys())
-        cls.model_fields = model_fields
-
-        # Pre-compute flat field specs for fast __init__ (avoid dict lookups per-call)
-        fast_fields = []
-        for field_name, field_data in fields.items():
-            fi = field_data.get('field_info')
-            # Determine validation alias (validation_alias > alias)
-            validation_alias = None
-            if fi:
-                validation_alias = fi.validation_alias or fi.alias
-            if validation_alias is None:
-                for c in field_data['constraints']:
-                    if isinstance(c, FieldInfo):
-                        validation_alias = c.validation_alias or c.alias
-                        break
-            fast_fields.append((
-                field_name,
-                field_data['required'],
-                field_data['default'],
-                field_data.get('default_factory'),
-                validation_alias,
-                validators[field_name],
-                fi,  # Include FieldInfo for frozen/exclude checks
-            ))
-        cls.__dhi_fast_fields__ = tuple(fast_fields)
-
-        # Try to build native init specs for batch C init (one Python→C call)
-        # Now includes nested model fields - C handles them directly!
-        native_init_specs = []
-        nested_field_specs = []  # For fields that still need Python (mutable defaults, custom validators)
-        can_native_init = HAS_NATIVE_EXT
-        has_nested_or_complex = False
-
-        # Dummy constraints tuple for nested models (type_code will be overridden to 6 in C)
-        _NESTED_DUMMY_CONSTRAINTS = (0, 0, None, None, None, None, None, None, None, 1, 0, 0, 0, 0)
-
-        if can_native_init:
-            for field_name, required, default, default_factory, alias, validator, _fi in fast_fields:
-                constraints = getattr(validator, '__dhi_native_constraints__', None)
-                field_data = fields[field_name]
-                base_type = field_data['base_type']
-
-                # Check if this is a nested model field (pre-compute for hot path)
-                is_nested = _is_basemodel_subclass(base_type)
-
-                # Mutable defaults or default_factory can't use native path
-                has_mutable_default = default_factory is not None or isinstance(default, (list, dict, set))
-
-                if is_nested and not has_mutable_default:
-                    # NESTED MODEL - include in native specs with base_type as 6th element
-                    # C code will handle isinstance check and dict→model conversion
-                    native_init_specs.append((
-                        field_name,
-                        alias,
-                        required,
-                        default if default is not _MISSING else None,
-                        _NESTED_DUMMY_CONSTRAINTS,
-                        base_type,  # 6th element: nested model type
-                    ))
-                elif constraints is not None and not is_nested and not has_mutable_default:
-                    # Simple field with native constraints
-                    native_init_specs.append((
-                        field_name,
-                        alias,
-                        required,
-                        default if default is not _MISSING else None,
-                        constraints,
-                        None,  # 6th element: no nested type
-                    ))
-                else:
-                    # Complex field - mutable default, custom validator, or no native constraints
-                    has_nested_or_complex = True
-                    nested_field_specs.append((
-                        field_name, alias, required, default, default_factory, validator, base_type, is_nested
-                    ))
-
-        cls.__dhi_native_init_specs__ = tuple(native_init_specs) if can_native_init and native_init_specs else None
-        cls.__dhi_nested_field_specs__ = tuple(nested_field_specs) if nested_field_specs else None
-        cls.__dhi_has_nested_fields__ = has_nested_or_complex
+        # Compile fields, validators, and native specs
+        _compile_model_fields(cls, hints)
 
         # Check if model_post_init is overridden (for optimization)
         has_post_init = 'model_post_init' in namespace
@@ -721,24 +820,6 @@ class _ModelMeta(type):
 
         # Combined flag: needs any post-init processing (private attrs or post_init override)
         cls.__dhi_needs_post_init__ = bool(private_attrs) or has_post_init
-
-        # Pre-compile into C structs for zero-overhead constraint access
-        # Even with nested fields, compile native fields for hybrid init
-        if can_native_init and native_init_specs:
-            cls.__dhi_compiled_specs__ = _dhi_native.compile_model_specs(
-                tuple(native_init_specs))
-        else:
-            cls.__dhi_compiled_specs__ = None
-
-        # Track if we can use full native (no nested/complex fields)
-        cls.__dhi_full_native__ = can_native_init and native_init_specs and not has_nested_or_complex
-
-        # Note: __dhi_use_ultra_fast__ will be set by __init_subclass__ which runs
-        # during super().__new__() before we reach this point. So we should NOT
-        # overwrite it here. However, for the BaseModel class itself (which doesn't
-        # have __init_subclass__ called), we need a default.
-        # The __init_subclass__ hook sets the correct value based on whether
-        # custom validators are present.
 
         return cls
 
@@ -1272,11 +1353,11 @@ class BaseModel(metaclass=_ModelMeta):
         """
         cls = type(self)
 
-        # FAST PATH: Native C dump for simple cases (no filtering options)
+        # FAST PATH: Native C dump (handles nested models recursively now)
         compiled = getattr(cls, '__dhi_compiled_specs__', None)
         if (compiled is not None and mode == 'python' and not include and not exclude
                 and not by_alias and not exclude_unset and not exclude_defaults
-                and not exclude_none and not cls.__dhi_has_nested_fields__ and HAS_NATIVE_EXT):
+                and not exclude_none and HAS_NATIVE_EXT):
             return _dhi_native.dump_model_compiled(self, compiled)
 
         result: Dict[str, Any] = {}
@@ -1671,12 +1752,56 @@ class BaseModel(metaclass=_ModelMeta):
         _parent_namespace_depth: int = 2,
         _types_namespace: Optional[Dict[str, Any]] = None,
     ) -> Optional[bool]:
-        """Rebuild model schema, useful for forward references.
+        """Rebuild model schema, resolving forward references.
+
+        Call this after all referenced types are defined so that
+        forward-referenced annotations can be resolved.
 
         Matches Pydantic v2's model_rebuild().
+
+        Args:
+            force: Force rebuild even if fields are already resolved.
+            raise_errors: If True, raise on resolution failure.
+            _parent_namespace_depth: Stack depth to find caller's namespace.
+            _types_namespace: Explicit namespace for type resolution.
+
+        Returns:
+            True if rebuild succeeded, None if not needed.
         """
-        # dhi doesn't need to rebuild in most cases since we resolve at class creation
-        # This is provided for API compatibility
+        # Skip if already has fields and not forced
+        if not force and getattr(cls, '__dhi_fields__', None):
+            return None
+
+        # Build namespace for resolving forward references
+        module = sys.modules.get(cls.__module__, None)
+        globalns = getattr(module, '__dict__', {}) if module else {}
+        localns = {cls.__name__: cls}
+
+        # Merge caller's frame locals for types defined in the same scope
+        try:
+            frame = sys._getframe(_parent_namespace_depth)
+            localns.update(frame.f_locals)
+        except (ValueError, AttributeError):
+            pass
+
+        # Merge explicit namespace if provided
+        if _types_namespace:
+            localns.update(_types_namespace)
+
+        try:
+            hints = get_type_hints(cls, globalns=globalns, localns=localns, include_extras=True)
+        except Exception:
+            if raise_errors:
+                raise
+            return None
+
+        # Re-compile fields, validators, and native specs
+        _compile_model_fields(cls, hints)
+
+        # Re-run __init_subclass__ logic to update custom validator flags
+        has_custom = getattr(cls, '__dhi_has_custom_validators__', False)
+        cls.__dhi_use_ultra_fast__ = cls.__dhi_full_native__ and not has_custom
+
         return True
 
     @classmethod
