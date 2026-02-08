@@ -452,6 +452,8 @@ typedef struct {
     int strip_ws, to_lower, to_upper;
     // Nested model support (type_code=6 for nested models)
     PyObject *nested_model_type;  // The nested BaseModel class (borrowed ref, or NULL)
+    // Union/list-of-models support (type_code=7 for list-of-models, 8 for union)
+    PyObject *union_types_tuple;  // Tuple of acceptable BaseModel types (borrowed ref, or NULL)
     // Cached JSON parsing fields (computed once, used for fast field matching)
     const char *name_ptr;   // Cached UTF-8 pointer to name
     size_t name_len;        // Cached length of name
@@ -501,20 +503,26 @@ static PyObject* py_compile_model_specs(PyObject* self, PyObject* args) {
         fs->default_val = PyTuple_GET_ITEM(spec, 3);
         PyObject *constraints = PyTuple_GET_ITEM(spec, 4);
 
-        // Check for nested model type (6th element)
+        // Check for nested model type or union types (6th element)
         fs->nested_model_type = NULL;
+        fs->union_types_tuple = NULL;
         if (spec_len >= 6) {
-            PyObject *nested = PyTuple_GET_ITEM(spec, 5);
-            if (nested != Py_None && PyType_Check(nested)) {
-                fs->nested_model_type = nested;  // borrowed ref, kept alive by class
+            PyObject *sixth = PyTuple_GET_ITEM(spec, 5);
+            if (sixth != Py_None && PyType_Check(sixth)) {
+                fs->nested_model_type = sixth;  // borrowed ref, kept alive by class
+            } else if (sixth != Py_None && PyTuple_Check(sixth)) {
+                fs->union_types_tuple = sixth;  // tuple of acceptable types
             }
         }
 
         // Pre-parse all constraint values ONCE (not per-call)
         fs->type_code = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 0));
-        // Override type_code if this is a nested model field
+        // Override type_code based on field kind
         if (fs->nested_model_type != NULL) {
-            fs->type_code = 6;  // Special type code for nested models
+            fs->type_code = 6;  // Nested model field
+        } else if (fs->union_types_tuple != NULL) {
+            // type_code from constraints tells us: 7=list-of-models, 8=union
+            // Keep the type_code from constraints (7 or 8)
         }
         fs->strict    = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 1));
 
@@ -1579,6 +1587,143 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
             PyList_Append(errors, err);
             Py_DECREF(err);
             continue;
+        } else if (fs->type_code == 7) { // list of model variants - FAST PATH
+            if (!PyList_Check(result)) {
+                Py_DECREF(result);
+                field_name = PyUnicode_AsUTF8(fs->name_obj);
+                if (!errors) { errors = PyList_New(0); }
+                PyObject *msg = PyUnicode_FromFormat("%s: Expected list, got %s",
+                    field_name, Py_TYPE(value)->tp_name);
+                PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                Py_DECREF(msg);
+                PyList_Append(errors, err); Py_DECREF(err); continue;
+            }
+            // Length constraints on the list
+            if (fs->has_minl || fs->has_maxl) {
+                Py_ssize_t list_len = PyList_GET_SIZE(result);
+                if (fs->has_minl && list_len < fs->min_len) {
+                    Py_DECREF(result);
+                    field_name = PyUnicode_AsUTF8(fs->name_obj);
+                    if (!errors) { errors = PyList_New(0); }
+                    PyObject *msg = PyUnicode_FromFormat("%s: Length must be >= %zd, got %zd",
+                        field_name, fs->min_len, list_len);
+                    PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                    Py_DECREF(msg); PyList_Append(errors, err); Py_DECREF(err); continue;
+                }
+                if (fs->has_maxl && list_len > fs->max_len) {
+                    Py_DECREF(result);
+                    field_name = PyUnicode_AsUTF8(fs->name_obj);
+                    if (!errors) { errors = PyList_New(0); }
+                    PyObject *msg = PyUnicode_FromFormat("%s: Length must be <= %zd, got %zd",
+                        field_name, fs->max_len, list_len);
+                    PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                    Py_DECREF(msg); PyList_Append(errors, err); Py_DECREF(err); continue;
+                }
+            }
+            // Items are already validated BaseModel instances - just passthrough
+            // For dict items, try to coerce using the first matching type
+            Py_ssize_t list_len = PyList_GET_SIZE(result);
+            int has_dicts = 0;
+            for (Py_ssize_t j = 0; j < list_len; j++) {
+                PyObject *item = PyList_GET_ITEM(result, j);
+                if (PyDict_Check(item)) { has_dicts = 1; break; }
+            }
+            if (has_dicts && fs->union_types_tuple) {
+                // Need to coerce dict items - create new list
+                if (!g_empty_tuple) {
+                    g_empty_tuple = PyTuple_New(0);
+                    if (!g_empty_tuple) {
+                        Py_DECREF(result); Py_DECREF(obj_dict); Py_XDECREF(errors); return NULL;
+                    }
+                }
+                PyObject *new_list = PyList_New(list_len);
+                if (!new_list) {
+                    Py_DECREF(result); Py_DECREF(obj_dict); Py_XDECREF(errors); return NULL;
+                }
+                int coerce_error = 0;
+                for (Py_ssize_t j = 0; j < list_len; j++) {
+                    PyObject *item = PyList_GET_ITEM(result, j);
+                    if (PyDict_Check(item)) {
+                        // Try each union type until one succeeds
+                        Py_ssize_t n_types = PyTuple_GET_SIZE(fs->union_types_tuple);
+                        PyObject *coerced = NULL;
+                        for (Py_ssize_t t = 0; t < n_types; t++) {
+                            PyObject *model_type = PyTuple_GET_ITEM(fs->union_types_tuple, t);
+                            coerced = PyObject_Call(model_type, g_empty_tuple, item);
+                            if (coerced) break;
+                            PyErr_Clear();
+                        }
+                        if (coerced) {
+                            PyList_SET_ITEM(new_list, j, coerced);  // steals ref
+                        } else {
+                            field_name = PyUnicode_AsUTF8(fs->name_obj);
+                            if (!errors) { errors = PyList_New(0); }
+                            PyObject *msg = PyUnicode_FromFormat("%s: Item %zd: cannot coerce dict to model", field_name, j);
+                            PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+                            Py_DECREF(msg); PyList_Append(errors, err); Py_DECREF(err);
+                            // Fill remaining items to avoid segfault
+                            Py_INCREF(item);
+                            PyList_SET_ITEM(new_list, j, item);
+                            coerce_error = 1;
+                        }
+                    } else {
+                        Py_INCREF(item);
+                        PyList_SET_ITEM(new_list, j, item);  // steals ref
+                    }
+                }
+                Py_DECREF(result);
+                result = new_list;
+                if (coerce_error) {
+                    PyDict_SetItem(obj_dict, fs->name_obj, result);
+                    Py_DECREF(result); continue;
+                }
+            }
+            // Set directly - no copy needed for non-dict items
+            PyDict_SetItem(obj_dict, fs->name_obj, result);
+            Py_DECREF(result);
+            continue;
+        } else if (fs->type_code == 8) { // union of model types
+            // Check if value is an instance of any union type
+            if (fs->union_types_tuple) {
+                int is_instance = PyObject_IsInstance(result, fs->union_types_tuple);
+                if (is_instance == 1) {
+                    // Already correct type
+                    PyDict_SetItem(obj_dict, fs->name_obj, result);
+                    Py_DECREF(result);
+                    continue;
+                }
+                // Try dict coercion
+                if (PyDict_Check(result)) {
+                    if (!g_empty_tuple) {
+                        g_empty_tuple = PyTuple_New(0);
+                        if (!g_empty_tuple) {
+                            Py_DECREF(result); Py_DECREF(obj_dict); Py_XDECREF(errors); return NULL;
+                        }
+                    }
+                    Py_ssize_t n_types = PyTuple_GET_SIZE(fs->union_types_tuple);
+                    PyObject *coerced = NULL;
+                    for (Py_ssize_t t = 0; t < n_types; t++) {
+                        PyObject *model_type = PyTuple_GET_ITEM(fs->union_types_tuple, t);
+                        coerced = PyObject_Call(model_type, g_empty_tuple, result);
+                        if (coerced) break;
+                        PyErr_Clear();
+                    }
+                    if (coerced) {
+                        PyDict_SetItem(obj_dict, fs->name_obj, coerced);
+                        Py_DECREF(coerced);
+                        Py_DECREF(result);
+                        continue;
+                    }
+                }
+            }
+            // Not a valid type
+            Py_DECREF(result);
+            field_name = PyUnicode_AsUTF8(fs->name_obj);
+            if (!errors) { errors = PyList_New(0); }
+            PyObject *msg = PyUnicode_FromFormat("%s: Value does not match any expected type", field_name);
+            PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
+            Py_DECREF(msg); PyList_Append(errors, err); Py_DECREF(err);
+            continue;
         }
 
         // --- STRING TRANSFORMS (inline for speed) ---
@@ -1812,6 +1957,90 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
 // dump_model_compiled: Ultra-fast dict dump using pre-compiled specs
 // Returns Python dict directly without intermediate processing
 // =============================================================================
+// Forward declaration for recursive dump
+static PyObject* dump_model_recursive(PyObject *model_self);
+
+// Helper: dump a single value, recursing into BaseModel instances and lists
+static PyObject* dump_value_recursive(PyObject *value) {
+    // Check if value has __dhi_fields__ (is a BaseModel)
+    if (PyObject_HasAttrString(value, "__dhi_fields__")) {
+        return dump_model_recursive(value);
+    }
+    // Check if value is a list - recurse into items
+    if (PyList_Check(value)) {
+        Py_ssize_t len = PyList_GET_SIZE(value);
+        PyObject *new_list = PyList_New(len);
+        if (!new_list) return NULL;
+        for (Py_ssize_t i = 0; i < len; i++) {
+            PyObject *item = PyList_GET_ITEM(value, i);
+            PyObject *dumped;
+            if (PyObject_HasAttrString(item, "__dhi_fields__")) {
+                dumped = dump_model_recursive(item);
+            } else {
+                dumped = item;
+                Py_INCREF(dumped);
+            }
+            if (!dumped) { Py_DECREF(new_list); return NULL; }
+            PyList_SET_ITEM(new_list, i, dumped);  // steals ref
+        }
+        return new_list;
+    }
+    Py_INCREF(value);
+    return value;
+}
+
+// Recursive dump: handles nested models and list-of-models
+static PyObject* dump_model_recursive(PyObject *model_self) {
+    PyObject *obj_dict = PyObject_GenericGetDict(model_self, NULL);
+    if (!obj_dict) return NULL;
+
+    // Get compiled specs if available
+    PyObject *compiled_attr = PyObject_GetAttrString((PyObject*)Py_TYPE(model_self), "__dhi_compiled_specs__");
+    if (!compiled_attr || compiled_attr == Py_None) {
+        Py_XDECREF(compiled_attr);
+        // Fallback: call Python model_dump
+        Py_DECREF(obj_dict);
+        return PyObject_CallMethod(model_self, "model_dump", NULL);
+    }
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(compiled_attr, "dhi.compiled_specs");
+    if (!ms) {
+        Py_DECREF(compiled_attr);
+        Py_DECREF(obj_dict);
+        return PyObject_CallMethod(model_self, "model_dump", NULL);
+    }
+
+    PyObject *result = _PyDict_NewPresized(ms->n_fields);
+    if (!result) { Py_DECREF(compiled_attr); Py_DECREF(obj_dict); return NULL; }
+
+    for (Py_ssize_t i = 0; i < ms->n_fields; i++) {
+        CompiledFieldSpec *fs = &ms->specs[i];
+        PyObject *value = PyDict_GetItem(obj_dict, fs->name_obj);
+        if (!value) continue;
+
+        if (fs->type_code == 6 || fs->type_code == 8) {
+            // Nested model or union - recurse
+            PyObject *dumped = dump_value_recursive(value);
+            if (!dumped) { Py_DECREF(result); Py_DECREF(compiled_attr); Py_DECREF(obj_dict); return NULL; }
+            PyDict_SetItem(result, fs->name_obj, dumped);
+            Py_DECREF(dumped);
+        } else if (fs->type_code == 7) {
+            // List of models - recurse into list
+            PyObject *dumped = dump_value_recursive(value);
+            if (!dumped) { Py_DECREF(result); Py_DECREF(compiled_attr); Py_DECREF(obj_dict); return NULL; }
+            PyDict_SetItem(result, fs->name_obj, dumped);
+            Py_DECREF(dumped);
+        } else {
+            // Simple value - direct copy
+            PyDict_SetItem(result, fs->name_obj, value);
+        }
+    }
+
+    Py_DECREF(compiled_attr);
+    Py_DECREF(obj_dict);
+    return result;
+}
+
 static PyObject* py_dump_model_compiled(PyObject* self_unused, PyObject* args) {
     PyObject *model_self, *capsule;
 
@@ -1822,25 +2051,8 @@ static PyObject* py_dump_model_compiled(PyObject* self_unused, PyObject* args) {
     CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
     if (!ms) return NULL;
 
-    PyObject *obj_dict = PyObject_GenericGetDict(model_self, NULL);
-    if (!obj_dict) return NULL;
-
-    // Pre-allocate result dict with exact size
-    PyObject *result = _PyDict_NewPresized(ms->n_fields);
-    if (!result) { Py_DECREF(obj_dict); return NULL; }
-
-    for (Py_ssize_t i = 0; i < ms->n_fields; i++) {
-        CompiledFieldSpec *fs = &ms->specs[i];
-        PyObject *value = PyDict_GetItem(obj_dict, fs->name_obj);
-        if (!value) continue;
-
-        // Direct copy - values are already validated
-        // Note: For nested models, Python caller will need to recurse
-        PyDict_SetItem(result, fs->name_obj, value);
-    }
-
-    Py_DECREF(obj_dict);
-    return result;
+    // Use recursive dump that handles nested models
+    return dump_model_recursive(model_self);
 }
 
 static PyObject* py_dump_json_compiled(PyObject* self_unused, PyObject* args) {
