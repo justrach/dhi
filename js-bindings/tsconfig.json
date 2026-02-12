@@ -24,5 +24,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "include": ["*.ts", "packages/dhi-sdk/src/**/*.ts"],
+  "exclude": ["node_modules", "examples", "packages/dhi-sdk/complex-sdk", "packages/dhi-sdk/my-sdk"]
 }

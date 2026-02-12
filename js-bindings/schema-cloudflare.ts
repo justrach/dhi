@@ -2574,6 +2574,7 @@ export namespace z {
   export type infer<T extends DhiType<any, any>> = T["_output"];
   export type input<T extends DhiType<any, any>> = T["_input"];
   export type output<T extends DhiType<any, any>> = T["_output"];
+  export type ZodType<Output = any, Input = Output> = DhiType<Output, Input>;
 }
 
 // Also export as `d` for dhi-native usage

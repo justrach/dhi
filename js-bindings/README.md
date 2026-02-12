@@ -230,7 +230,7 @@ type Post = z.infer<typeof PostSchema>;
 ### Same error handling
 
 ```typescript
-import { z, ZodError } from 'dhi/schema';
+import { z, ZodError } from 'dhi';
 
 try {
   schema.parse(badData);
