@@ -74,15 +74,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/model.zig"),
     });
 
-    // Export module for use as a dependency
-    const satya_module = b.addModule("satya", .{
+    // Export module for use as a dependency (no target/optimize — inherited from consumer)
+    const dhi_module = b.addModule("dhi", .{
         .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
     });
-    satya_module.addImport("validator", validator_mod);
-    satya_module.addImport("combinators", combinators_mod);
-    satya_module.addImport("json_validator", json_validator_mod);
+    dhi_module.addImport("validator", validator_mod);
+    dhi_module.addImport("combinators", combinators_mod);
+    dhi_module.addImport("json_validator", json_validator_mod);
 
     // Example: basic_usage
     const basic_example = b.addExecutable(.{
