@@ -33,7 +33,21 @@ jobs:
 
       - name: Install dependencies
         working-directory: js-bindings
+      - name: Install dependencies
+        working-directory: js-bindings
         run: bun install
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: latest
+
+      - name: Build N-API native addon
+        run: |
+          NODE_INCLUDE=$(node -e "process.stdout.write(process.execPath.replace('/bin/node', '/include/node'))")
+          zig build -Doptimize=ReleaseFast "-Dnode_include=$NODE_INCLUDE"
+          cp zig-out/lib/libdhi_native.so js-bindings/dhi_native.node 2>/dev/null || \
+          cp zig-out/lib/libdhi_native.dylib js-bindings/dhi_native.node 2>/dev/null || true
 
       - name: Run compatibility tests
         working-directory: js-bindings
@@ -42,6 +56,10 @@ jobs:
       - name: Run feature tests
         working-directory: js-bindings
         run: bun run tests/test-all-features.ts
+
+      - name: Run N-API tests
+        working-directory: js-bindings
+        run: bun run tests/test-napi-compat.ts
 
       - name: Verify WASM exists
         run: |
@@ -75,7 +93,7 @@ jobs:
           body: |
             ## dhi ${{ github.ref_name }}
 
-            **Ultra-fast Zod 4 drop-in replacement — SIMD-powered WASM + JIT compilation**
+            **Ultra-fast Zod 4 drop-in replacement — SIMD-powered WASM + N-API native addon**
 
             ### Performance (vs Zod 4.3.6)
             - String validators: 1.1–2.9x faster
