@@ -69,6 +69,32 @@ pub fn build(b: *std.Build) void {
     wasm_lib.rdynamic = true;
     b.installArtifact(wasm_lib);
 
+    // Build N-API native addon for Node.js
+    const node_include = b.option([]const u8, "node_include", "Path to Node.js include directory for N-API") orelse "";
+
+    if (node_include.len > 0) {
+        const validators_comprehensive_mod = b.addModule("validators_comprehensive", .{
+            .root_source_file = b.path("src/validators_comprehensive.zig"),
+        });
+
+        const napi_lib = b.addLibrary(.{
+            .name = "dhi_native",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/napi_api.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .linkage = .dynamic,
+        });
+        napi_lib.addIncludePath(.{ .cwd_relative = node_include });
+        napi_lib.root_module.addImport("validators_comprehensive", validators_comprehensive_mod);
+        // Link against libc (required on macOS/Linux for N-API)
+        napi_lib.linkLibC();
+        // N-API symbols are resolved at runtime by Node.js - allow undefined symbols
+        napi_lib.linker_allow_shlib_undefined = true;
+        b.installArtifact(napi_lib);
+    }
+
     // Create model module (Pydantic-style API)
     const model_mod = b.addModule("model", .{
         .root_source_file = b.path("src/model.zig"),

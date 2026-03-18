@@ -50,7 +50,10 @@
     "test": "bun test",
     "bench": "bun run benchmarks/benchmark-vs-zod.ts",
     "bench:all": "bun run benchmarks/benchmark-vs-all.ts",
+    "bench:napi": "bun run benchmarks/benchmark-napi-vs-wasm.ts",
+    "test:napi": "bun tests/test-napi-compat.ts",
     "build": "rm -rf dist && bun run scripts/generate-nextjs-edge.ts && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
+    "build:napi": "bash scripts/build-napi.sh",
     "prepublishOnly": "npm run build",
     "test:nextjs": "cd examples/nextjs-app && npm install && npm run build"
   },
