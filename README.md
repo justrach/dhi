@@ -56,6 +56,14 @@ const User = z.object({
 const user = User.parse(data); // same API, 20x faster
 ```
 
+**Two backends — same API:**
+
+| Backend | Import | Best for |
+|---------|--------|----------|
+| WASM (default) | `import { z } from 'dhi'` | Browsers, edge runtimes, Cloudflare Workers |
+| N-API native | `import { z } from 'dhi/napi'` | Node.js servers — 1.7–2x faster on string formats |
+
+
 ### Zig — compile-time validated, zero overhead
 
 ```zig
@@ -185,29 +193,30 @@ dhi is written in [Zig](https://ziglang.org) — a systems language with compile
 | Target | What it does |
 |--------|-------------|
 | `libsatya.dylib/.so` | Python C extension — extracts from dicts, no copies |
-| `dhi.wasm` (28KB) | TypeScript — 128-bit SIMD, JIT-compiled schemas |
+| `dhi.wasm` (28KB) | TypeScript WASM — 128-bit SIMD, works in browsers + edge |
+| `dhi_native.node` | TypeScript N-API — direct native calls, 1.7–2x faster on Node.js |
 | Native `.zig` import | Zig — zero-cost comptime validation, fully inlined |
 
 **Key tricks:**
 - **Comptime models** — Validation logic is generated at compile time. No vtables, no reflection, no hash lookups.
 - **SIMD batch validation** — Process 4 values per cycle on 256-bit vectors.
 - **Single FFI call** — Python batch validation crosses the FFI boundary once, not per-item.
+- **N-API over WASM** — For Node.js, the native addon skips alloc/encode/dealloc per string call: 1.7–2x faster for format validators (url, ipv4, datetime).
 - **No allocations** — The happy path never allocates. Errors are stack-returned.
 
 ```
-┌─────────────────────────────────────────────┐
-│         Zig Core (comptime + SIMD)          │
-└──────┬────────────────┬────────────────┬────┘
-       │                │                │
-  ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
-  │  Python  │    │   WASM   │    │   Zig    │
-  │  C ext   │    │  28KB    │    │  Native  │
-  └────┬─────┘    └────┬─────┘    └────┬─────┘
-       │                │                │
-  BaseModel        z.object()       Model()
-  Pydantic API     Zod 4 API      comptime API
+┌─────────────────────────────────────────────────────┐
+│            Zig Core (comptime + SIMD)                │
+└──────┬────────────────┬──────────┬────────────────┬──┘
+       │                │          │                │
+  ┌────▼─────┐    ┌────▼────┐ ┌───▼──────┐    ┌───▼──────┐
+  │  Python  │    │  WASM   │ │  N-API   │    │   Zig    │
+  │  C ext   │    │  28KB   │ │  .node   │    │  Native  │
+  └────┬─────┘    └────┬────┘ └───┬──────┘    └───┬──────┘
+       │                │          │                │
+  BaseModel        z.object()  z.object()      Model()
+  Pydantic API    Zod 4 (edge) Zod 4 (Node)  comptime API
 ```
-
 ---
 
 ## Run the benchmarks yourself
