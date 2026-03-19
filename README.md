@@ -4,7 +4,7 @@
 
 # dhi
 
-**136x faster than Pydantic. 20x faster than Zod. Same API.**
+**523x faster than Pydantic. 31x faster than msgspec-ext. 20x faster than Zod. Same API.**
 
 One validation core. Three ecosystems. Zero compromise.
 
@@ -13,7 +13,7 @@ One validation core. Three ecosystems. Zero compromise.
 [![MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ```
-Python:     27,300,000 validations/sec (136x faster than Pydantic)
+Python:     24,100,000 validations/sec (523x faster than Pydantic, 31x faster than msgspec-ext)
 TypeScript: 20x faster than Zod 4 (avg), up to 50x on number formats
 Zig:        Zero-cost. Comptime. No runtime.
 ```
@@ -111,14 +111,15 @@ const user = try User.parse(.{
 
 | Library | Throughput | vs dhi |
 |---------|------------|--------|
-| **dhi** | **27.3M/sec** | — |
-| satya (Rust + PyO3) | 9.6M/sec | 2.8x slower |
-| Pydantic v2 | 0.2M/sec | **136x slower** |
+| **dhi** | **24.1M/sec** | — |
+| msgspec (C) | 5.8M/sec | 4.2x slower |
+| satya (Rust + PyO3) | 2.1M/sec | 11.5x slower |
+| msgspec-ext (msgspec + validators) | 777K/sec | 31x slower |
+| Pydantic v2 | 46K/sec | **523x slower** |
 
 BaseModel layer: 546K model_validate/sec | 6.4M model_dump/sec
 
-> **Note on msgspec:** msgspec is excluded from these benchmarks as it does not have 1:1 feature parity with dhi for complex validations (min_length, max_length, gt, ge, lt, le constraints). For basic struct parsing without validation, msgspec performs at ~10M/sec, while dhi with validation performs at ~5.7M/sec. When comparing equivalent functionality (validated parsing), dhi provides a compelling alternative with its Pydantic-compatible API.
-
+> **Note on msgspec:** Plain msgspec (~5.8M/sec) does type-checked JSON decoding but lacks field-level validators (email, URL, positive int). msgspec-ext adds those 26 validators via Python `dec_hook` callbacks, bringing it to ~777K/sec — a fairer apples-to-apples comparison with dhi's validated parsing.
 ---
 
 ## Install
@@ -218,20 +219,42 @@ dhi is written in [Zig](https://ziglang.org) — a systems language with compile
   Pydantic API    Zod 4 (edge) Zod 4 (Node)  comptime API
 ```
 ---
-
 ## Run the benchmarks yourself
 
 ```bash
-# Python
+# Python — full comparison (dhi vs msgspec vs msgspec-ext vs satya vs Pydantic)
 git clone https://github.com/justrach/dhi-zig.git && cd dhi-zig
-cd python-bindings && pip install -e . && python benchmark_batch.py
+cd python-bindings
+pip install -e .
+pip install msgspec msgspec-ext 'pydantic[email]' satya
+python benchmarks/benchmark_vs_all.py
 
-# TypeScript
+# TypeScript — dhi vs Zod 4
 cd js-bindings && bun install && bun run benchmark-vs-zod.ts
 
 # Zig
 zig build bench -Doptimize=ReleaseFast
 ```
+
+### Methodology
+
+The Python benchmark validates **10,000 user objects** with 4 field-level validators each:
+
+| Field | Validator |
+|-------|-----------|
+| `name` | string, min_length=1, max_length=100 |
+| `email` | RFC 5321 email format |
+| `age` | positive integer |
+| `website` | URL format |
+
+Each library uses its idiomatic equivalent:
+- **dhi**: `_dhi_native.validate_batch_direct()` — single FFI call, Zig SIMD validators
+- **msgspec**: `msgspec.json.Decoder` — C-level JSON decode + type check (no format validators)
+- **msgspec-ext**: `msgspec.json.decode()` with `dec_hook` — adds EmailStr, HttpUrl, PositiveInt validators on top of msgspec
+- **satya**: `model_validate_json_array_bytes()` — Rust JSON parse + validation
+- **Pydantic v2**: `model_validate()` per item — Rust-backed, with EmailStr + Field constraints
+
+Timing uses `time.perf_counter()` over 5 runs after a warmup pass. Results are averaged. Tested on Python 3.13 and 3.14 (no significant difference — hot paths are native code).
 
 ---
 
@@ -247,7 +270,7 @@ The hypothesis: Zig's `comptime` can generate the same validation semantics that
 |-------|--------|
 | Pydantic-level DX in Zig | `Model("User", .{ .name = Str(.{}) })` — yes |
 | One core, three ecosystems | Python FFI + WASM + native Zig — yes |
-| 10-100x faster | 136x (Python), 20x avg (TypeScript) — yes |
+| 10-100x faster | 523x (Python), 20x avg (TypeScript) — yes |
 | Reasonable binary size | 28KB WASM, ~200KB native — yes |
 | Comptime replaces reflection | No runtime type inspection needed — yes |
 

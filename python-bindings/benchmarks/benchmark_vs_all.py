@@ -1,5 +1,5 @@
 """
-Comprehensive benchmark: dhi vs satya vs msgspec vs Pydantic
+Comprehensive benchmark: dhi vs satya vs msgspec vs msgspec-ext vs Pydantic
 Testing JSON validation performance with real-world data
 """
 
@@ -32,8 +32,16 @@ except ImportError:
     HAS_PYDANTIC = False
     print("⚠️  pydantic not installed")
 
+try:
+    import msgspec as _msgspec_ext_base
+    from msgspec_ext import EmailStr as MsgspecExtEmailStr, HttpUrl, PositiveInt, dec_hook
+    HAS_MSGSPEC_EXT = True
+except ImportError:
+    HAS_MSGSPEC_EXT = False
+    print("⚠️  msgspec-ext not installed (pip install msgspec-ext)")
+
 print("=" * 80)
-print("🏆 COMPREHENSIVE BENCHMARK: dhi vs satya vs msgspec vs Pydantic")
+print("🏆 COMPREHENSIVE BENCHMARK: dhi vs satya vs msgspec vs msgspec-ext vs Pydantic")
 print("=" * 80)
 print()
 
@@ -216,6 +224,55 @@ if HAS_PYDANTIC:
     print()
 
 # ============================================================================
+# Test 5: msgspec-ext (msgspec + validators)
+# ============================================================================
+
+if HAS_MSGSPEC_EXT:
+    print("=" * 80)
+    print("Test 5: msgspec-ext (msgspec + 26 validators) - JSON Decoding + Validation")
+    print("=" * 80)
+
+    class MsgspecExtUser(_msgspec_ext_base.Struct):
+        name: str
+        email: MsgspecExtEmailStr
+        age: PositiveInt
+        website: HttpUrl
+        active: bool
+
+    msgspec_ext_decoder = _msgspec_ext_base.json.Decoder(List[MsgspecExtUser])
+
+    # Warmup
+    try:
+        _ = msgspec_ext_decoder.decode(json_bytes, dec_hook=dec_hook)
+    except Exception:
+        # Fallback: decode without dec_hook if the decoder doesn't accept it
+        try:
+            _ = _msgspec_ext_base.json.decode(json_bytes, type=List[MsgspecExtUser], dec_hook=dec_hook)
+        except Exception:
+            pass
+
+    # Benchmark
+    times = []
+    for i in range(5):
+        start = time.perf_counter()
+        try:
+            results = _msgspec_ext_base.json.decode(json_bytes, type=List[MsgspecExtUser], dec_hook=dec_hook)
+            valid_count = len(results)
+        except Exception as e:
+            valid_count = 0
+            if i == 0:
+                print(f"  ⚠️  Validation error: {e}")
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+        throughput = len(users) / elapsed
+        print(f"  Run {i+1}: {throughput:,.0f} users/sec ({elapsed*1000:.2f}ms)")
+
+    msgspec_ext_time = sum(times) / len(times)
+    msgspec_ext_throughput = len(users) / msgspec_ext_time
+    print(f"\n✅ msgspec-ext Average: {msgspec_ext_throughput:,.0f} users/sec")
+    print()
+
+# ============================================================================
 # RESULTS SUMMARY
 # ============================================================================
 
@@ -234,6 +291,8 @@ if HAS_MSGSPEC:
     results.append(("msgspec (C)", msgspec_throughput, msgspec_time))
 if HAS_PYDANTIC:
     results.append(("Pydantic V2 (Rust)", pydantic_throughput, pydantic_time))
+if HAS_MSGSPEC_EXT:
+    results.append(("msgspec-ext (msgspec+)", msgspec_ext_throughput, msgspec_ext_time))
 
 # Sort by throughput (descending)
 results.sort(key=lambda x: x[1], reverse=True)
@@ -275,5 +334,10 @@ print("msgspec advantages:")
 print("  ✅ Fastest JSON decoding (C implementation)")
 print("  ✅ Low memory usage")
 print("  ✅ Type-safe structs")
+print()
+print("msgspec-ext advantages:")
+print("  ✅ 26 built-in validators (email, URL, IP, etc.)")
+print("  ✅ msgspec C backend + Python validation layer")
+print("  ✅ Drop-in pydantic-settings replacement")
 print()
 print("=" * 80)
