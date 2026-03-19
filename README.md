@@ -120,6 +120,7 @@ const user = try User.parse(.{
 BaseModel layer: 546K model_validate/sec | 6.4M model_dump/sec
 
 > **Note on msgspec:** Plain msgspec (~5.8M/sec) does type-checked JSON decoding but lacks field-level validators (email, URL, positive int). msgspec-ext adds those 26 validators via Python `dec_hook` callbacks, bringing it to ~777K/sec — a fairer apples-to-apples comparison with dhi's validated parsing.
+
 ---
 
 ## Install
@@ -218,7 +219,9 @@ dhi is written in [Zig](https://ziglang.org) — a systems language with compile
   BaseModel        z.object()  z.object()      Model()
   Pydantic API    Zod 4 (edge) Zod 4 (Node)  comptime API
 ```
+
 ---
+
 ## Run the benchmarks yourself
 
 ```bash
