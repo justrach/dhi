@@ -4,7 +4,7 @@
 
 ## 🚀 Performance
 
-**28 million validations/sec** - 3x faster than satya (Rust), 3x faster than msgspec (C)
+**24 million validations/sec** - 4x faster than msgspec (C), 31x faster than msgspec-ext, 523x faster than Pydantic
 
 ```python
 # Validate 10,000 users in 0.36ms
@@ -24,7 +24,7 @@ results, valid_count = _dhi_native.validate_batch_direct(users, field_specs)
 
 ## ✨ Features
 
-- **�� Fastest**: 3x faster than satya (Rust) and msgspec (C)
+- **⚡ Fastest**: 4x faster than msgspec (C), 31x faster than msgspec-ext, 523x faster than Pydantic
 - **🎯 24+ Validators**: Email, URL, UUID, IPv4, dates, numbers, strings
 - **🔋 Zero Python Overhead**: C extension extracts directly from dicts
 - **🌍 General Purpose**: Works with any dict structure
@@ -63,10 +63,14 @@ print(f"Valid: {valid_count}/{len(users)}")
 
 ## 🏆 Benchmarks
 
+10,000 users validated with email, URL, and positive-int checks:
+
 ```
-dhi:     28M users/sec  🥇
-satya:    9M users/sec  (3.0x slower)
-msgspec:  9M users/sec  (3.1x slower)
+dhi (Zig+C):      24M users/sec  🥇
+msgspec (C):       5.8M users/sec  (4.2x slower)
+satya (Rust):      2.1M users/sec  (11.5x slower)
+msgspec-ext:       777K users/sec  (31x slower)
+Pydantic V2:        46K users/sec  (523x slower)
 ```
 
 ## 📝 License
