@@ -30,12 +30,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/justrach/satya-zig.git",
+    "url": "https://github.com/justrach/dhi.git",
     "directory": "js-bindings"
   },
-  "homepage": "https://github.com/justrach/satya-zig#readme",
+  "homepage": "https://github.com/justrach/dhi#readme",
   "bugs": {
-    "url": "https://github.com/justrach/satya-zig/issues"
+    "url": "https://github.com/justrach/dhi/issues"
   },
   "files": [
     "dist/**/*.js",

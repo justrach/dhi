@@ -134,6 +134,23 @@ Pure Python fallback included — no native extension required to get started.
 
 ---
 
+## Repo Structure
+
+dhi is a Zig core with bindings for JS and Python:
+
+```
+src/              → Zig core: validators, SIMD, C API, WASM API (the engine)
+js-bindings/      → npm package: Zod 4 drop-in replacement
+python-bindings/  → PyPI package: Pydantic drop-in replacement
+docs/             → Benchmark charts, shared docs
+.github/          → CI, release workflows
+```
+
+**Which package should I use?**
+- **TypeScript/JS**: `npm install dhi` — replaces Zod, works in browsers + edge + Node.js
+- **Python**: `pip install dhi` — replaces Pydantic, 523x faster validation
+- **Zig**: Import `src/` directly — zero-cost comptime validation
+
 ## Full Zod 4 Feature Parity
 
 dhi implements **100% of the Zod 4 API**, including all new Zod 4 features:
@@ -194,7 +211,7 @@ dhi is written in [Zig](https://ziglang.org) — a systems language with compile
 
 | Target | What it does |
 |--------|-------------|
-| `libsatya.dylib/.so` | Python C extension — extracts from dicts, no copies |
+| `libdhi.dylib/.so` | Python C extension — extracts from dicts, no copies |
 | `dhi.wasm` (28KB) | TypeScript WASM — 128-bit SIMD, works in browsers + edge |
 | `dhi_native.node` | TypeScript N-API — direct native calls, 1.7–2x faster on Node.js |
 | Native `.zig` import | Zig — zero-cost comptime validation, fully inlined |
@@ -226,7 +243,7 @@ dhi is written in [Zig](https://ziglang.org) — a systems language with compile
 
 ```bash
 # Python — full comparison (dhi vs msgspec vs msgspec-ext vs satya vs Pydantic)
-git clone https://github.com/justrach/dhi-zig.git && cd dhi-zig
+git clone https://github.com/justrach/dhi.git && cd dhi
 cd python-bindings
 pip install -e .
 pip install msgspec msgspec-ext 'pydantic[email]' satya

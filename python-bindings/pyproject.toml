@@ -35,10 +35,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/justrach/satya-zig"
-Documentation = "https://github.com/justrach/satya-zig#readme"
-Repository = "https://github.com/justrach/satya-zig"
-Issues = "https://github.com/justrach/satya-zig/issues"
+Homepage = "https://github.com/justrach/dhi"
+Documentation = "https://github.com/justrach/dhi#readme"
+Repository = "https://github.com/justrach/dhi"
+Issues = "https://github.com/justrach/dhi/issues"
 
 [project.optional-dependencies]
 dev = [

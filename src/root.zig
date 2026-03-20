@@ -1,5 +1,5 @@
 // Root module that exports all validator functionality
-// This is the main entry point for the satya-zig library
+// This is the main entry point for the dhi validation library
 
 pub const validator = @import("validator");
 pub const combinators = @import("combinators");
