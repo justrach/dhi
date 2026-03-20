@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dhi"
-version = "1.1.20"
-description = "Ultra-fast data validation for Python - 28M validations/sec, 3x faster than Rust alternatives"
+version = "1.1.21"
+description = "Ultra-fast data validation for Python - 24M validations/sec, powered by Zig"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -35,10 +35,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/justrach/satya-zig"
-Documentation = "https://github.com/justrach/satya-zig#readme"
-Repository = "https://github.com/justrach/satya-zig"
-Issues = "https://github.com/justrach/satya-zig/issues"
+Homepage = "https://github.com/justrach/dhi"
+Documentation = "https://github.com/justrach/dhi#readme"
+Repository = "https://github.com/justrach/dhi"
+Issues = "https://github.com/justrach/dhi/issues"
 
 [project.optional-dependencies]
 dev = [

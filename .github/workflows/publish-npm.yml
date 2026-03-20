@@ -33,14 +33,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: js-bindings
-      - name: Install dependencies
-        working-directory: js-bindings
         run: bun install
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: latest
+          version: 0.15.2
 
       - name: Build N-API native addon
         run: |

@@ -1,6 +1,6 @@
 {
   "name": "dhi",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Ultra-fast Zod 4 drop-in replacement - 20x faster average, full API parity, SIMD WASM, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -30,12 +30,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/justrach/satya-zig.git",
+    "url": "https://github.com/justrach/dhi.git",
     "directory": "js-bindings"
   },
-  "homepage": "https://github.com/justrach/satya-zig#readme",
+  "homepage": "https://github.com/justrach/dhi#readme",
   "bugs": {
-    "url": "https://github.com/justrach/satya-zig/issues"
+    "url": "https://github.com/justrach/dhi/issues"
   },
   "files": [
     "dist/**/*.js",

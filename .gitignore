@@ -1,3 +1,4 @@
+# Zig
 zig-cache/
 zig-out/
 .zig-cache/
@@ -7,13 +8,26 @@ zig-out/
 *.dylib
 *.dll
 *.exe
-.DS_Store
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+python-bindings/dist/
+python-bindings/build/
+python-bindings/*.egg-info/
+.venv/
+*.whl
 
-# Social media drafts (not for version control)
+# JavaScript / TypeScript
+js-bindings/node_modules/
+js-bindings/dist/
+js-bindings/dhi_native.node
+
+# OS
+.DS_Store
+
+# Project-specific
 Socials.md
-
-# Remotion
 .remotion/

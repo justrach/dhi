@@ -46,4 +46,4 @@ Initial release with batch validation API.
 
 ---
 
-For full details, see [GitHub Releases](https://github.com/justrach/satya-zig/releases)
+For full details, see [GitHub Releases](https://github.com/justrach/dhi/releases)

@@ -148,6 +148,6 @@ const result = await generateText({
 
 ## Learn More
 
-- [dhi Documentation](https://github.com/justrach/satya-zig)
+- [dhi Documentation](https://github.com/justrach/dhi)
 - [Vercel AI SDK Documentation](https://sdk.vercel.ai/docs)
 - [dhi Benchmarks](../../benchmarks/)

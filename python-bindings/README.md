@@ -19,7 +19,7 @@ field_specs = {
 }
 
 results, valid_count = _dhi_native.validate_batch_direct(users, field_specs)
-# 28M users/sec! 🔥
+# 24M users/sec! 🔥
 ```
 
 ## ✨ Features
@@ -77,7 +77,7 @@ Pydantic V2:        46K users/sec  (523x slower)
 
 MIT License - see LICENSE file
 
-## 🔗 Links
+## Links
 
-- GitHub: https://github.com/justrach/satya-zig
+- GitHub: https://github.com/justrach/dhi
 - PyPI: https://pypi.org/project/dhi/

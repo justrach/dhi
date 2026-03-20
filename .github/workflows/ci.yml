@@ -50,3 +50,27 @@ jobs:
         run: |
           cd python-bindings
           pytest tests/ -v
+
+  js-test:
+    name: JS Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: js-bindings
+        run: bun install
+
+      - name: Run Zod 4 compatibility tests
+        working-directory: js-bindings
+        run: bun run tests/test-zod4-compat.ts
+
+      - name: Run feature tests
+        working-directory: js-bindings
+        run: bun run tests/test-all-features.ts

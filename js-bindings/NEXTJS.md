@@ -473,9 +473,9 @@ await init(); // One-time cost
 
 ## Support
 
-- **GitHub**: https://github.com/justrach/satya-zig
+- **GitHub**: https://github.com/justrach/dhi
 - **npm**: https://www.npmjs.com/package/dhi
-- **Issues**: https://github.com/justrach/satya-zig/issues
+- **Issues**: https://github.com/justrach/dhi/issues
 
 ## License
 

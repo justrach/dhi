@@ -143,7 +143,7 @@ class Email:
 
 # TODO: Load Zig shared library for native performance
 # This is a pure Python implementation for now
-# Future: Use ctypes to call into libsatya.so for 100x+ speedup
+# Future: Use ctypes to call into libdhi.so for 100x+ speedup
 
 class _ZigValidator:
     """Native Zig validator"""
@@ -157,26 +157,26 @@ class _ZigValidator:
         lib_path = Path(__file__).parent.parent.parent / "zig-out" / "lib"
         
         # Try different library names
-        for name in ["libsatya.dylib", "libsatya.so", "satya.dll"]:
+        for name in ["libdhi.dylib", "libdhi.so", "dhi.dll"]:
             full_path = lib_path / name
             if full_path.exists():
                 try:
                     self._lib = ctypes.CDLL(str(full_path))
                     
                     # Define function signatures
-                    self._lib.satya_validate_int.argtypes = [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64]
-                    self._lib.satya_validate_int.restype = ctypes.c_int32
+                    self._lib.dhi_validate_int.argtypes = [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64]
+                    self._lib.dhi_validate_int.restype = ctypes.c_int32
                     
-                    self._lib.satya_validate_string_length.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_size_t]
-                    self._lib.satya_validate_string_length.restype = ctypes.c_int32
+                    self._lib.dhi_validate_string_length.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_size_t]
+                    self._lib.dhi_validate_string_length.restype = ctypes.c_int32
                     
-                    self._lib.satya_validate_email.argtypes = [ctypes.c_char_p]
-                    self._lib.satya_validate_email.restype = ctypes.c_int32
+                    self._lib.dhi_validate_email.argtypes = [ctypes.c_char_p]
+                    self._lib.dhi_validate_email.restype = ctypes.c_int32
                     
-                    self._lib.satya_version.argtypes = []
-                    self._lib.satya_version.restype = ctypes.c_char_p
+                    self._lib.dhi_version.argtypes = []
+                    self._lib.dhi_version.restype = ctypes.c_char_p
                     
-                    version = self._lib.satya_version().decode('utf-8')
+                    version = self._lib.dhi_version().decode('utf-8')
                     print(f"✅ Loaded native Zig library v{version}: {name}")
                     return
                 except Exception as e:
@@ -194,19 +194,19 @@ class _ZigValidator:
         """Validate integer using native Zig"""
         if not self.available:
             return min_val <= value <= max_val
-        return bool(self._lib.satya_validate_int(value, min_val, max_val))
+        return bool(self._lib.dhi_validate_int(value, min_val, max_val))
     
     def validate_string_length(self, value: str, min_len: int, max_len: int) -> bool:
         """Validate string length using native Zig"""
         if not self.available:
             return min_len <= len(value) <= max_len
-        return bool(self._lib.satya_validate_string_length(value.encode('utf-8'), min_len, max_len))
+        return bool(self._lib.dhi_validate_string_length(value.encode('utf-8'), min_len, max_len))
     
     def validate_email(self, value: str) -> bool:
         """Validate email using native Zig"""
         if not self.available:
             return "@" in value and "." in value.split("@")[-1]
-        return bool(self._lib.satya_validate_email(value.encode('utf-8')))
+        return bool(self._lib.dhi_validate_email(value.encode('utf-8')))
 
 
 # Global instance

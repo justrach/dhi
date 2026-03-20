@@ -127,7 +127,7 @@ pub fn main() !void {
         };
     }
 
-    // Example 7: Batch validation (satya's validate_batch pattern)
+    // Example 7: Batch validation (dhi's validate_batch pattern)
     std.debug.print("\nExample 7: Batch validation (multiple products)\n", .{});
     {
         const json = 
