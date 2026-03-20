@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// ValidationError represents a single validation failure with field path and message.
-/// Inspired by satya's ValidationError dataclass.
+/// Represents a single validation failure with field path and message.
 pub const ValidationError = struct {
     field: []const u8,
     message: []const u8,
@@ -64,8 +64,8 @@ pub const ValidationError = struct {
     }
 };
 
-/// ValidationErrors collects multiple validation failures (satya's approach).
-/// Supports non-fail-fast/// ValidationErrors collects all validation errors for a single struct.
+/// ValidationErrors collects multiple validation failures.
+/// Supports non-fail-fast validation — collects all errors for a single struct.
 pub const ValidationErrors = struct {
     errors: std.ArrayList(ValidationError),
     allocator: std.mem.Allocator,
@@ -115,7 +115,7 @@ pub const ValidationErrors = struct {
 };
 
 /// BoundedInt creates a validated integer type with compile-time bounds.
-/// Inspired by satya's Field(ge=min, le=max) pattern.
+/// Creates a validated integer type with compile-time bounds (ge=min, le=max).
 ///
 /// Example:
 ///   const Age = BoundedInt(u8, 0, 130);
@@ -152,7 +152,7 @@ pub fn BoundedInt(comptime T: type, comptime min: T, comptime max: T) type {
 }
 
 /// BoundedString creates a validated string type with length constraints.
-/// Inspired by satya's Field(min_length=n, max_length=m) pattern.
+/// Creates a validated string type with length constraints (min_length, max_length).
 ///
 /// Example:
 ///   const Name = BoundedString(1, 40);
@@ -200,7 +200,7 @@ pub fn BoundedString(comptime min_len: usize, comptime max_len: usize) type {
 }
 
 /// Email validates email format using a simplified RFC 5322 check.
-/// Inspired by satya's Field(email=True) pattern.
+/// Validates email format using a simplified RFC 5322 check.
 pub const Email = struct {
     value: []const u8,
 
@@ -238,7 +238,7 @@ pub const Email = struct {
 };
 
 /// Pattern validates strings against a regex pattern (conceptual - requires regex lib).
-/// Inspired by satya's Field(pattern=r"^[A-Z]{3}-\d{4}$") pattern.
+/// Validates strings against a regex pattern (conceptual — requires regex lib).
 ///
 /// Note: Zig doesn't have std.regex yet. This is a placeholder for when you add
 /// a regex library like https://github.com/tiehuis/zig-regex or similar.
@@ -264,8 +264,8 @@ pub fn Pattern(comptime pattern: []const u8) type {
     };
 }
 
-/// ValidationResult represents the outcome of validation (satya's approach).
-/// Either contains a valid value or a list of errors.
+/// ValidationResult represents the outcome of validation.
+/// Contains either a valid value or a list of errors.
 pub fn ValidationResult(comptime T: type) type {
     return union(enum) {
         valid: T,
@@ -299,7 +299,7 @@ pub fn ValidationResult(comptime T: type) type {
 }
 
 /// validateStruct uses @typeInfo to validate struct fields based on naming conventions.
-/// Inspired by satya's declarative schema approach.
+/// Uses @typeInfo to validate struct fields based on naming conventions.
 ///
 /// Field naming conventions:
 ///   - "*_ne": Non-empty string (min_length=1)

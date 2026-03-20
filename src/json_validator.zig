@@ -2,7 +2,7 @@ const std = @import("std");
 const validator = @import("validator");
 
 /// ParseAndValidate combines JSON parsing with validation in one step.
-/// Inspired by satya's StreamValidator pattern.
+/// Combines JSON parsing with validation in one step.
 ///
 /// Example:
 ///   const user = try parseAndValidate(User, json_string, allocator);
@@ -140,7 +140,7 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
 }
 
 /// BatchValidate validates multiple JSON objects from an array.
-/// Inspired by satya's validate_batch pattern.
+/// Validates multiple JSON objects from an array.
 pub fn batchValidate(comptime T: type, json_array: []const u8, allocator: std.mem.Allocator) ![]validator.ValidationResult(T) {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_array, .{});
     defer parsed.deinit();
@@ -165,7 +165,7 @@ pub fn batchValidate(comptime T: type, json_array: []const u8, allocator: std.me
 }
 
 /// StreamValidate processes NDJSON (newline-delimited JSON) with constant memory.
-/// Inspired by satya's validate_stream pattern.
+/// Processes NDJSON (newline-delimited JSON) with constant memory.
 pub fn streamValidate(comptime T: type, reader: anytype, allocator: std.mem.Allocator, callback: fn (validator.ValidationResult(T)) anyerror!void) !void {
     var line_buf: [4096]u8 = undefined;
 

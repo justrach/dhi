@@ -2,7 +2,7 @@ const std = @import("std");
 const validator = @import("validator");
 
 /// Optional wraps a type T and allows null/missing values.
-/// Inspired by satya's Optional[T] pattern.
+/// Wraps a type T and allows null/missing values.
 ///
 /// Example:
 ///   const MaybeAge = Optional(validator.BoundedInt(u8, 0, 130));
@@ -44,7 +44,7 @@ pub fn Optional(comptime T: type) type {
 }
 
 /// Default wraps a type T and provides a default value if validation fails or value is missing.
-/// Inspired by satya's default value pattern.
+/// Wraps a type T and provides a default value if validation fails or value is missing.
 ///
 /// Example:
 ///   const AgeWithDefault = Default(u8, 18);
@@ -89,7 +89,7 @@ pub fn Transform(comptime T: type, comptime transformFn: fn (T) T) type {
 }
 
 /// OneOf validates that a value is one of a set of allowed values.
-/// Inspired by satya's enum constraint pattern.
+/// Validates that a value is one of a set of allowed values.
 ///
 /// Example:
 ///   const Status = OneOf([]const u8, &.{"active", "pending", "closed"});
