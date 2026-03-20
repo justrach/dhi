@@ -89,8 +89,8 @@ enum ValidatorType type = parse_validator_type(type_str);
 
 // Dispatch with O(1) switch
 switch (type) {
-    case VAL_EMAIL: return satya_validate_email(value);
-    case VAL_URL: return satya_validate_url(value);
+    case VAL_EMAIL: return dhi_validate_email(value);
+    case VAL_URL: return dhi_validate_url(value);
 }
 ```
 

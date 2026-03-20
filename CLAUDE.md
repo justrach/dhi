@@ -52,7 +52,7 @@ bun run bench                       # Run benchmark (vs Zod)
 ### Zig (rebuild native libs)
 ```bash
 zig build -Doptimize=ReleaseFast    # Build optimized
-cp zig-out/lib/libsatya.dylib python-bindings/dhi/
+cp zig-out/lib/libdhi.dylib python-bindings/dhi/
 ```
 
 ### Python C Extension (rebuild)
@@ -65,7 +65,7 @@ python setup.py build_ext --inplace
 
 ### Python Path
 ```
-Python → _dhi_native.so (C) → libsatya.dylib (Zig) → SIMD validators
+Python → _dhi_native.so (C) → libdhi.dylib (Zig) → SIMD validators
               ↓
     Pre-compiled field specs (zero per-call overhead)
 ```
@@ -154,6 +154,6 @@ cd js-bindings && bun test-zod4-compat.ts
 
 ## Links
 
-- **GitHub**: https://github.com/justrach/satya-zig
+- **GitHub**: https://github.com/justrach/dhi
 - **PyPI**: https://pypi.org/project/dhi/
 - **npm**: https://www.npmjs.com/package/dhi

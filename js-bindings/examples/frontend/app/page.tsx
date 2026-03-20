@@ -174,7 +174,7 @@ export default function Home() {
 
         <div className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
           <a 
-            href="https://github.com/justrach/satya-zig"
+            href="https://github.com/justrach/dhi"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-blue-600 dark:hover:text-blue-400 transition underline"

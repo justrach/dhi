@@ -463,7 +463,7 @@ python benchmark_vs_all.py
 
 | Library | Speed | Comparison |
 |---------|-------|------------|
-| dhi | 28M/sec | - |
+| dhi | 24M/sec | - |
 | satya (Rust) | 9M/sec | 3.0x slower |
 | msgspec (C) | 9M/sec | 3.1x slower |
 | Pydantic | 48K/sec | **520x slower** |

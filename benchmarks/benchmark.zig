@@ -104,7 +104,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("=== satya-zig Performance Benchmarks ===\n\n", .{});
+    std.debug.print("=== dhi Performance Benchmarks ===\n\n", .{});
 
     try benchmarkSingleValidation(allocator);
     try benchmarkBatchValidation(allocator);

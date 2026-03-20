@@ -221,5 +221,5 @@ This pattern is ideal for:
 ## Learn More
 
 - [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
-- [dhi Documentation](https://github.com/justrach/satya-zig)
+- [dhi Documentation](https://github.com/justrach/dhi)
 - [Vercel AI SDK](https://sdk.vercel.ai/docs)
