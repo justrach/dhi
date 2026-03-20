@@ -18,7 +18,7 @@ try:
         Path(__file__).parent / "dhi",  # Bundled in package
     ]
     
-    lib_name = 'satya'
+    lib_name = 'dhi'
     lib_file = None
     lib_dir = None
     

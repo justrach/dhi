@@ -40,8 +40,8 @@ jobs:
         with:
           name: zig-lib-${{ matrix.arch }}
           path: |
-            zig-out/lib/libsatya.*
-            zig-out/lib/satya.*
+            zig-out/lib/libdhi.*
+            zig-out/lib/dhi.*
           retention-days: 1
 
   build_wheels:
@@ -83,7 +83,7 @@ jobs:
         run: |
           echo "Zig library for ${{ matrix.arch }}:"
           ls -la zig-out/lib/
-          file zig-out/lib/libsatya.* || true
+          file zig-out/lib/libdhi.* || true
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21.3
