@@ -13,9 +13,9 @@ cd typescript-runtime-type-benchmarks
 bun install
 
 # Copy dhi files
-cp /path/to/satya-zig/js-bindings/dhi.wasm cases/
-cp /path/to/satya-zig/js-bindings/schema.ts cases/dhi-schema.ts
-cp /path/to/satya-zig/typescript-runtime-type-benchmarks/dhi.ts cases/
+cp /path/to/dhi/js-bindings/dhi.wasm cases/
+cp /path/to/dhi/js-bindings/schema.ts cases/dhi-schema.ts
+cp /path/to/dhi/typescript-runtime-type-benchmarks/dhi.ts cases/
 
 # Run dhi benchmark
 bun index.ts run dhi

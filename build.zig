@@ -25,7 +25,7 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for building the library
     const lib = b.addLibrary(.{
-        .name = "satya-zig",
+        .name = "dhi-zig",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .target = target,
@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
 
     // Build shared library for Python bindings
     const c_lib = b.addLibrary(.{
-        .name = "satya",
+        .name = "dhi",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/c_api.zig"),
             .target = target,

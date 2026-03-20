@@ -19,7 +19,7 @@ field_specs = {
 }
 
 results, valid_count = _dhi_native.validate_batch_direct(users, field_specs)
-# 28M users/sec! 🔥
+# 24M users/sec! 🔥
 ```
 
 ## ✨ Features

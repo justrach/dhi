@@ -27,8 +27,8 @@ pip install dhi
 ### From Source
 
 ```bash
-git clone https://github.com/justrach/satya-zig.git
-cd satya-zig
+git clone https://github.com/justrach/dhi.git
+cd dhi
 zig build -Doptimize=ReleaseFast
 cd python-bindings
 pip install -e .
@@ -419,8 +419,8 @@ A: Yes! Thoroughly tested and benchmarked. Used in production systems.
 
 ## Support
 
-- **GitHub Issues**: https://github.com/justrach/satya-zig/issues
-- **Documentation**: https://github.com/justrach/satya-zig/blob/main/DOCS.md
+- **GitHub Issues**: https://github.com/justrach/dhi/issues
+- **Documentation**: https://github.com/justrach/dhi/blob/main/DOCS.md
 - **PyPI**: https://pypi.org/project/dhi/
 
 ---
@@ -512,10 +512,10 @@ Created `src/batch_validator.zig` with:
 ### 2. Exposed via C API
 
 Added to `src/c_api.zig`:
-- `satya_validate_users_batch_optimized`
-- `satya_validate_int_batch_simd`
-- `satya_validate_string_length_batch`
-- `satya_validate_email_batch`
+- `dhi_validate_users_batch_optimized`
+- `dhi_validate_int_batch_simd`
+- `dhi_validate_string_length_batch`
+- `dhi_validate_email_batch`
 
 ### 3. Created Python Bindings
 
@@ -945,8 +945,8 @@ Step 1: Build Zig Library
            │ zig build -Doptimize=ReleaseFast
            ↓
 ┌──────────────────────┐
-│ libsatya.dylib       │  ← Shared library (macOS)
-│ libsatya.so          │  ← Shared library (Linux)
+│ libdhi.dylib       │  ← Shared library (macOS)
+│ libdhi.so          │  ← Shared library (Linux)
 └──────────┬───────────┘
            │
            │
@@ -956,11 +956,11 @@ Step 2: Build C Extension
 │  dhi/_native.c       │  ← CPython C extension source
 │  - PyInit_dhi_native │
 │  - py_validate_int() │
-│  - Links: libsatya   │
+│  - Links: libdhi   │
 └──────────┬───────────┘
            │ pip install -e . (runs setup.py)
            │ gcc -shared -fPIC -I/python/include
-           │     -L../zig-out/lib -lsatya
+           │     -L../zig-out/lib -ldhi
            ↓
 ┌──────────────────────┐
 │ _dhi_native.so       │  ← Compiled C extension
@@ -992,7 +992,7 @@ zig build -Doptimize=ReleaseFast
 2. Finds C library definition:
    ```zig
    const c_lib = b.addLibrary(.{
-       .name = "satya",
+       .name = "dhi",
        .root_module = b.createModule(.{
            .root_source_file = b.path("src/c_api.zig"),
            .target = target,
@@ -1003,16 +1003,16 @@ zig build -Doptimize=ReleaseFast
    ```
 3. Compiles `src/c_api.zig` with exported functions:
    ```zig
-   export fn satya_validate_int(value: i64, min: i64, max: i64) i32 {
+   export fn dhi_validate_int(value: i64, min: i64, max: i64) i32 {
        if (value < min or value > max) return 0;
        return 1;
    }
    ```
-4. Creates `zig-out/lib/libsatya.dylib` (or `.so` on Linux)
+4. Creates `zig-out/lib/libdhi.dylib` (or `.so` on Linux)
 
 **Output:**
-- `libsatya.dylib` - Shared library with C ABI
-- Exports: `satya_validate_int`, `satya_validate_email`, etc.
+- `libdhi.dylib` - Shared library with C ABI
+- Exports: `dhi_validate_int`, `dhi_validate_email`, etc.
 - Size: ~49KB (optimized)
 
 ### Step 2: Build CPython C Extension
@@ -1031,29 +1031,29 @@ pip install -e .
        'dhi._dhi_native',
        sources=['dhi/_native.c'],
        library_dirs=[str(zig_lib_path)],
-       libraries=['satya'],  # ← Links against libsatya
+       libraries=['dhi'],  # ← Links against libdhi
        extra_compile_args=['-O3'],
    )
    ```
 3. Compiles `dhi/_native.c`:
    ```c
    // External Zig functions
-   extern int satya_validate_int(long value, long min, long max);
+   extern int dhi_validate_int(long value, long min, long max);
    
    // Python wrapper
    static PyObject* py_validate_int(PyObject* self, PyObject* args) {
        long value, min, max;
        PyArg_ParseTuple(args, "lll", &value, &min, &max);
-       int result = satya_validate_int(value, min, max);
+       int result = dhi_validate_int(value, min, max);
        return PyBool_FromLong(result);
    }
    ```
-4. Links against `libsatya.dylib`
+4. Links against `libdhi.dylib`
 5. Creates `_dhi_native.cpython-313t-darwin.so`
 
 **Output:**
 - `_dhi_native.so` - CPython extension module
-- Imports: `libsatya.dylib` functions
+- Imports: `libdhi.dylib` functions
 - Size: ~16KB
 
 ### Step 3: Python Runtime
@@ -1082,7 +1082,7 @@ age = Age.validate(25)
        if not _dhi_native.validate_int(value, self.min_val, self.max_val):
            raise ValidationError(...)
    ```
-4. `_dhi_native.validate_int()` calls Zig's `satya_validate_int()`
+4. `_dhi_native.validate_int()` calls Zig's `dhi_validate_int()`
 5. Result returned to Python
 
 **Call stack:**
@@ -1093,7 +1093,7 @@ Python: _dhi_native.validate_int(25, 18, 90)
     ↓ (C extension - 55ns overhead)
 C: py_validate_int()
     ↓
-C: satya_validate_int(25, 18, 90)
+C: dhi_validate_int(25, 18, 90)
     ↓ (Zig code - 0ns overhead)
 Zig: if (value < min or value > max) return 0; return 1;
     ↓
@@ -1139,10 +1139,10 @@ Total time per validation: 121.7ns
 ### ctypes (Previous Approach)
 ```python
 # Load library
-lib = ctypes.CDLL('libsatya.dylib')
+lib = ctypes.CDLL('libdhi.dylib')
 
 # Call function
-result = lib.satya_validate_int(value, min, max)
+result = lib.dhi_validate_int(value, min, max)
 ```
 
 **Overhead:** ~150ns per call
@@ -1213,7 +1213,7 @@ This ensures the package works everywhere, even without Zig or C compiler!
 ls python-bindings/dhi/_dhi_native*.so
 
 # Check if Zig library exists
-ls zig-out/lib/libsatya.*
+ls zig-out/lib/libdhi.*
 
 # Verify import
 python -c "from dhi import _dhi_native; print('OK')"
@@ -1315,31 +1315,31 @@ All validators are exposed via C API for Python bindings:
 
 ```c
 // String validators
-extern int satya_validate_email(const char* str);
-extern int satya_validate_url(const char* str);
-extern int satya_validate_uuid(const char* str);
-extern int satya_validate_ipv4(const char* str);
-extern int satya_validate_base64(const char* str);
-extern int satya_validate_iso_date(const char* str);
-extern int satya_validate_iso_datetime(const char* str);
-extern int satya_validate_contains(const char* str, const char* substring);
-extern int satya_validate_starts_with(const char* str, const char* prefix);
-extern int satya_validate_ends_with(const char* str, const char* suffix);
+extern int dhi_validate_email(const char* str);
+extern int dhi_validate_url(const char* str);
+extern int dhi_validate_uuid(const char* str);
+extern int dhi_validate_ipv4(const char* str);
+extern int dhi_validate_base64(const char* str);
+extern int dhi_validate_iso_date(const char* str);
+extern int dhi_validate_iso_datetime(const char* str);
+extern int dhi_validate_contains(const char* str, const char* substring);
+extern int dhi_validate_starts_with(const char* str, const char* prefix);
+extern int dhi_validate_ends_with(const char* str, const char* suffix);
 
 // Number validators
-extern int satya_validate_int_gt(long value, long min);
-extern int satya_validate_int_gte(long value, long min);
-extern int satya_validate_int_lt(long value, long max);
-extern int satya_validate_int_lte(long value, long max);
-extern int satya_validate_int_positive(long value);
-extern int satya_validate_int_non_negative(long value);
-extern int satya_validate_int_negative(long value);
-extern int satya_validate_int_non_positive(long value);
-extern int satya_validate_int_multiple_of(long value, long divisor);
+extern int dhi_validate_int_gt(long value, long min);
+extern int dhi_validate_int_gte(long value, long min);
+extern int dhi_validate_int_lt(long value, long max);
+extern int dhi_validate_int_lte(long value, long max);
+extern int dhi_validate_int_positive(long value);
+extern int dhi_validate_int_non_negative(long value);
+extern int dhi_validate_int_negative(long value);
+extern int dhi_validate_int_non_positive(long value);
+extern int dhi_validate_int_multiple_of(long value, long divisor);
 
 // Float validators
-extern int satya_validate_float_gt(double value, double min);
-extern int satya_validate_float_finite(double value);
+extern int dhi_validate_float_gt(double value, double min);
+extern int dhi_validate_float_finite(double value);
 ```
 
 ## 🎯 Python API (Coming Soon)
@@ -1442,7 +1442,7 @@ All while being **completely general** and **production-ready**! 🚀
 - `src/c_api.zig` - C API exports
 - `dhi/_native.c` - Python C extension (to be updated)
 - `dhi/batch.py` - Python wrapper (to be updated)
-# Contributing to satya-zig
+# Contributing to dhi
 
 Thanks for your interest in contributing! This document provides guidelines and information for contributors.
 
@@ -1455,8 +1455,8 @@ Thanks for your interest in contributing! This document provides guidelines and 
 
 2. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/satya-zig.git
-   cd satya-zig
+   git clone https://github.com/yourusername/dhi.git
+   cd dhi
    ```
 
 3. **Run tests**
@@ -1472,7 +1472,7 @@ Thanks for your interest in contributing! This document provides guidelines and 
 ## Project Structure
 
 ```
-satya-zig/
+dhi/
 ├── src/
 │   ├── validator.zig        # Core validation primitives
 │   ├── combinators.zig      # Combinator patterns (Optional, OneOf, etc.)
@@ -1506,7 +1506,7 @@ Example validator structure:
 
 ```zig
 /// MyValidator validates X with constraints Y.
-/// Inspired by satya's Field(constraint=value) pattern.
+/// Validates fields with constraint=value pattern.
 pub const MyValidator = struct {
     const Self = @This();
     value: T,
@@ -1561,7 +1561,7 @@ test "BoundedInt - at boundaries" { ... }
 
 ```zig
 /// BoundedInt creates a validated integer type with compile-time bounds.
-/// Inspired by satya's Field(ge=min, le=max) pattern.
+/// Validates integers with ge=min, le=max pattern.
 ///
 /// Example:
 ///   const Age = BoundedInt(u8, 0, 130);
@@ -2401,7 +2401,7 @@ Mac Studio shows excellent thermal performance:
 
 ```bash
 # Always use the project's .venv
-cd /Users/rachpradhan/satya-zig/python-bindings
+cd /Users/rachpradhan/dhi/python-bindings
 source ../.venv/bin/activate
 python benchmark_native.py
 ```
@@ -2566,7 +2566,7 @@ See `BENCHMARK_ANALYSIS.md` for detailed explanation.
 ### 1. Update Your Benchmarks
 
 ```bash
-cd /Users/rachpradhan/satya-zig/python-bindings
+cd /Users/rachpradhan/dhi/python-bindings
 ./run_benchmark_venv.sh
 ```
 
@@ -2827,7 +2827,7 @@ results = validate_batch(users, schema)
 
 1. **Add C API function** in `src/c_api.zig`:
    ```zig
-   export fn satya_validate_batch(
+   export fn dhi_validate_batch(
        data_ptr: [*]const u8,
        data_len: usize,
        schema_ptr: [*]const SchemaField,
@@ -2885,7 +2885,7 @@ results = UserSchema.validate_json_array(json_bytes)
 
 2. **Expose via C API**:
    ```zig
-   export fn satya_validate_json_array(
+   export fn dhi_validate_json_array(
        json_ptr: [*]const u8,
        json_len: usize,
        schema_ptr: [*]const SchemaField,
@@ -3176,7 +3176,7 @@ This will make dhi a complete, high-performance validation library suitable for 
 
 ```bash
 # Go to GitHub repo settings
-https://github.com/justrach/satya-zig/settings/secrets/actions
+https://github.com/justrach/dhi/settings/secrets/actions
 
 # Click "New repository secret"
 # Name: PYPI_API_TOKEN
@@ -3186,7 +3186,7 @@ https://github.com/justrach/satya-zig/settings/secrets/actions
 ### 2. Verify Git Status
 
 ```bash
-cd /Users/rachpradhan/satya-zig
+cd /Users/rachpradhan/dhi
 git status  # Make sure you're on main branch
 git remote -v  # Verify origin is correct
 ```
@@ -3208,7 +3208,7 @@ This will:
 ### Option B: Manual
 
 ```bash
-cd /Users/rachpradhan/satya-zig
+cd /Users/rachpradhan/dhi
 
 # Commit
 git add -A
@@ -3226,7 +3226,7 @@ git push origin v1.0.11
 
 After pushing the tag:
 
-1. **Watch GitHub Actions**: https://github.com/justrach/satya-zig/actions
+1. **Watch GitHub Actions**: https://github.com/justrach/dhi/actions
 2. **Check build progress** (takes ~10-15 minutes):
    - Build Zig library (macOS, Linux, Windows)
    - Build Python wheels (3.8-3.13 for each platform)
@@ -3322,8 +3322,8 @@ Once verified:
 ### 📦 Installation
 
 ```bash
-git clone https://github.com/justrach/satya-zig.git
-cd satya-zig
+git clone https://github.com/justrach/dhi.git
+cd dhi
 zig build test
 ```
 
@@ -3350,10 +3350,10 @@ See [TODO.md](TODO.md) for the roadmap, including:
 
 ```zig
 const std = @import("std");
-const satya = @import("satya");
+const dhi = @import("dhi");
 
-const Age = satya.BoundedInt(u8, 18, 90);
-const Email = satya.Email;
+const Age = dhi.BoundedInt(u8, 18, 90);
+const Email = dhi.Email;
 
 const User = struct {
     name: []const u8,
@@ -3363,7 +3363,7 @@ const User = struct {
 
 // Validate JSON in one step
 const json = "{\"name\":\"Alice\",\"email\":\"alice@example.com\",\"age\":25}";
-const user = try satya.parseAndValidate(User, json, allocator);
+const user = try dhi.parseAndValidate(User, json, allocator);
 ```
 
 ### 🙏 Acknowledgments
@@ -3379,7 +3379,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ---
 
-**Repository**: https://github.com/justrach/satya-zig  
+**Repository**: https://github.com/justrach/dhi  
 **Author**: [@justrach](https://github.com/justrach)  
 **Zig Version**: 0.15.1+
 # Satya Validation Patterns - Reference for Zig Implementation
@@ -3683,7 +3683,7 @@ pub fn parseAndValidate(comptime T: type, json: []const u8) !T {
 #### Python Wrapper (High Priority)
 - [ ] Create Python bindings using `ctypes` or `cffi`
 - [ ] Expose core validation functions to Python
-- [ ] Package as `satya-zig-py` on PyPI
+- [ ] Package as `dhi-py` on PyPI
 - [ ] Write Python examples showing interop
 - [ ] Benchmark against Pydantic for performance comparison
 - [ ] Consider using `zig build-lib -dynamic` for shared library
@@ -3695,7 +3695,7 @@ zig build-lib src/root.zig -dynamic -OReleaseFast
 
 # Python wrapper example
 import ctypes
-satya = ctypes.CDLL('./libsatya.so')
+dhi_lib = ctypes.CDLL('./libdhi.so')
 # Define function signatures and call from Python
 ```
 
@@ -3703,7 +3703,7 @@ satya = ctypes.CDLL('./libsatya.so')
 - [ ] Create WASM build target for browser/Node.js
 - [ ] Use `zig build-lib -target wasm32-freestanding`
 - [ ] Write TypeScript type definitions
-- [ ] Package as `@satya/zig` on npm
+- [ ] Package as `@dhi/zig` on npm
 - [ ] Create Zod-like API for TypeScript users
 - [ ] Add examples for Next.js/React integration
 
@@ -3713,14 +3713,14 @@ satya = ctypes.CDLL('./libsatya.so')
 zig build-lib src/root.zig -target wasm32-freestanding -dynamic -rdynamic
 
 # TypeScript wrapper
-import { instantiate } from './satya.wasm';
+import { instantiate } from './dhi.wasm';
 export const validate = (data: unknown) => { /* ... */ };
 ```
 
 #### Rust FFI (Low Priority)
 - [ ] Create C-compatible API layer
 - [ ] Generate Rust bindings with `bindgen`
-- [ ] Publish as `satya-zig` crate on crates.io
+- [ ] Publish as `dhi` crate on crates.io
 
 ### Core Library Improvements
 
@@ -3799,17 +3799,17 @@ Create `src/python_ext.c`:
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-// Link against libsatya.dylib
-extern int satya_validate_int(long value, long min, long max);
-extern int satya_validate_string_length(const char* str, size_t min_len, size_t max_len);
-extern int satya_validate_email(const char* str);
+// Link against libdhi.dylib
+extern int dhi_validate_int(long value, long min, long max);
+extern int dhi_validate_string_length(const char* str, size_t min_len, size_t max_len);
+extern int dhi_validate_email(const char* str);
 
 static PyObject* py_validate_int(PyObject* self, PyObject* args) {
     long value, min, max;
     if (!PyArg_ParseTuple(args, "lll", &value, &min, &max))
         return NULL;
     
-    int result = satya_validate_int(value, min, max);
+    int result = dhi_validate_int(value, min, max);
     return PyBool_FromLong(result);
 }
 
@@ -3834,7 +3834,7 @@ PyMODINIT_FUNC PyInit__dhi_native(void) {
 **Build**:
 ```bash
 gcc -shared -fPIC -I/usr/include/python3.11 \
-    src/python_ext.c -L./zig-out/lib -lsatya \
+    src/python_ext.c -L./zig-out/lib -ldhi \
     -o dhi/_dhi_native.so
 ```
 
@@ -3853,7 +3853,7 @@ Validate many items in one FFI call.
 
 Update `src/c_api.zig` (already done!):
 ```zig
-export fn satya_validate_users_batch(
+export fn dhi_validate_users_batch(
     ids: [*]const i64,
     names: [*]const [*:0]const u8,
     emails: [*]const [*:0]const u8,
@@ -3874,7 +3874,7 @@ def validate_batch(users: List[dict]) -> List[bool]:
     results = (ctypes.c_uint8 * len(users))()
     
     # Single FFI call!
-    _zig._lib.satya_validate_users_batch(ids, names, emails, ages, len(users), results)
+    _zig._lib.dhi_validate_users_batch(ids, names, emails, ages, len(users), results)
     return [bool(r) for r in results]
 ```
 
@@ -4202,7 +4202,7 @@ print(f'✅ dhi v1.0.0 installed! Valid: {count}/{len(users)}')
 ## 🔗 Links to Share
 
 - **PyPI**: https://pypi.org/project/dhi/
-- **GitHub**: https://github.com/justrach/satya-zig
+- **GitHub**: https://github.com/justrach/dhi
 - **Benchmarks**: 28M users/sec (see benchmark_batch.py)
 
 ## 🎉 Congratulations!
@@ -4228,8 +4228,8 @@ From 0 to 28M validations/sec in one session. 🚀
 
 ```bash
 # Clone and build locally
-git clone https://github.com/justrach/satya-zig.git
-cd satya-zig
+git clone https://github.com/justrach/dhi.git
+cd dhi
 zig build -Doptimize=ReleaseFast
 cd python-bindings
 pip install -e .
@@ -4287,7 +4287,7 @@ ls -lh dist/
 ### Step 1: Test Locally (Optional but Recommended)
 
 ```bash
-cd /Users/rachpradhan/satya-zig/python-bindings
+cd /Users/rachpradhan/dhi/python-bindings
 
 # Test the wheel
 pip install dist/dhi-1.0.0-cp314-cp314-macosx_11_0_arm64.whl --force-reinstall
@@ -4321,7 +4321,7 @@ export TWINE_PASSWORD=pypi-YOUR_TOKEN_HERE
 ### Step 3: Upload to Test PyPI (RECOMMENDED FIRST!)
 
 ```bash
-cd /Users/rachpradhan/satya-zig/python-bindings
+cd /Users/rachpradhan/dhi/python-bindings
 
 # Upload to test PyPI
 twine upload --repository testpypi dist/*
@@ -4336,7 +4336,7 @@ python -c "from dhi import _dhi_native; print('✅ Test PyPI installation works!
 ### Step 4: Upload to Production PyPI
 
 ```bash
-cd /Users/rachpradhan/satya-zig/python-bindings
+cd /Users/rachpradhan/dhi/python-bindings
 
 # 🎉 THE BIG MOMENT! 🎉
 twine upload dist/*
@@ -4431,7 +4431,7 @@ results, count = _dhi_native.validate_batch_direct(users, specs)
 
 Built with Zig for maximum performance. MIT licensed.
 
-GitHub: https://github.com/justrach/satya-zig
+GitHub: https://github.com/justrach/dhi
 PyPI: https://pypi.org/project/dhi/
 
 Would love your feedback!
@@ -4468,7 +4468,7 @@ If people like it:
 **Ready to publish?**
 
 ```bash
-cd /Users/rachpradhan/satya-zig/python-bindings
+cd /Users/rachpradhan/dhi/python-bindings
 twine upload dist/*
 ```
 

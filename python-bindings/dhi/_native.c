@@ -1,6 +1,6 @@
 /*
  * Native CPython extension for dhi
- * Links against libsatya.dylib (Zig backend)
+ * Links against libdhi.dylib (Zig backend)
  */
 
 #define PY_SSIZE_T_CLEAN
@@ -13,7 +13,7 @@
 // =============================================================================
 
 // Inline email validator - avoids Zig FFI call for simple email format checks
-// This is the same logic as Zig's satya_validate_email but runs in C
+// This is the same logic as Zig's dhi_validate_email but runs in C
 static inline int inline_validate_email(const char* str) {
     if (!str || !*str) return 0;
 
@@ -32,66 +32,66 @@ static inline int inline_validate_email(const char* str) {
     return 1;
 }
 
-// External Zig functions from libsatya - COMPREHENSIVE VALIDATORS
+// External Zig functions from libdhi - COMPREHENSIVE VALIDATORS
 // Basic validators
-extern int satya_validate_int(long value, long min, long max);
-extern int satya_validate_string_length(const char* str, size_t min_len, size_t max_len);
-extern int satya_validate_email(const char* str);
+extern int dhi_validate_int(long value, long min, long max);
+extern int dhi_validate_string_length(const char* str, size_t min_len, size_t max_len);
+extern int dhi_validate_email(const char* str);
 
 // String validators (Zod-style)
-extern int satya_validate_url(const char* str);
-extern int satya_validate_uuid(const char* str);
-extern int satya_validate_ipv4(const char* str);
-extern int satya_validate_base64(const char* str);
-extern int satya_validate_iso_date(const char* str);
-extern int satya_validate_iso_datetime(const char* str);
-extern int satya_validate_contains(const char* str, const char* substring);
-extern int satya_validate_starts_with(const char* str, const char* prefix);
-extern int satya_validate_ends_with(const char* str, const char* suffix);
+extern int dhi_validate_url(const char* str);
+extern int dhi_validate_uuid(const char* str);
+extern int dhi_validate_ipv4(const char* str);
+extern int dhi_validate_base64(const char* str);
+extern int dhi_validate_iso_date(const char* str);
+extern int dhi_validate_iso_datetime(const char* str);
+extern int dhi_validate_contains(const char* str, const char* substring);
+extern int dhi_validate_starts_with(const char* str, const char* prefix);
+extern int dhi_validate_ends_with(const char* str, const char* suffix);
 
 // Number validators (Pydantic-style)
-extern int satya_validate_int_gt(long value, long min);
-extern int satya_validate_int_gte(long value, long min);
-extern int satya_validate_int_lt(long value, long max);
-extern int satya_validate_int_lte(long value, long max);
-extern int satya_validate_int_positive(long value);
-extern int satya_validate_int_non_negative(long value);
-extern int satya_validate_int_negative(long value);
-extern int satya_validate_int_non_positive(long value);
-extern int satya_validate_int_multiple_of(long value, long divisor);
+extern int dhi_validate_int_gt(long value, long min);
+extern int dhi_validate_int_gte(long value, long min);
+extern int dhi_validate_int_lt(long value, long max);
+extern int dhi_validate_int_lte(long value, long max);
+extern int dhi_validate_int_positive(long value);
+extern int dhi_validate_int_non_negative(long value);
+extern int dhi_validate_int_negative(long value);
+extern int dhi_validate_int_non_positive(long value);
+extern int dhi_validate_int_multiple_of(long value, long divisor);
 
 // Float validators
-extern int satya_validate_float_gt(double value, double min);
-extern int satya_validate_float_gte(double value, double min);
-extern int satya_validate_float_lt(double value, double max);
-extern int satya_validate_float_lte(double value, double max);
-extern int satya_validate_float_finite(double value);
+extern int dhi_validate_float_gt(double value, double min);
+extern int dhi_validate_float_gte(double value, double min);
+extern int dhi_validate_float_lt(double value, double max);
+extern int dhi_validate_float_lte(double value, double max);
+extern int dhi_validate_float_finite(double value);
 
 // IPv6 validator
-extern int satya_validate_ipv6(const char* str);
+extern int dhi_validate_ipv6(const char* str);
 
 // =============================================================================
 // SIMD JSON PARSING FUNCTIONS FROM ZIG
 // =============================================================================
-extern size_t satya_skip_whitespace(const char* json, size_t len, size_t start);
-extern int satya_extract_json_string(
+extern size_t dhi_skip_whitespace(const char* json, size_t len, size_t start);
+extern int dhi_extract_json_string(
     const char* json, size_t len, size_t start,
     const char** out_str_ptr, size_t* out_str_len,
     int* out_has_escapes, size_t* out_end
 );
-extern int satya_parse_json_int(
+extern int dhi_parse_json_int(
     const char* json, size_t len, size_t start,
     long* out_value, size_t* out_end
 );
-extern int satya_parse_json_float(
+extern int dhi_parse_json_float(
     const char* json, size_t len, size_t start,
     double* out_value, size_t* out_end
 );
-extern int satya_skip_json_value(
+extern int dhi_skip_json_value(
     const char* json, size_t len, size_t start,
     size_t* out_end
 );
-extern unsigned long long satya_hash_field_name(const char* name, size_t len);
+extern unsigned long long dhi_hash_field_name(const char* name, size_t len);
 
 // =============================================================================
 // FNV-1a HASH - Fast hash for JSON field matching (computed at compile time)
@@ -113,7 +113,7 @@ static PyObject* py_validate_int(PyObject* self, PyObject* args) {
         return NULL;
     }
     
-    int result = satya_validate_int(value, min, max);
+    int result = dhi_validate_int(value, min, max);
     return PyBool_FromLong(result);
 }
 
@@ -126,7 +126,7 @@ static PyObject* py_validate_string_length(PyObject* self, PyObject* args) {
         return NULL;
     }
     
-    int result = satya_validate_string_length(str, (size_t)min_len, (size_t)max_len);
+    int result = dhi_validate_string_length(str, (size_t)min_len, (size_t)max_len);
     return PyBool_FromLong(result);
 }
 
@@ -138,7 +138,7 @@ static PyObject* py_validate_email(PyObject* self, PyObject* args) {
         return NULL;
     }
     
-    int result = satya_validate_email(str);
+    int result = dhi_validate_email(str);
     return PyBool_FromLong(result);
 }
 
@@ -307,82 +307,82 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
             switch (field_specs[f].validator_type) {
                 case VAL_INT: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int(value, field_specs[f].param1, field_specs[f].param2);
+                    is_valid = dhi_validate_int(value, field_specs[f].param1, field_specs[f].param2);
                     break;
                 }
                 case VAL_INT_GT: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_gt(value, field_specs[f].param1);
+                    is_valid = dhi_validate_int_gt(value, field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_GTE: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_gte(value, field_specs[f].param1);
+                    is_valid = dhi_validate_int_gte(value, field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_LT: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_lt(value, field_specs[f].param1);
+                    is_valid = dhi_validate_int_lt(value, field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_LTE: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_lte(value, field_specs[f].param1);
+                    is_valid = dhi_validate_int_lte(value, field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_POSITIVE: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_positive(value);
+                    is_valid = dhi_validate_int_positive(value);
                     break;
                 }
                 case VAL_INT_NON_NEGATIVE: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_non_negative(value);
+                    is_valid = dhi_validate_int_non_negative(value);
                     break;
                 }
                 case VAL_INT_MULTIPLE_OF: {
                     long value = PyLong_AsLong(field_value);
-                    is_valid = satya_validate_int_multiple_of(value, field_specs[f].param1);
+                    is_valid = dhi_validate_int_multiple_of(value, field_specs[f].param1);
                     break;
                 }
                 case VAL_STRING: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_string_length(value, (size_t)field_specs[f].param1, (size_t)field_specs[f].param2);
+                    is_valid = dhi_validate_string_length(value, (size_t)field_specs[f].param1, (size_t)field_specs[f].param2);
                     break;
                 }
                 case VAL_EMAIL: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_email(value);
+                    is_valid = dhi_validate_email(value);
                     break;
                 }
                 case VAL_URL: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_url(value);
+                    is_valid = dhi_validate_url(value);
                     break;
                 }
                 case VAL_UUID: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_uuid(value);
+                    is_valid = dhi_validate_uuid(value);
                     break;
                 }
                 case VAL_IPV4: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_ipv4(value);
+                    is_valid = dhi_validate_ipv4(value);
                     break;
                 }
                 case VAL_BASE64: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_base64(value);
+                    is_valid = dhi_validate_base64(value);
                     break;
                 }
                 case VAL_ISO_DATE: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_iso_date(value);
+                    is_valid = dhi_validate_iso_date(value);
                     break;
                 }
                 case VAL_ISO_DATETIME: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = satya_validate_iso_datetime(value);
+                    is_valid = dhi_validate_iso_datetime(value);
                     break;
                 }
                 case VAL_UNKNOWN:
@@ -844,13 +844,13 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             const char *fmt_name = "unknown";
             switch (fs->format_code) {
                 case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;  // INLINED
-                case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
-                case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
-                case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
-                case 5: valid = satya_validate_ipv6(str_val); fmt_name = "IPv6"; break;
-                case 6: valid = satya_validate_base64(str_val); fmt_name = "base64"; break;
-                case 7: valid = satya_validate_iso_date(str_val); fmt_name = "ISO date"; break;
-                case 8: valid = satya_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
+                case 2: valid = dhi_validate_url(str_val); fmt_name = "URL"; break;
+                case 3: valid = dhi_validate_uuid(str_val); fmt_name = "UUID"; break;
+                case 4: valid = dhi_validate_ipv4(str_val); fmt_name = "IPv4"; break;
+                case 5: valid = dhi_validate_ipv6(str_val); fmt_name = "IPv6"; break;
+                case 6: valid = dhi_validate_base64(str_val); fmt_name = "base64"; break;
+                case 7: valid = dhi_validate_iso_date(str_val); fmt_name = "ISO date"; break;
+                case 8: valid = dhi_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
             }
             if (!valid) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
@@ -1020,7 +1020,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         long val = PyLong_AsLong(result);
         if (gt_obj != Py_None) {
             long gt_val = as_long_coerce(gt_obj);
-            if (!satya_validate_int_gt(val, gt_val)) {
+            if (!dhi_validate_int_gt(val, gt_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
                     "%s: Value must be > %ld, got %ld", field_name, gt_val, val);
@@ -1028,7 +1028,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (ge_obj != Py_None) {
             long ge_val = as_long_coerce(ge_obj);
-            if (!satya_validate_int_gte(val, ge_val)) {
+            if (!dhi_validate_int_gte(val, ge_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
                     "%s: Value must be >= %ld, got %ld", field_name, ge_val, val);
@@ -1036,7 +1036,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (lt_obj != Py_None) {
             long lt_val = as_long_coerce(lt_obj);
-            if (!satya_validate_int_lt(val, lt_val)) {
+            if (!dhi_validate_int_lt(val, lt_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
                     "%s: Value must be < %ld, got %ld", field_name, lt_val, val);
@@ -1044,7 +1044,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (le_obj != Py_None) {
             long le_val = as_long_coerce(le_obj);
-            if (!satya_validate_int_lte(val, le_val)) {
+            if (!dhi_validate_int_lte(val, le_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
                     "%s: Value must be <= %ld, got %ld", field_name, le_val, val);
@@ -1052,7 +1052,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (mul_obj != Py_None) {
             long mul_val = as_long_coerce(mul_obj);
-            if (!satya_validate_int_multiple_of(val, mul_val)) {
+            if (!dhi_validate_int_multiple_of(val, mul_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
                     "%s: Value must be a multiple of %ld, got %ld", field_name, mul_val, val);
@@ -1061,7 +1061,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
     } else if (PyFloat_Check(result)) {
         double val = PyFloat_AsDouble(result);
         if (!allow_inf_nan) {
-            if (!satya_validate_float_finite(val)) {
+            if (!dhi_validate_float_finite(val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
                     "%s: Value must be finite", field_name);
@@ -1069,7 +1069,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (gt_obj != Py_None) {
             double gt_val = as_double_coerce(gt_obj);
-            if (!satya_validate_float_gt(val, gt_val)) {
+            if (!dhi_validate_float_gt(val, gt_val)) {
                 char buf[128];
                 snprintf(buf, sizeof(buf), "%s: Value must be > %g, got %g", field_name, gt_val, val);
                 Py_DECREF(result);
@@ -1079,7 +1079,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (ge_obj != Py_None) {
             double ge_val = as_double_coerce(ge_obj);
-            if (!satya_validate_float_gte(val, ge_val)) {
+            if (!dhi_validate_float_gte(val, ge_val)) {
                 char buf[128];
                 snprintf(buf, sizeof(buf), "%s: Value must be >= %g, got %g", field_name, ge_val, val);
                 Py_DECREF(result);
@@ -1089,7 +1089,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (lt_obj != Py_None) {
             double lt_val = as_double_coerce(lt_obj);
-            if (!satya_validate_float_lt(val, lt_val)) {
+            if (!dhi_validate_float_lt(val, lt_val)) {
                 char buf[128];
                 snprintf(buf, sizeof(buf), "%s: Value must be < %g, got %g", field_name, lt_val, val);
                 Py_DECREF(result);
@@ -1099,7 +1099,7 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
         }
         if (le_obj != Py_None) {
             double le_val = as_double_coerce(le_obj);
-            if (!satya_validate_float_lte(val, le_val)) {
+            if (!dhi_validate_float_lte(val, le_val)) {
                 char buf[128];
                 snprintf(buf, sizeof(buf), "%s: Value must be <= %g, got %g", field_name, le_val, val);
                 Py_DECREF(result);
@@ -1154,13 +1154,13 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
 
         switch (format_code) {
             case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;  // INLINED
-            case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
-            case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
-            case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
-            case 5: valid = satya_validate_ipv6(str_val); fmt_name = "IPv6"; break;
-            case 6: valid = satya_validate_base64(str_val); fmt_name = "base64"; break;
-            case 7: valid = satya_validate_iso_date(str_val); fmt_name = "ISO date"; break;
-            case 8: valid = satya_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
+            case 2: valid = dhi_validate_url(str_val); fmt_name = "URL"; break;
+            case 3: valid = dhi_validate_uuid(str_val); fmt_name = "UUID"; break;
+            case 4: valid = dhi_validate_ipv4(str_val); fmt_name = "IPv4"; break;
+            case 5: valid = dhi_validate_ipv6(str_val); fmt_name = "IPv6"; break;
+            case 6: valid = dhi_validate_base64(str_val); fmt_name = "base64"; break;
+            case 7: valid = dhi_validate_iso_date(str_val); fmt_name = "ISO date"; break;
+            case 8: valid = dhi_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
         }
 
         if (!valid) {
@@ -1751,7 +1751,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
         int validation_failed = 0;
         if (PyLong_Check(result) && !PyBool_Check(result)) {
             long val = PyLong_AsLong(result);
-            // INLINED: val > gt_long (was satya_validate_int_gt)
+            // INLINED: val > gt_long (was dhi_validate_int_gt)
             if (fs->has_gt && val <= fs->gt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
@@ -1759,7 +1759,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            // INLINED: val >= ge_long (was satya_validate_int_gte)
+            // INLINED: val >= ge_long (was dhi_validate_int_gte)
             if (fs->has_ge && val < fs->ge_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
@@ -1767,7 +1767,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            // INLINED: val < lt_long (was satya_validate_int_lt)
+            // INLINED: val < lt_long (was dhi_validate_int_lt)
             if (fs->has_lt && val >= fs->lt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
@@ -1775,7 +1775,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            // INLINED: val <= le_long (was satya_validate_int_lte)
+            // INLINED: val <= le_long (was dhi_validate_int_lte)
             if (fs->has_le && val > fs->le_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
@@ -1783,7 +1783,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
-            // INLINED: val % mul_long == 0 (was satya_validate_int_multiple_of)
+            // INLINED: val % mul_long == 0 (was dhi_validate_int_multiple_of)
             if (fs->has_mul && (val % fs->mul_long) != 0) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
@@ -1793,7 +1793,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
             }
         } else if (PyFloat_Check(result)) {
             double val = PyFloat_AsDouble(result);
-            // INLINED: isfinite check (was satya_validate_float_finite)
+            // INLINED: isfinite check (was dhi_validate_float_finite)
             if (!fs->allow_inf_nan && !isfinite(val)) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
@@ -1855,13 +1855,13 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
             const char *fmt_name = "unknown";
             switch (fs->format_code) {
                 case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;  // INLINED
-                case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
-                case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
-                case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
-                case 5: valid = satya_validate_ipv6(str_val); fmt_name = "IPv6"; break;
-                case 6: valid = satya_validate_base64(str_val); fmt_name = "base64"; break;
-                case 7: valid = satya_validate_iso_date(str_val); fmt_name = "ISO date"; break;
-                case 8: valid = satya_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
+                case 2: valid = dhi_validate_url(str_val); fmt_name = "URL"; break;
+                case 3: valid = dhi_validate_uuid(str_val); fmt_name = "UUID"; break;
+                case 4: valid = dhi_validate_ipv4(str_val); fmt_name = "IPv4"; break;
+                case 5: valid = dhi_validate_ipv6(str_val); fmt_name = "IPv6"; break;
+                case 6: valid = dhi_validate_base64(str_val); fmt_name = "base64"; break;
+                case 7: valid = dhi_validate_iso_date(str_val); fmt_name = "ISO date"; break;
+                case 8: valid = dhi_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
             }
             if (!valid) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
@@ -2483,13 +2483,13 @@ static int DhiStruct_init(DhiStructObject *self, PyObject *args, PyObject *kwarg
             const char *fmt_name = "unknown";
             switch (fs->format_code) {
                 case 1: valid = inline_validate_email(str_val); fmt_name = "email"; break;
-                case 2: valid = satya_validate_url(str_val); fmt_name = "URL"; break;
-                case 3: valid = satya_validate_uuid(str_val); fmt_name = "UUID"; break;
-                case 4: valid = satya_validate_ipv4(str_val); fmt_name = "IPv4"; break;
-                case 5: valid = satya_validate_ipv6(str_val); fmt_name = "IPv6"; break;
-                case 6: valid = satya_validate_base64(str_val); fmt_name = "base64"; break;
-                case 7: valid = satya_validate_iso_date(str_val); fmt_name = "ISO date"; break;
-                case 8: valid = satya_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
+                case 2: valid = dhi_validate_url(str_val); fmt_name = "URL"; break;
+                case 3: valid = dhi_validate_uuid(str_val); fmt_name = "UUID"; break;
+                case 4: valid = dhi_validate_ipv4(str_val); fmt_name = "IPv4"; break;
+                case 5: valid = dhi_validate_ipv6(str_val); fmt_name = "IPv6"; break;
+                case 6: valid = dhi_validate_base64(str_val); fmt_name = "base64"; break;
+                case 7: valid = dhi_validate_iso_date(str_val); fmt_name = "ISO date"; break;
+                case 8: valid = dhi_validate_iso_datetime(str_val); fmt_name = "ISO datetime"; break;
             }
             if (!valid) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
@@ -2689,7 +2689,7 @@ static PyObject* py_init_struct_class(PyObject *self, PyObject *args) {
 
 // Skip whitespace using SIMD (via Zig)
 #define SKIP_WS_SIMD(json, pos, len) \
-    (pos) = satya_skip_whitespace((json), (len), (pos))
+    (pos) = dhi_skip_whitespace((json), (len), (pos))
 
 // Fallback for simple cases
 #define SKIP_WS(json, pos, len) \
@@ -2734,7 +2734,7 @@ static inline char* json_parse_string_simd(const char *json, size_t *pos, size_t
     int has_escapes;
     size_t simd_end;
 
-    int result = satya_extract_json_string(json, len, start, &str_ptr, &str_len, &has_escapes, &simd_end);
+    int result = dhi_extract_json_string(json, len, start, &str_ptr, &str_len, &has_escapes, &simd_end);
     if (result != 0) return NULL;
 
     *out_len = str_len;
@@ -2964,7 +2964,7 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
             // Float - use Zig SIMD for accuracy
             double fval;
             size_t end;
-            int result = satya_parse_json_float(json, len, *pos, &fval, &end);
+            int result = dhi_parse_json_float(json, len, *pos, &fval, &end);
             if (result != 0) {
                 PyErr_SetString(PyExc_ValueError, "Invalid float");
                 return NULL;
@@ -2982,7 +2982,7 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
         // Very large integer - fall back to Zig SIMD
         long int_val;
         size_t end;
-        int result = satya_parse_json_int(json, len, *pos, &int_val, &end);
+        int result = dhi_parse_json_int(json, len, *pos, &int_val, &end);
         if (result != 0) {
             PyErr_SetString(PyExc_ValueError, "Invalid integer");
             return NULL;
@@ -3073,7 +3073,7 @@ static int json_skip_value(const char *json, size_t *pos, size_t len) {
 // SIMD-accelerated skip value using Zig backend
 static int json_skip_value_simd(const char *json, size_t *pos, size_t len) {
     size_t end;
-    int result = satya_skip_json_value(json, len, *pos, &end);
+    int result = dhi_skip_json_value(json, len, *pos, &end);
     if (result != 0) return 0;
     *pos = end;
     return 1;

@@ -166,8 +166,8 @@ dhi is a WASM-powered validation library that's 4.86x faster than Zod.
 
 ### Links
 - npm: https://www.npmjs.com/package/dhi
-- GitHub: https://github.com/justrach/satya-zig
-- Docs: https://github.com/justrach/satya-zig/blob/main/js-bindings/README.md
+- GitHub: https://github.com/justrach/dhi
+- Docs: https://github.com/justrach/dhi/blob/main/js-bindings/README.md
 
 ### Features
 - Drop-in Zod replacement

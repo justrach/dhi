@@ -179,7 +179,7 @@ pub fn main() !void {
         };
     }
 
-    // Example 5: ValidationResult pattern (satya-style)
+    // Example 5: ValidationResult pattern (dhi-style)
     std.debug.print("Example 5: ValidationResult pattern\n", .{});
     {
         // Create a result-style validator

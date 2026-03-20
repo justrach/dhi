@@ -38,7 +38,7 @@ cd test-dhi
 npm init -y
 
 # Install from local directory
-npm install /Users/rachpradhan/satya-zig/js-bindings
+npm install /Users/rachpradhan/dhi/js-bindings
 
 # Test it works
 cat > test.ts << 'EOF'
@@ -68,7 +68,7 @@ Enter your npm credentials.
 ### Option 1: Manual Publish (Recommended for First Time)
 
 ```bash
-cd /Users/rachpradhan/satya-zig/js-bindings
+cd /Users/rachpradhan/dhi/js-bindings
 
 # Final check
 npm pack --dry-run
@@ -91,7 +91,7 @@ npm publish --access public
    # Select "Automation" type
    ```
 
-   - Go to: https://github.com/justrach/satya-zig/settings/secrets/actions
+   - Go to: https://github.com/justrach/dhi/settings/secrets/actions
    - Click "New repository secret"
    - Name: `NPM_TOKEN`
    - Value: (paste your npm token)
@@ -105,7 +105,7 @@ npm publish --access public
    ```
 
    Option B: Manual trigger
-   - Go to: https://github.com/justrach/satya-zig/actions/workflows/publish-npm.yml
+   - Go to: https://github.com/justrach/dhi/actions/workflows/publish-npm.yml
    - Click "Run workflow"
    - Enter version: `0.3.0`
    - Click "Run workflow"
@@ -146,7 +146,7 @@ The fastest TypeScript validation library:
 
 npm install dhi
 
-https://github.com/justrach/satya-zig
+https://github.com/justrach/dhi
 ```
 
 ## Troubleshooting
