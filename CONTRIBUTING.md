@@ -1,67 +1,139 @@
-# Contributing to dhi
+# Rach's Agentic Contribution Template
 
-## Repo Structure
+Maintainer process template by [@rachpradhan](https://x.com/rachpradhan).
 
-```
-src/              Zig core — validators, SIMD, C API, WASM API
-js-bindings/      npm package (TypeScript, Zod 4 compatible)
-python-bindings/  PyPI package (Python, Pydantic compatible)
-docs/             Shared documentation and benchmark charts
-```
+This repo moves quickly. Small, current, issue-linked PRs are much easier to review and much less likely to regress behavior.
 
-The Zig core is the engine. JS and Python packages are bindings.
+## Ground Rules
 
-## Local Development
+1. Every PR must be tied to an issue.
+2. Rebase onto current `main` before requesting final review.
+3. Keep PRs tightly scoped.
+4. Do not commit generated artifacts.
+5. Do not mix unrelated lockfile churn, scaffolding, or benchmark churn into a focused fix.
+6. Keep each PR under **500 changed lines** by default.
 
-### Prerequisites
+If a branch goes stale, close it and open a smaller replacement instead of piling more changes onto the old PR.
 
-- [Zig 0.15.2](https://ziglang.org/download/)
-- [Bun](https://bun.sh) (for JS)
-- Python 3.9+ (for Python)
+## PR Requirements
 
-### Build & Test
+Every PR description should include:
+
+- linked issue number
+- summary of the exact change
+- files or subsystems touched
+- tests run
+- failing test, xfail, or exact repro that demonstrated the problem before the fix
+- passing rerun of that same test or repro after the fix
+- nearby non-regression checks proving the change did not just move the bug
+- whether the branch was rebased onto current `main`
+- whether any generated files, lockfiles, or benchmarks changed
+
+If a PR does not map cleanly to an issue, open the issue first.
+
+## Red-To-Green Rule
+
+For bug fixes, compatibility fixes, runtime fixes, and perf regressions:
+
+1. show the failing test, xfail, or exact repro first
+2. make the code change
+3. rerun the same test or repro and show it passing
+4. run the closest neighboring tests to prove the fix did not just move the bug
+
+If there is no failing test yet, write one first unless the failure is impossible to encode cleanly.
+
+## Scope Rules
+
+Good PR scope:
+
+- one bug fix
+- one benchmark methodology fix
+- one small perf change
+- one docs-only clarification
+
+Bad PR scope:
+
+- runtime change + unrelated refactor
+- perf tweak + dependency upgrade
+- feature work + generated build output
+- benchmark change + docs rewrite + lockfile churn
+
+If a reviewer cannot explain the PR in one sentence, it is probably too large.
+
+## Rebase Policy
+
+Before requesting review on any non-trivial PR:
 
 ```bash
-# Zig core
-zig build -Doptimize=ReleaseFast
-zig build test
-
-# Python bindings
-cd python-bindings
-pip install -e .
-pytest tests/ -v
-
-# JS bindings
-cd js-bindings
-bun install
-bun run tests/test-zod4-compat.ts
-bun run tests/test-all-features.ts
+git fetch origin
+git rebase origin/main
 ```
 
-### Benchmarks
+If rebasing reveals unrelated conflicts, split the PR.
 
-```bash
-# Python
-cd python-bindings && python benchmarks/benchmark_vs_all.py
+## Generated Files
 
-# TypeScript
-cd js-bindings && bun run benchmarks/benchmark-json.ts
-```
+Do not commit generated or local-build artifacts, including:
 
-## Branch & Merge Policy
+- `.zig-cache/`
+- `zig-out/`
+- `.dylib`, `.so`, `.o`
+- local benchmark artifacts/logs unless the PR is explicitly about publishing benchmark evidence
 
-- **Short-lived branches** off `main`
-- **Squash merge only** — keep history clean
-- **CI must pass** before merge (Zig + Python + JS)
-- **Tags only from `main`** — releases are cut from main after merge
-- No merge commits, no direct pushes to main (except emergency fixes)
+If a file is generated during local builds, add or update `.gitignore` instead of committing it.
 
-## Pull Requests
+## Lockfiles And Dependencies
 
-- Keep PRs focused — one concern per PR
-- Include a short description of what and why
-- If adding a new validator: add it to Zig core, export via C API / WASM API, add bindings, add tests
+Do not update lockfiles unless the PR actually changes dependencies.
 
-## Versioning
+If you touch dependency metadata:
 
-npm, PyPI, and Zig versions are **independent** — they track binding-level changes, not just core changes. See [RELEASING.md](RELEASING.md) for details.
+- explain why
+- keep that change isolated
+- mention it clearly in the PR summary
+
+## Tests
+
+Run the narrowest relevant tests for the code you changed.
+
+For fixes, do not just say “tests passed”.
+
+Show:
+
+- the failing command before the fix
+- the passing command after the fix
+- at least one neighboring or regression-guard command
+
+## Benchmark PRs
+
+Benchmark-related PRs must say:
+
+- what layer is being measured
+- whether caches are on or off
+- whether numbers are cold-start or warmed steady-state
+- number of runs
+- whether values are single-run or median
+- exact machine or CI environment
+
+Do not publish cached results as uncached performance.
+
+## Review Expectations
+
+Reviewers will push back on:
+
+- stale branches
+- unrelated file churn
+- generated artifacts
+- oversized PRs
+- missing issue links
+- claims that do not match the changed code
+
+That is process, not hostility.
+
+The easiest way to get a fast review is:
+
+1. open an issue
+2. make a small branch
+3. rebase onto `main`
+4. keep the diff narrow
+5. include exact tests and rationale

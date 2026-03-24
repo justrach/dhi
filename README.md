@@ -303,3 +303,11 @@ MIT
 ---
 
 **dhi** — the fastest validation library for every language you use.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for Rach's Agentic Contribution Template before opening a PR.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for Rach's Agentic Contribution Template before opening a PR.
