@@ -69,13 +69,27 @@ ts-to-dhi types.ts -w
 |------------|------------|
 | `interface` | `z.object()` |
 | `type` (object literal) | `z.object()` |
-| `string`, `number`, `boolean` | `z.string()`, etc. |
+| `string`, `number`, `boolean`, `bigint`, `Date` | `z.string()`, etc. |
 | `T?` (optional) | `.optional()` |
 | `T \| null` | `.nullable()` |
-| `"a" \| "b"` | `z.enum([...])` |
-| `T[]` | `z.array(...)` |
+| `T \| undefined` | `.optional()` |
+| `"a" \| "b"` (string literals) | `z.enum([...])` |
+| `1 \| 2 \| 3` (number literals) | `z.union([z.literal(1), ...])` |
+| `string \| number` (mixed) | `z.union([...])` |
+| `T[]` / `Array<T>` | `z.array(...)` |
+| `readonly T[]` | `z.array(...)` |
+| `[string, number]` (tuple) | `z.tuple([...])` |
 | `Record<K, V>` | `z.record(...)` |
-| `any` | `z.any()` |
+| `{ a: string }` (inline object) | `z.object({ a: z.string() })` |
+| `{ a: { b: string } }` (nested) | `z.object({ a: z.object(...) })` |
+| `A & B` (intersection) | `z.intersection([...])` |
+| `extends` (inheritance) | `z.intersection([Base, z.object(...)])` |
+| `(string \| number)[]` (parenthesized) | `z.array(z.union([...]))` |
+| `any`, `unknown` | `z.any()`, `z.unknown()` |
+| `interface {}` (empty) | `z.object({})` |
+| Methods `foo(): T` | Commented (skipped) |
+| Generics `<T>` | Commented (needs manual) |
+| Index signatures `[key: string]` | Commented (use Record) |
 
 ## Programmatic API
 
