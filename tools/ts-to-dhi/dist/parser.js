@@ -47,6 +47,23 @@ export function extractTypes(source, filename = "types.ts") {
 }
 function extractInterfaceProperties(node) {
     const properties = [];
+    // Handle extends clause: interface User extends BaseEntity, Auditable { ... }
+    if (node.extends?.length > 0) {
+        for (const ext of node.extends) {
+            // Get the extended type reference
+            if (ext.expression?.type === "Identifier") {
+                const extendedTypeName = ext.expression.name;
+                // Add a placeholder property that references the extended type
+                // The generator will use ExtendedTypeSchema
+                properties.push({
+                    name: `__extends_${extendedTypeName}`,
+                    type: extendedTypeName,
+                    optional: false,
+                    nullable: false,
+                });
+            }
+        }
+    }
     const members = node.body?.body || [];
     for (const member of members) {
         // Regular property: foo: type
@@ -139,7 +156,36 @@ function getTypeString(node) {
         case "TSIntersectionType":
             return node.types?.map(getTypeString).join(" & ") || "unknown";
         case "TSLiteralType":
+            // Handle string, number, and boolean literals properly
+            if (node.literal?.value === null && node.literal?.type === "NullLiteral") {
+                return "null";
+            }
+            if (typeof node.literal?.value === "string") {
+                return `"${node.literal.value}"`;
+            }
+            if (typeof node.literal?.value === "number" || typeof node.literal?.value === "boolean") {
+                return String(node.literal.value);
+            }
+            // Fallback: try raw value
+            if (node.literal?.raw) {
+                return node.literal.raw;
+            }
             return JSON.stringify(node.literal?.value);
+        case "TSTypeLiteral":
+            // Handle inline object types: { a: string; b: number }
+            const members = node.members || [];
+            const props = members.map((m) => {
+                if (m.type === "TSPropertySignature" && m.key?.name) {
+                    const propType = getTypeString(m.typeAnnotation?.typeAnnotation);
+                    const optional = m.optional ? "?" : "";
+                    return `${m.key.name}${optional}: ${propType}`;
+                }
+                return "";
+            }).filter(Boolean);
+            return `{ ${props.join("; ")} }`;
+        case "TSParenthesizedType":
+            // Handle parenthesized types: (string | number)
+            return getTypeString(node.typeAnnotation);
         case "TSTypeReference":
             const typeName = node.typeName?.name || "unknown";
             if (node.typeArguments?.params?.length > 0) {

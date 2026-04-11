@@ -50,12 +50,18 @@ export function generateDhiSchema(types: ParsedType[]): string {
       continue;
     }
 
-    lines.push(`export const ${type.name}Schema = z.object({`);
-
-    for (const prop of type.properties) {
+    // Separate regular properties from inheritance (__extends_*)
+    const regularProps = type.properties.filter(p => !p.name.startsWith("__extends_"));
+    const extendsProps = type.properties.filter(p => p.name.startsWith("__extends_"));
+    
+    // Build the base object schema
+    const objectSchemaLines: string[] = [];
+    objectSchemaLines.push("z.object({");
+    
+    for (const prop of regularProps) {
       // Method signatures: foo(): type -> skip with comment
       if (prop.type.includes("=>")) {
-        lines.push(`  // ${prop.name}: ${prop.type} (method - validation skipped),`);
+        objectSchemaLines.push(`  // ${prop.name}: ${prop.type} (method - validation skipped),`);
         continue;
       }
 
@@ -63,23 +69,36 @@ export function generateDhiSchema(types: ParsedType[]): string {
       if (prop.name.startsWith("[key:")) {
         // Index signatures become .catchall() which allows arbitrary keys
         const schema = typeToDhiSchema(prop.type.replace(/^Record<[^,]+,\s*/, "").replace(/>$/, ""));
-        lines.push(`  // Index signature: ${prop.name}`);
-        lines.push(`  // .catchall(${schema}) would go here but dhi doesn't support it directly`);
-        lines.push(`  // Consider using z.record() for this type instead`);
+        objectSchemaLines.push(`  // Index signature: ${prop.name}`);
+        objectSchemaLines.push(`  // .catchall(${schema}) would go here but dhi doesn't support it directly`);
+        objectSchemaLines.push(`  // Consider using z.record() for this type instead`);
         continue;
       }
       
       // Skip generic type parameters (like T in ApiResponse<T>)
       if (/^[A-Z]$/i.test(prop.type) && !TYPE_MAPPING[prop.type.toLowerCase()]) {
-        lines.push(`  // ${prop.name}: ${prop.type} (generic parameter - needs manual implementation),`);
+        objectSchemaLines.push(`  // ${prop.name}: ${prop.type} (generic parameter - needs manual implementation),`);
         continue;
       }
       
       const schema = propertyToDhiSchema(prop);
-      lines.push(`  ${prop.name}: ${schema},`);
+      objectSchemaLines.push(`  ${prop.name}: ${schema},`);
     }
-
-    lines.push("});");
+    
+    objectSchemaLines.push("})");
+    const objectSchema = objectSchemaLines.join("\n");
+    
+    // If there are extended types, use z.intersection()
+    if (extendsProps.length > 0) {
+      const extendedSchemas = extendsProps.map(p => `${p.type}Schema`);
+      lines.push(`export const ${type.name}Schema = z.intersection([`);
+      lines.push(`  ${extendedSchemas.join(", ")},`);
+      lines.push(`  ${objectSchema}`);
+      lines.push(`]);`);
+    } else {
+      lines.push(`export const ${type.name}Schema = ${objectSchema};`);
+    }
+    
     lines.push("");
     lines.push(`export type ${type.name} = z.infer<typeof ${type.name}Schema>;`);
     lines.push("");
@@ -163,11 +182,15 @@ function typeToDhiSchema(tsType: string): string {
     return `z.union([${nonNullParts.map((p) => typeToDhiSchema(p)).join(", ")}])`;
   }
 
-  // Handle literal types
+  // Handle literal types (string, number, boolean)
   if (tsType.startsWith('"') || tsType.startsWith("'")) {
     return `z.literal(${tsType})`;
   }
   if (tsType === "true" || tsType === "false") {
+    return `z.literal(${tsType})`;
+  }
+  // Number literals: 1, 2, 3 → z.literal(1)
+  if (/^-?\d+(\.\d+)?$/.test(tsType)) {
     return `z.literal(${tsType})`;
   }
 
@@ -179,6 +202,28 @@ function typeToDhiSchema(tsType: string): string {
       return `z.record(${valueType})`;
     }
     return "z.record(z.any())";
+  }
+
+  // Handle inline object types: { a: string; b: number }
+  if (tsType.startsWith("{ ") && tsType.endsWith(" }")) {
+    const inner = tsType.slice(2, -2).trim(); // Remove { and }
+    if (!inner) return "z.object({})";
+    
+    // Parse properties that may be separated by semicolons or just spaces
+    const props = inner.split(";").map(p => p.trim()).filter(Boolean).map(prop => {
+      const match = prop.match(/^([^:]+?)(\?)?:\s*(.+)$/);
+      if (match) {
+        const [, name, optional, typeStr] = match;
+        const schema = typeToDhiSchema(typeStr.trim());
+        if (optional) {
+          return `${name}: ${schema}.optional()`;
+        }
+        return `${name}: ${schema}`;
+      }
+      return "";
+    }).filter(Boolean).join(", ");
+    
+    return props ? `z.object({ ${props} })` : "z.object({})";
   }
 
   // Basic types
