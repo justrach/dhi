@@ -128,8 +128,11 @@ function generate(inputFile: string, outputFile: string): boolean {
   
   console.log("🔍 Parsing TypeScript...");
   let types: ParsedType[];
+  let imports: { name: string; source: string; isTypeOnly: boolean }[];
   try {
-    types = extractTypes(source, inputFile);
+    const result = extractTypes(source, inputFile);
+    types = result.types;
+    imports = result.imports;
   } catch (err) {
     console.error(`❌ Parse error: ${err instanceof Error ? err.message : err}`);
     return false;
@@ -141,9 +144,12 @@ function generate(inputFile: string, outputFile: string): boolean {
   }
   
   console.log(`✅ Found ${types.length} type definition(s)`);
+  if (imports.length > 0) {
+    console.log(`📦 Found ${imports.length} import(s)`);
+  }
   
   console.log("📝 Generating dhi schemas...");
-  const output = generateDhiSchema(types);
+  const output = generateDhiSchema(types, imports);
   
   try {
     writeFileSync(outputFile, output);

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { generateDhiSchema } from "../src/generator.js";
-import type { ParsedType } from "../src/parser.js";
-
+import { generateDhiSchema } from "../src/generator.ts";
+import type { ParsedType } from "../src/parser.ts";
 describe("generateDhiSchema", () => {
   it("should generate simple object schema", () => {
     const types: ParsedType[] = [{
