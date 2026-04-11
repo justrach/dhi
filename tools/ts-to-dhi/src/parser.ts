@@ -62,6 +62,7 @@ function extractInterfaceProperties(node: any): ParsedProperty[] {
   const members = node.body?.body || [];
 
   for (const member of members) {
+    // Regular property: foo: type
     if (member.type === "TSPropertySignature" && member.key?.name) {
       const typeAnnotation = member.typeAnnotation?.typeAnnotation;
       const tsType = typeAnnotation ? getTypeString(typeAnnotation) : "unknown";
@@ -72,6 +73,27 @@ function extractInterfaceProperties(node: any): ParsedProperty[] {
         optional: !!member.optional,
         nullable: tsType.includes("null"),
       });
+    }
+    
+    // Index signature: [key: string]: type
+    if (member.type === "TSIndexSignature") {
+      const keyType = member.parameters?.[0]?.typeAnnotation?.typeAnnotation;
+      const valueType = member.typeAnnotation?.typeAnnotation;
+      
+      if (keyType && valueType) {
+        const keyTypeStr = getTypeString(keyType);
+        const valueTypeStr = getTypeString(valueType);
+        
+        // Only string/number keys supported
+        if (keyTypeStr === "string" || keyTypeStr === "number") {
+          properties.push({
+            name: `[key: ${keyTypeStr}]`,
+            type: `Record<${keyTypeStr}, ${valueTypeStr}>`,
+            optional: false,
+            nullable: valueTypeStr.includes("null"),
+          });
+        }
+      }
     }
   }
 
@@ -114,8 +136,13 @@ function getTypeString(node: any): string {
     case "TSUndefinedKeyword": return "undefined";
     case "TSArrayType":
       return `${getTypeString(node.elementType)}[]`;
+    case "TSTupleType":
+      const elements = node.elementTypes?.map(getTypeString).join(", ") || "";
+      return `[${elements}]`;
     case "TSUnionType":
       return node.types?.map(getTypeString).join(" | ") || "unknown";
+    case "TSIntersectionType":
+      return node.types?.map(getTypeString).join(" & ") || "unknown";
     case "TSLiteralType":
       return JSON.stringify(node.literal?.value);
     case "TSTypeReference":

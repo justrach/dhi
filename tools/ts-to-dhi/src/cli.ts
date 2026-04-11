@@ -58,21 +58,33 @@ function parseArgs(args: string[]): CliOptions | null {
   return { input: resolve(input), output: resolve(output), watch };
 }
 
-function generate(inputFile: string, outputFile: string): void {
+function generate(inputFile: string, outputFile: string): boolean {
   if (!existsSync(inputFile)) {
     console.error(`❌ Error: File not found: ${inputFile}`);
-    process.exit(1);
+    return false;
   }
 
   console.log(`📖 Reading ${inputFile}...`);
-  const source = readFileSync(inputFile, "utf-8");
+  let source: string;
+  try {
+    source = readFileSync(inputFile, "utf-8");
+  } catch (err) {
+    console.error(`❌ Error reading file: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
   
   console.log("🔍 Parsing TypeScript...");
-  const types = extractTypes(source, inputFile);
+  let types: ParsedType[];
+  try {
+    types = extractTypes(source, inputFile);
+  } catch (err) {
+    console.error(`❌ Parse error: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
   
   if (types.length === 0) {
-    console.log("⚠️  No types found to generate");
-    return;
+    console.log("⚠️  No types found to generate (looking for interfaces and type aliases)");
+    return false;
   }
   
   console.log(`✅ Found ${types.length} type definition(s)`);
@@ -80,8 +92,13 @@ function generate(inputFile: string, outputFile: string): void {
   console.log("📝 Generating dhi schemas...");
   const output = generateDhiSchema(types);
   
-  writeFileSync(outputFile, output);
-  console.log(`✨ Written to ${outputFile}`);
+  try {
+    writeFileSync(outputFile, output);
+    console.log(`✨ Written to ${outputFile}`);
+  } catch (err) {
+    console.error(`❌ Error writing file: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
   
   // Print summary
   console.log("\n📦 Generated schemas:");
@@ -89,6 +106,8 @@ function generate(inputFile: string, outputFile: string): void {
     const icon = type.kind === "interface" ? "🔹" : "🔸";
     console.log(`  ${icon} ${type.name}Schema (${type.properties.length} properties)`);
   }
+  
+  return true;
 }
 
 async function main(): Promise<void> {
