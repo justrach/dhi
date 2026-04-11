@@ -4,10 +4,16 @@ import { resolve, dirname, basename, extname } from "path";
 import { extractTypes } from "./parser.js";
 import { generateDhiSchema } from "./generator.js";
 
+interface Config {
+  input?: string;
+  output?: string;
+}
+
 interface CliOptions {
   input: string;
   output?: string;
   watch?: boolean;
+  config?: string;
 }
 
 function printHelp(): void {
@@ -20,13 +26,40 @@ Usage:
 Options:
   -o, --output <file>    Output file (default: <input>.schemas.ts)
   -w, --watch           Watch for changes and regenerate
+  -c, --config <file>   Config file path (default: ts-to-dhi.json)
   -h, --help            Show this help
+
+Config file (ts-to-dhi.json):
+  {
+    "input": "types.ts",
+    "output": "schemas.ts"
+  }
 
 Examples:
   ts-to-dhi types.ts                    # Generate types.schemas.ts
   ts-to-dhi models/user.ts -o schemas.ts # Custom output file
   ts-to-dhi types.ts -w                 # Watch mode
+  ts-to-dhi -c ts-to-dhi.json           # Use config file
 `);
+}
+
+function loadConfig(configPath?: string): Config | null {
+  const paths = configPath 
+    ? [resolve(configPath)]
+    : [resolve("ts-to-dhi.json"), resolve(".ts-to-dhi.json")];
+  
+  for (const path of paths) {
+    if (existsSync(path)) {
+      try {
+        const content = readFileSync(path, "utf-8");
+        return JSON.parse(content) as Config;
+      } catch (err) {
+        console.warn(`⚠️  Warning: Could not load config from ${path}`);
+      }
+    }
+  }
+  
+  return null;
 }
 
 function parseArgs(args: string[]): CliOptions | null {
@@ -35,17 +68,37 @@ function parseArgs(args: string[]): CliOptions | null {
     return null;
   }
 
-  const input = args[0];
+  let input: string | undefined;
   let output: string | undefined;
   let watch = false;
+  let config: string | undefined;
 
-  for (let i = 1; i < args.length; i++) {
+  for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "-o" || arg === "--output") {
       output = args[++i];
     } else if (arg === "-w" || arg === "--watch") {
       watch = true;
+    } else if (arg === "-c" || arg === "--config") {
+      config = args[++i];
+    } else if (!arg.startsWith("-") && !input) {
+      input = arg;
     }
+  }
+
+  // Load config if available
+  const cfg = loadConfig(config);
+  if (cfg) {
+    console.log("📄 Using config file");
+    if (!input && cfg.input) input = cfg.input;
+    if (!output && cfg.output) output = cfg.output;
+  }
+
+  // Must have input
+  if (!input) {
+    console.error("❌ Error: No input file specified");
+    printHelp();
+    return null;
   }
 
   // Default output: types.ts → types.schemas.ts
@@ -55,7 +108,7 @@ function parseArgs(args: string[]): CliOptions | null {
     output = resolve(dir, `${name}.schemas.ts`);
   }
 
-  return { input: resolve(input), output: resolve(output), watch };
+  return { input: resolve(input), output: resolve(output), watch, config };
 }
 
 function generate(inputFile: string, outputFile: string): boolean {

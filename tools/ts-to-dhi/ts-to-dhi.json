@@ -1,0 +1,4 @@
+{
+  "input": "example-types.ts",
+  "output": "test-config-output.ts"
+}

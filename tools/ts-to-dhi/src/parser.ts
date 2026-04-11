@@ -83,6 +83,28 @@ function extractInterfaceProperties(node: any): ParsedProperty[] {
       });
     }
     
+    // Method signature: foo(): type
+    if (member.type === "TSMethodSignature" && member.key?.name) {
+      const returnType = member.typeAnnotation?.typeAnnotation;
+      const returnTypeStr = returnType ? getTypeString(returnType) : "void";
+      
+      // Convert params to a simplified string representation
+      const params = member.parameters?.map((p: any) => {
+        const paramType = p.typeAnnotation?.typeAnnotation;
+        return paramType ? getTypeString(paramType) : "any";
+      }) || [];
+      
+      const paramsStr = params.join(", ");
+      const methodType = `(${paramsStr}) => ${returnTypeStr}`;
+      
+      properties.push({
+        name: member.key.name,
+        type: methodType,
+        optional: !!member.optional,
+        nullable: false,
+      });
+    }
+    
     // Index signature: [key: string]: type
     if (member.type === "TSIndexSignature") {
       const keyType = member.parameters?.[0]?.typeAnnotation?.typeAnnotation;
