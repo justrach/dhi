@@ -40,13 +40,17 @@ export function generateDhiSchema(types) {
             lines.push("");
             continue;
         }
-        if (type.properties.length === 0) {
-            // Skip empty types
-            continue;
-        }
         // Separate regular properties from inheritance (__extends_*)
         const regularProps = type.properties.filter(p => !p.name.startsWith("__extends_"));
         const extendsProps = type.properties.filter(p => p.name.startsWith("__extends_"));
+        // Handle empty interfaces (no regular properties, no extends)
+        if (regularProps.length === 0 && extendsProps.length === 0) {
+            lines.push(`export const ${type.name}Schema = z.object({});`);
+            lines.push("");
+            lines.push(`export type ${type.name} = z.infer<typeof ${type.name}Schema>;`);
+            lines.push("");
+            continue;
+        }
         // Build the base object schema
         const objectSchemaLines = [];
         objectSchemaLines.push("z.object({");
@@ -68,6 +72,12 @@ export function generateDhiSchema(types) {
             // Skip generic type parameters (like T in ApiResponse<T>)
             if (/^[A-Z]$/i.test(prop.type) && !TYPE_MAPPING[prop.type.toLowerCase()]) {
                 objectSchemaLines.push(`  // ${prop.name}: ${prop.type} (generic parameter - needs manual implementation),`);
+                continue;
+            }
+            // Handle __GENERIC_* markers from parser (generic type references like data: T)
+            if (prop.type.startsWith("__GENERIC_")) {
+                const genericName = prop.type.replace("__GENERIC_", "");
+                objectSchemaLines.push(`  // ${prop.name}: ${genericName} (generic parameter - needs manual implementation),`);
                 continue;
             }
             const schema = propertyToDhiSchema(prop);
@@ -112,6 +122,10 @@ function propertyToDhiSchema(prop) {
  * Convert TypeScript type string to dhi schema
  */
 function typeToDhiSchema(tsType) {
+    // Handle generic type references (from parser's __GENERIC_* marker)
+    if (tsType.startsWith("__GENERIC_")) {
+        return "z.any() /* generic type - manual implementation needed */";
+    }
     // Handle tuple types [string, number]
     if (tsType.startsWith("[") && tsType.endsWith("]")) {
         const inner = tsType.slice(1, -1).trim();

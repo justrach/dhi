@@ -223,8 +223,16 @@ function getTypeString(node: any): string {
     case "TSParenthesizedType":
       // Handle parenthesized types: (string | number)
       return getTypeString(node.typeAnnotation);
+    case "TSTypeOperator":
+      // Handle readonly, unique, etc. - just unwrap to underlying type
+      // readonly string[] → string[]
+      return getTypeString(node.typeAnnotation);
     case "TSTypeReference":
       const typeName = node.typeName?.name || "unknown";
+      // Check if it's a generic type parameter (single uppercase letter)
+      if (/^[A-Z]$/.test(typeName)) {
+        return `__GENERIC_${typeName}`;
+      }
       if (node.typeArguments?.params?.length > 0) {
         const args = node.typeArguments.params.map(getTypeString).join(", ");
         return `${typeName}<${args}>`;
