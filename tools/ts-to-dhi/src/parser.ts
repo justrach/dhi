@@ -11,8 +11,12 @@ export interface ParsedType {
   name: string;
   kind: "interface" | "type-alias";
   properties: ParsedProperty[];
+  rawType?: string; // For non-object types like tuples, intersections
 }
 
+/**
+ * Extract type definitions from TypeScript source using oxc-parser
+ */
 /**
  * Extract type definitions from TypeScript source using oxc-parser
  */
@@ -39,17 +43,21 @@ export function extractTypes(source: string, filename = "types.ts"): ParsedType[
     // TSTypeAliasDeclaration: type User = { ... }
     if (actualNode.type === "TSTypeAliasDeclaration") {
       let properties: ParsedProperty[] = [];
+      let rawType: string | undefined;
       
       // Handle object literal types
       if (actualNode.typeAnnotation?.type === "TSTypeLiteral") {
         properties = extractTypeLiteralProperties(actualNode.typeAnnotation);
+      } else {
+        // Capture raw type for tuples, intersections, etc.
+        rawType = getTypeString(actualNode.typeAnnotation);
       }
-      // Skip non-object type aliases for now
 
       types.push({
         name: actualNode.id?.name || "Unknown",
         kind: "type-alias",
         properties,
+        rawType,
       });
     }
   }
