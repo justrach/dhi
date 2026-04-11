@@ -112,5 +112,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "yuku-parser": "^0.4.4"
   }
 }

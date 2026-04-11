@@ -1,0 +1,42 @@
+{
+  "name": "@dhi/ts-to-dhi",
+  "version": "0.1.0",
+  "description": "Generate dhi validation schemas from TypeScript types",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ts-to-dhi": "./bin/ts-to-dhi"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "oxc-parser": "^0.35.0",
+    "dhi": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^20.0.0"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "README.md"
+  ],
+  "keywords": [
+    "dhi",
+    "typescript",
+    "validation",
+    "schema",
+    "codegen"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justrach/dhi",
+    "directory": "tools/ts-to-dhi"
+  }
+}
