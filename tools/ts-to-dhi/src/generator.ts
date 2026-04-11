@@ -34,7 +34,15 @@ export function generateDhiSchema(types: ParsedType[]): string {
     "",
   ];
 
+  const seenNames = new Set<string>();
+
   for (const type of types) {
+    // Skip duplicate names (e.g., type Foo + interface Foo)
+    if (seenNames.has(type.name)) {
+      lines.push(`// Skipped duplicate: ${type.name} (${type.kind})`);
+      continue;
+    }
+    seenNames.add(type.name);
     // Handle non-object types (tuples, intersections, primitives)
     if (type.rawType && type.properties.length === 0) {
       const schema = typeToDhiSchema(type.rawType);
@@ -172,6 +180,29 @@ function typeToDhiSchema(tsType: string): string {
     return `z.array(${typeToDhiSchema(elemType)})`;
   }
 
+  // Handle inline object types FIRST (before unions/intersections)
+  // This prevents { a: string | null } from being treated as a union
+  if (tsType.startsWith("{ ") && tsType.endsWith(" }")) {
+    const inner = tsType.slice(2, -2).trim(); // Remove { and }
+    if (!inner) return "z.object({})";
+    
+    // Parse properties that may be separated by semicolons or just spaces
+    const props = inner.split(";").map(p => p.trim()).filter(Boolean).map(prop => {
+      const match = prop.match(/^([^:]+?)(\?)?:\s*(.+)$/);
+      if (match) {
+        const [, name, optional, typeStr] = match;
+        const schema = typeToDhiSchema(typeStr.trim());
+        if (optional) {
+          return `${name}: ${schema}.optional()`;
+        }
+        return `${name}: ${schema}`;
+      }
+      return "";
+    }).filter(Boolean).join(", ");
+    
+    return props ? `z.object({ ${props} })` : "z.object({})";
+  }
+
   // Handle intersection types (A & B)
   if (tsType.includes(" & ")) {
     const parts = tsType.split(" & ").map(p => p.trim()).filter(Boolean);
@@ -218,28 +249,6 @@ function typeToDhiSchema(tsType: string): string {
       return `z.record(${valueType})`;
     }
     return "z.record(z.any())";
-  }
-
-  // Handle inline object types: { a: string; b: number }
-  if (tsType.startsWith("{ ") && tsType.endsWith(" }")) {
-    const inner = tsType.slice(2, -2).trim(); // Remove { and }
-    if (!inner) return "z.object({})";
-    
-    // Parse properties that may be separated by semicolons or just spaces
-    const props = inner.split(";").map(p => p.trim()).filter(Boolean).map(prop => {
-      const match = prop.match(/^([^:]+?)(\?)?:\s*(.+)$/);
-      if (match) {
-        const [, name, optional, typeStr] = match;
-        const schema = typeToDhiSchema(typeStr.trim());
-        if (optional) {
-          return `${name}: ${schema}.optional()`;
-        }
-        return `${name}: ${schema}`;
-      }
-      return "";
-    }).filter(Boolean).join(", ");
-    
-    return props ? `z.object({ ${props} })` : "z.object({})";
   }
 
   // Basic types
