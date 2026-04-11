@@ -8,6 +8,7 @@ import { parseSync } from "oxc-parser";
 export function extractTypes(source, filename = "types.ts") {
     const result = parseSync(filename, source);
     const ast = result.program;
+    const comments = result.comments || [];
     const types = [];
     for (const node of ast.body || []) {
         // Unwrap export declarations: export interface Foo { ... }
@@ -16,7 +17,7 @@ export function extractTypes(source, filename = "types.ts") {
             continue;
         // TSInterfaceDeclaration: interface User { ... }
         if (actualNode.type === "TSInterfaceDeclaration") {
-            const properties = extractInterfaceProperties(actualNode);
+            const properties = extractInterfaceProperties(actualNode, comments);
             types.push({
                 name: actualNode.id?.name || "Unknown",
                 kind: "interface",
@@ -29,7 +30,7 @@ export function extractTypes(source, filename = "types.ts") {
             let rawType;
             // Handle object literal types
             if (actualNode.typeAnnotation?.type === "TSTypeLiteral") {
-                properties = extractTypeLiteralProperties(actualNode.typeAnnotation);
+                properties = extractTypeLiteralProperties(actualNode.typeAnnotation, comments);
             }
             else {
                 // Capture raw type for tuples, intersections, etc.
@@ -45,7 +46,56 @@ export function extractTypes(source, filename = "types.ts") {
     }
     return types;
 }
-function extractInterfaceProperties(node) {
+function extractJSDoc(comments, memberStart, lastMemberEnd = 0) {
+    // Find block comments between the previous member and this one
+    // Only take comments that are "attached" to this member (after previous member ended)
+    const attachedComments = comments.filter(c => c.type === "Block" && c.end <= memberStart && c.start >= lastMemberEnd);
+    if (attachedComments.length === 0)
+        return undefined;
+    // Combine all attached JSDoc-style comments
+    const jsdocText = attachedComments
+        .map(c => c.value.replace(/^\*\s?/, "").trim())
+        .join("\n");
+    const info = {};
+    // Extract @minimum
+    const minimumMatch = jsdocText.match(/@minimum\s+(\d+(?:\.\d+)?)/);
+    if (minimumMatch)
+        info.minimum = parseFloat(minimumMatch[1]);
+    // Extract @maximum
+    const maximumMatch = jsdocText.match(/@maximum\s+(\d+(?:\.\d+)?)/);
+    if (maximumMatch)
+        info.maximum = parseFloat(maximumMatch[1]);
+    // Extract @minLength
+    const minLengthMatch = jsdocText.match(/@minLength\s+(\d+)/);
+    if (minLengthMatch)
+        info.minLength = parseInt(minLengthMatch[1], 10);
+    // Extract @maxLength
+    const maxLengthMatch = jsdocText.match(/@maxLength\s+(\d+)/);
+    if (maxLengthMatch)
+        info.maxLength = parseInt(maxLengthMatch[1], 10);
+    // Extract @pattern
+    const patternMatch = jsdocText.match(/@pattern\s+(\/[^\/]+\/|["'][^"']+["'])/);
+    if (patternMatch) {
+        let pattern = patternMatch[1];
+        // Remove quotes if present
+        if ((pattern.startsWith('"') && pattern.endsWith('"')) ||
+            (pattern.startsWith("'") && pattern.endsWith("'"))) {
+            pattern = pattern.slice(1, -1);
+        }
+        info.pattern = pattern;
+    }
+    // Extract @format
+    const formatMatch = jsdocText.match(/@format\s+(\w+)/);
+    if (formatMatch)
+        info.format = formatMatch[1];
+    // Extract description (text before first @tag)
+    const descMatch = jsdocText.match(/^([^@]+)/);
+    if (descMatch && descMatch[1].trim()) {
+        info.description = descMatch[1].trim();
+    }
+    return Object.keys(info).length > 0 ? info : undefined;
+}
+function extractInterfaceProperties(node, comments = []) {
     const properties = [];
     // Handle extends clause: interface User extends BaseEntity, Auditable { ... }
     if (node.extends?.length > 0) {
@@ -65,17 +115,21 @@ function extractInterfaceProperties(node) {
         }
     }
     const members = node.body?.body || [];
+    let lastMemberEnd = node.body?.start || 0;
     for (const member of members) {
         // Regular property: foo: type
         if (member.type === "TSPropertySignature" && member.key?.name) {
             const typeAnnotation = member.typeAnnotation?.typeAnnotation;
             const tsType = typeAnnotation ? getTypeString(typeAnnotation) : "unknown";
+            const jsdoc = extractJSDoc(comments, member.start, lastMemberEnd);
             properties.push({
                 name: member.key.name,
                 type: tsType,
                 optional: !!member.optional,
                 nullable: tsType.includes("null"),
+                jsdoc,
             });
+            lastMemberEnd = member.end;
         }
         // Method signature: foo(): type
         if (member.type === "TSMethodSignature" && member.key?.name) {
@@ -116,19 +170,23 @@ function extractInterfaceProperties(node) {
     }
     return properties;
 }
-function extractTypeLiteralProperties(node) {
+function extractTypeLiteralProperties(node, comments = []) {
     const properties = [];
     const members = node.members || [];
+    let lastMemberEnd = node.start || 0;
     for (const member of members) {
         if (member.type === "TSPropertySignature" && member.key?.name) {
             const typeAnnotation = member.typeAnnotation?.typeAnnotation;
             const tsType = typeAnnotation ? getTypeString(typeAnnotation) : "unknown";
+            const jsdoc = extractJSDoc(comments, member.start, lastMemberEnd);
             properties.push({
                 name: member.key.name,
                 type: tsType,
                 optional: !!member.optional,
                 nullable: tsType.includes("null"),
+                jsdoc,
             });
+            lastMemberEnd = member.end;
         }
     }
     return properties;

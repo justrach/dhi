@@ -1,10 +1,22 @@
 import { parseSync } from "oxc-parser";
 
+export interface JSDocInfo {
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: string;
+  default?: string | number | boolean;
+}
+
 export interface ParsedProperty {
   name: string;
   type: string;
   optional: boolean;
   nullable: boolean;
+  jsdoc?: JSDocInfo;
 }
 
 export interface ParsedType {
@@ -23,6 +35,7 @@ export interface ParsedType {
 export function extractTypes(source: string, filename = "types.ts"): ParsedType[] {
   const result = parseSync(filename, source);
   const ast = result.program;
+  const comments = result.comments || [];
   const types: ParsedType[] = [];
 
   for (const node of ast.body || []) {
@@ -32,7 +45,7 @@ export function extractTypes(source: string, filename = "types.ts"): ParsedType[
 
     // TSInterfaceDeclaration: interface User { ... }
     if (actualNode.type === "TSInterfaceDeclaration") {
-      const properties = extractInterfaceProperties(actualNode);
+      const properties = extractInterfaceProperties(actualNode, comments);
       types.push({
         name: actualNode.id?.name || "Unknown",
         kind: "interface",
@@ -47,7 +60,7 @@ export function extractTypes(source: string, filename = "types.ts"): ParsedType[
       
       // Handle object literal types
       if (actualNode.typeAnnotation?.type === "TSTypeLiteral") {
-        properties = extractTypeLiteralProperties(actualNode.typeAnnotation);
+        properties = extractTypeLiteralProperties(actualNode.typeAnnotation, comments);
       } else {
         // Capture raw type for tuples, intersections, etc.
         rawType = getTypeString(actualNode.typeAnnotation);
@@ -65,7 +78,64 @@ export function extractTypes(source: string, filename = "types.ts"): ParsedType[
   return types;
 }
 
-function extractInterfaceProperties(node: any): ParsedProperty[] {
+function extractJSDoc(comments: any[], memberStart: number, lastMemberEnd: number = 0): JSDocInfo | undefined {
+  // Find block comments between the previous member and this one
+  // Only take comments that are "attached" to this member (after previous member ended)
+  const attachedComments = comments.filter(
+    c => c.type === "Block" && c.end <= memberStart && c.start >= lastMemberEnd
+  );
+  
+  if (attachedComments.length === 0) return undefined;
+  
+  // Combine all attached JSDoc-style comments
+  const jsdocText = attachedComments
+    .map(c => c.value.replace(/^\*\s?/, "").trim())
+    .join("\n");
+  
+  const info: JSDocInfo = {};
+  
+  // Extract @minimum
+  const minimumMatch = jsdocText.match(/@minimum\s+(\d+(?:\.\d+)?)/);
+  if (minimumMatch) info.minimum = parseFloat(minimumMatch[1]);
+  
+  // Extract @maximum
+  const maximumMatch = jsdocText.match(/@maximum\s+(\d+(?:\.\d+)?)/);
+  if (maximumMatch) info.maximum = parseFloat(maximumMatch[1]);
+  
+  // Extract @minLength
+  const minLengthMatch = jsdocText.match(/@minLength\s+(\d+)/);
+  if (minLengthMatch) info.minLength = parseInt(minLengthMatch[1], 10);
+  
+  // Extract @maxLength
+  const maxLengthMatch = jsdocText.match(/@maxLength\s+(\d+)/);
+  if (maxLengthMatch) info.maxLength = parseInt(maxLengthMatch[1], 10);
+  
+  // Extract @pattern
+  const patternMatch = jsdocText.match(/@pattern\s+(\/[^\/]+\/|["'][^"']+["'])/);
+  if (patternMatch) {
+    let pattern = patternMatch[1];
+    // Remove quotes if present
+    if ((pattern.startsWith('"') && pattern.endsWith('"')) || 
+        (pattern.startsWith("'") && pattern.endsWith("'"))) {
+      pattern = pattern.slice(1, -1);
+    }
+    info.pattern = pattern;
+  }
+  
+  // Extract @format
+  const formatMatch = jsdocText.match(/@format\s+(\w+)/);
+  if (formatMatch) info.format = formatMatch[1];
+  
+  // Extract description (text before first @tag)
+  const descMatch = jsdocText.match(/^([^@]+)/);
+  if (descMatch && descMatch[1].trim()) {
+    info.description = descMatch[1].trim();
+  }
+  
+  return Object.keys(info).length > 0 ? info : undefined;
+}
+
+function extractInterfaceProperties(node: any, comments: any[] = []): ParsedProperty[] {
   const properties: ParsedProperty[] = [];
   
   // Handle extends clause: interface User extends BaseEntity, Auditable { ... }
@@ -87,19 +157,24 @@ function extractInterfaceProperties(node: any): ParsedProperty[] {
   }
   
   const members = node.body?.body || [];
+  let lastMemberEnd = node.body?.start || 0;
 
   for (const member of members) {
     // Regular property: foo: type
     if (member.type === "TSPropertySignature" && member.key?.name) {
       const typeAnnotation = member.typeAnnotation?.typeAnnotation;
       const tsType = typeAnnotation ? getTypeString(typeAnnotation) : "unknown";
+      const jsdoc = extractJSDoc(comments, member.start, lastMemberEnd);
       
       properties.push({
         name: member.key.name,
         type: tsType,
         optional: !!member.optional,
         nullable: tsType.includes("null"),
+        jsdoc,
       });
+      
+      lastMemberEnd = member.end;
     }
     
     // Method signature: foo(): type
@@ -149,21 +224,26 @@ function extractInterfaceProperties(node: any): ParsedProperty[] {
   return properties;
 }
 
-function extractTypeLiteralProperties(node: any): ParsedProperty[] {
+function extractTypeLiteralProperties(node: any, comments: any[] = []): ParsedProperty[] {
   const properties: ParsedProperty[] = [];
   const members = node.members || [];
+  let lastMemberEnd = node.start || 0;
 
   for (const member of members) {
     if (member.type === "TSPropertySignature" && member.key?.name) {
       const typeAnnotation = member.typeAnnotation?.typeAnnotation;
       const tsType = typeAnnotation ? getTypeString(typeAnnotation) : "unknown";
+      const jsdoc = extractJSDoc(comments, member.start, lastMemberEnd);
       
       properties.push({
         name: member.key.name,
         type: tsType,
         optional: !!member.optional,
         nullable: tsType.includes("null"),
+        jsdoc,
       });
+      
+      lastMemberEnd = member.end;
     }
   }
 

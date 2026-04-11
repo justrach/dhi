@@ -1,8 +1,19 @@
+export interface JSDocInfo {
+    description?: string;
+    minimum?: number;
+    maximum?: number;
+    minLength?: number;
+    maxLength?: number;
+    pattern?: string;
+    format?: string;
+    default?: string | number | boolean;
+}
 export interface ParsedProperty {
     name: string;
     type: string;
     optional: boolean;
     nullable: boolean;
+    jsdoc?: JSDocInfo;
 }
 export interface ParsedType {
     name: string;
