@@ -143,8 +143,27 @@ function propertyToDhiSchema(prop: ParsedProperty): string {
 }
 
 /**
- * Convert TypeScript type string to dhi schema
+ * Check if a type string is a single complete inline object (not an intersection/union of objects)
+ * A single inline object has its first opening brace at start and last closing brace at end,
+ * with no top-level closing braces before the end.
  */
+function isCompleteInlineObject(str: string): boolean {
+  if (!str.startsWith("{ ") || !str.endsWith(" }")) return false;
+  
+  let depth = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === "{") depth++;
+    if (char === "}") {
+      depth--;
+      // If we hit depth 0 before the last character, this isn't a single inline object
+      // (e.g., "{ a: string } & { b: number }" closes first object at pos 12, not at end)
+      if (depth === 0 && i < str.length - 1) return false;
+    }
+  }
+  return depth === 0;
+}
+
 /**
  * Convert TypeScript type string to dhi schema
  */
@@ -182,7 +201,8 @@ function typeToDhiSchema(tsType: string): string {
 
   // Handle inline object types FIRST (before unions/intersections)
   // This prevents { a: string | null } from being treated as a union
-  if (tsType.startsWith("{ ") && tsType.endsWith(" }")) {
+  // Check for complete single inline object (not "{ a: string } & { b: number }")
+  if (isCompleteInlineObject(tsType)) {
     const inner = tsType.slice(2, -2).trim(); // Remove { and }
     if (!inner) return "z.object({})";
     
