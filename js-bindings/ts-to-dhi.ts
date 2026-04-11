@@ -1,0 +1,364 @@
+#!/usr/bin/env bun
+/**
+ * ts-to-dhi: TypeScript → dhi schema generator
+ * Uses yuku-parser to extract types and generate dhi validators
+ */
+
+import { parse } from "yuku-parser";
+
+// Type mapping from TypeScript → dhi
+const TYPE_MAPPING: Record<string, string> = {
+  string: "z.string()",
+  number: "z.number()",
+  boolean: "z.boolean()",
+  bigint: "z.bigint()",
+  Date: "z.date()",
+  any: "z.any()",
+  unknown: "z.unknown()",
+  void: "z.void()",
+  null: "z.null()",
+  undefined: "z.undefined()",
+};
+
+interface ParsedProperty {
+  name: string;
+  type: string;
+  optional: boolean;
+  nullable: boolean;
+}
+
+interface ParsedInterface {
+  name: string;
+  properties: ParsedProperty[];
+}
+
+/**
+ * Extract interfaces from TypeScript source using yuku-parser
+ */
+function extractInterfaces(source: string): ParsedInterface[] {
+  const { program } = parse(source, { lang: "ts", sourceType: "module" });
+  const interfaces: ParsedInterface[] = [];
+
+  // Walk the AST to find TSInterfaceDeclaration and TSTypeAliasDeclaration
+  function walk(node: any, parent?: any): void {
+    if (!node || typeof node !== "object") return;
+
+    // TSInterfaceDeclaration: interface Foo { ... }
+    if (node.type === "TSInterfaceDeclaration" && node.id?.name) {
+      const properties: ParsedProperty[] = [];
+
+      // Extract properties from body
+      const body = node.body;
+      if (body?.type === "TSInterfaceBody" && body.body) {
+        for (const member of body.body) {
+          if (member.type === "TSPropertySignature" && member.key?.name) {
+            const tsType = extractTypeString(member.typeAnnotation?.typeAnnotation);
+            properties.push({
+              name: member.key.name,
+              type: tsType,
+              optional: !!member.optional,
+              nullable: isNullable(member.typeAnnotation?.typeAnnotation),
+            });
+          }
+        }
+      }
+
+      interfaces.push({
+        name: node.id.name,
+        properties,
+      });
+    }
+
+    // TSTypeAliasDeclaration: type Foo = { ... }
+    if (node.type === "TSTypeAliasDeclaration" && node.id?.name) {
+      const typeAnnotation = node.typeAnnotation;
+
+      // Handle object type literals: type Foo = { bar: string }
+      if (typeAnnotation?.type === "TSTypeLiteral" && typeAnnotation.members) {
+        const properties: ParsedProperty[] = [];
+
+        for (const member of typeAnnotation.members) {
+          if (member.type === "TSPropertySignature" && member.key?.name) {
+            const tsType = extractTypeString(member.typeAnnotation?.typeAnnotation);
+            properties.push({
+              name: member.key.name,
+              type: tsType,
+              optional: !!member.optional,
+              nullable: isNullable(member.typeAnnotation?.typeAnnotation),
+            });
+          }
+        }
+
+        interfaces.push({
+          name: node.id.name,
+          properties,
+        });
+      }
+    }
+
+    // Recurse into child nodes
+    for (const key in node) {
+      if (key === "parent" || key === "tokens" || key === "comments") continue;
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) walk(item, node);
+      } else {
+        walk(value, node);
+      }
+    }
+  }
+
+  walk(program);
+  return interfaces;
+}
+
+/**
+ * Extract a readable type string from AST type node
+ */
+function extractTypeString(typeNode: any): string {
+  if (!typeNode) return "unknown";
+
+  switch (typeNode.type) {
+    case "TSStringKeyword":
+      return "string";
+    case "TSNumberKeyword":
+      return "number";
+    case "TSBooleanKeyword":
+      return "boolean";
+    case "TSBigIntKeyword":
+      return "bigint";
+    case "TSAnyKeyword":
+      return "any";
+    case "TSUnknownKeyword":
+      return "unknown";
+    case "TSVoidKeyword":
+      return "void";
+    case "TSNullKeyword":
+      return "null";
+    case "TSUndefinedKeyword":
+      return "undefined";
+    case "TSTypeReference":
+      return typeNode.typeName?.name || "unknown";
+    case "TSArrayType":
+      return `${extractTypeString(typeNode.elementType)}[]`;
+    case "TSUnionType":
+      return typeNode.types?.map(extractTypeString).join(" | ") || "unknown";
+    case "TSLiteralType":
+      if (typeNode.literal?.type === "Literal") {
+        return JSON.stringify(typeNode.literal.value);
+      }
+      return "unknown";
+    default:
+      return "unknown";
+  }
+}
+
+/**
+ * Check if type is nullable (includes null)
+ */
+function isNullable(typeNode: any): boolean {
+  if (!typeNode) return false;
+  if (typeNode.type === "TSUnionType" && typeNode.types) {
+    return typeNode.types.some((t: any) => t.type === "TSNullKeyword");
+  }
+  return false;
+}
+
+/**
+ * Generate dhi schema code from parsed interfaces
+ */
+function generateDhiSchema(interfaces: ParsedInterface[]): string {
+  const lines: string[] = [
+    '// Auto-generated by ts-to-dhi',
+    '// Do not edit manually',
+    '',
+    "import { z } from 'dhi';",
+    '',
+  ];
+
+  for (const iface of interfaces) {
+    lines.push(`export const ${iface.name}Schema = z.object({`);
+
+    for (const prop of iface.properties) {
+      let schema = typeToDhiSchema(prop.type);
+
+      // Apply modifiers
+      if (prop.optional) {
+        schema = `${schema}.optional()`;
+      }
+      if (prop.nullable) {
+        schema = `${schema}.nullable()`;
+      }
+
+      lines.push(`  ${prop.name}: ${schema},`);
+    }
+
+    lines.push('});');
+    lines.push('');
+    lines.push(`export type ${iface.name} = z.infer<typeof ${iface.name}Schema>;`);
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Convert TypeScript type string to dhi schema
+ */
+function typeToDhiSchema(tsType: string): string {
+  // Handle array types
+  if (tsType.endsWith('[]')) {
+    const elemType = tsType.slice(0, -2);
+    return `z.array(${typeToDhiSchema(elemType)})`;
+  }
+
+  // Handle union types (simplified - just take first non-null)
+  if (tsType.includes(' | ')) {
+    const parts = tsType.split(' | ').filter(p => p.trim() !== 'null');
+    if (parts.length === 1) {
+      return typeToDhiSchema(parts[0]);
+    }
+    // For true unions, we'd need z.union() - simplified here
+    return `z.union([${parts.map(typeToDhiSchema).join(', ')}])`;
+  }
+
+  // Handle literal types
+  if (tsType.startsWith('"') || tsType.startsWith("'")) {
+    return `z.literal(${tsType})`;
+  }
+  if (tsType === 'true' || tsType === 'false') {
+    return `z.literal(${tsType})`;
+  }
+
+  // Basic types
+  const cleanType = tsType.trim();
+  if (TYPE_MAPPING[cleanType]) {
+    return TYPE_MAPPING[cleanType];
+  }
+
+  // Reference to another type (assume it has a schema)
+  return `${cleanType}Schema`;
+}
+
+// CLI usage
+if (import.meta.main) {
+  // Example TypeScript source - using yuku-compatible format
+  // (yuku supports TS annotations but not standalone TS declarations yet)
+  const exampleTs = `
+// Define types as JSDoc or inline annotations for now
+// Full TS declaration support: WIP in yuku
+
+/** @typedef {{ id: number; name: string; email: string; age?: number; role: "admin" | "user" | "guest"; isActive: boolean; metadata: any; tags: string[]; }} User */
+
+// Alternative: use const assertions with type annotations
+const UserSpec = {
+  id: 0 as number,
+  name: "" as string,
+  email: "" as string,
+  age: undefined as number | undefined,
+  role: "admin" as "admin" | "user" | "guest",
+  isActive: true as boolean,
+  metadata: {} as any,
+  tags: [] as string[],
+};
+
+const CreateUserRequestSpec = {
+  name: "" as string,
+  email: "" as string,
+  age: undefined as number | undefined,
+  role: "user" as "admin" | "user",
+};
+`;
+
+  console.log("=".repeat(60));
+  console.log("Input TypeScript:");
+  console.log("=".repeat(60));
+  console.log(exampleTs);
+
+  console.log("\n" + "=".repeat(60));
+  console.log("Parsed AST Info:");
+  console.log("=".repeat(60));
+
+  const { program, diagnostics } = parse(exampleTs, { lang: "ts", sourceType: "module" });
+  if (diagnostics.length > 0) {
+    console.log("Parse diagnostics:", diagnostics);
+  }
+  console.log("\nAST Program type:", program.type);
+  console.log("Body length:", program.body?.length);
+  if (program.body?.length > 0) {
+    console.log("First node type:", program.body[0].type);
+  }
+
+  const interfaces = extractInterfaces(exampleTs);
+  console.log(`\nFound ${interfaces.length} type definitions:`);
+  for (const iface of interfaces) {
+    console.log(`\n  ${iface.name}:`);
+    for (const prop of iface.properties) {
+      const opt = prop.optional ? "?" : "";
+      const nullMark = prop.nullable ? " | null" : "";
+      console.log(`    ${prop.name}${opt}: ${prop.type}${nullMark}`);
+    }
+  }
+
+  console.log("\n" + "=".repeat(60));
+  console.log("Generated dhi Schemas:");
+  console.log("=".repeat(60));
+  console.log(generateDhiSchema(interfaces));
+
+  // Test validation
+  console.log("\n" + "=".repeat(60));
+  console.log("Runtime Validation Test:");
+  console.log("=".repeat(60));
+
+  // Import dhi dynamically
+  const { z } = await import("./schema.ts");
+
+  // Build schemas manually for testing
+  const UserSchema = z.object({
+    id: z.number(),
+    name: z.string(),
+    email: z.string().email(),
+    age: z.number().optional(),
+    role: z.enum(["admin", "user", "guest"]),
+    isActive: z.boolean(),
+    metadata: z.any(),
+    tags: z.array(z.string()),
+  });
+
+  const validUser = {
+    id: 1,
+    name: "Alice",
+    email: "alice@example.com",
+    role: "admin",
+    isActive: true,
+    metadata: { team: "engineering" },
+    tags: ["senior", "full-stack"],
+  };
+
+  const result = UserSchema.safeParse(validUser);
+  console.log("Valid user:", result.success ? "✅ PASS" : "❌ FAIL");
+  if (!result.success) {
+    console.log("Errors:", result.error?.issues);
+  }
+
+  const invalidUser = {
+    id: "not-a-number",
+    name: "Bob",
+    email: "invalid-email",
+    role: "superadmin",
+    isActive: "yes",
+    metadata: null,
+    tags: [1, 2, 3], // Should be strings
+  };
+
+  const badResult = UserSchema.safeParse(invalidUser);
+  console.log("Invalid user:", badResult.success ? "✅ PASS (unexpected)" : "❌ FAIL (expected)");
+  if (!badResult.success) {
+    console.log("Caught errors:");
+    for (const issue of badResult.error?.issues || []) {
+      console.log(`  - ${issue.path.join('.')}: ${issue.message}`);
+    }
+  }
+}
+
+export { extractInterfaces, generateDhiSchema, typeToDhiSchema };
