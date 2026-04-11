@@ -61,9 +61,14 @@ ts-to-dhi types.ts -o schemas.ts
 
 # Watch mode (regenerate on changes)
 ts-to-dhi types.ts -w
+
+# Use config file
+ts-to-dhi -c ts-to-dhi.json
 ```
 
 ## Supported Features
+
+### TypeScript Types
 
 | TypeScript | dhi Output |
 |------------|------------|
@@ -74,8 +79,89 @@ ts-to-dhi types.ts -w
 | `T \| null` | `.nullable()` |
 | `"a" \| "b"` | `z.enum([...])` |
 | `T[]` | `z.array(...)` |
+| `[T, U]` | `z.tuple(...)` |
+| `A & B` | `z.intersection(...)` |
 | `Record<K, V>` | `z.record(...)` |
 | `any` | `z.any()` |
+
+### JSDoc Validators
+
+Add validation constraints via JSDoc comments:
+
+```typescript
+interface User {
+  /** @minimum 0 @maximum 150 */
+  age: number;
+  
+  /** @minLength 2 @maxLength 50 */
+  name: string;
+  
+  /** @format email */
+  email: string;
+  
+  /** @pattern ^[A-Z]{2}$ */
+  countryCode: string;
+  
+  /** @default "user" */
+  role?: string;
+}
+```
+
+Generated:
+```typescript
+export const UserSchema = z.object({
+  age: z.number().min(0).max(150),
+  name: z.string().min(2).max(50),
+  email: z.string().email(),
+  countryCode: z.string().regex(/^[A-Z]{2}$/),
+  role: z.string().default("user").optional(),
+});
+```
+
+**Supported JSDoc tags:**
+- `@minimum {number}` - Number minimum (uses `.min()`)
+- `@maximum {number}` - Number maximum (uses `.max()`)
+- `@minLength {number}` - String minimum length
+- `@maxLength {number}` - String maximum length
+- `@format {type}` - String format (`email`, `uuid`, `url`)
+- `@pattern {regex}` - String regex pattern
+- `@default {value}` - Default value
+
+### Cross-File Imports
+
+Imported types are handled as external references:
+
+```typescript
+// types.ts
+import { Address } from "./address";
+
+export interface User {
+  name: string;
+  address: Address;
+}
+```
+
+Generated:
+```typescript
+// External types (will use z.any() as placeholder)
+const AddressSchema = z.any(); // From: ./address
+
+export const UserSchema = z.object({
+  name: z.string(),
+  address: AddressSchema,
+});
+```
+
+## Config File
+
+Create `ts-to-dhi.json` for repeated use:
+
+```json
+{
+  "input": "src/types.ts",
+  "output": "src/schemas.ts"
+}
+```
 
 ## Programmatic API
 
@@ -83,10 +169,20 @@ ts-to-dhi types.ts -w
 import { extractTypes, generateDhiSchema } from '@dhi/ts-to-dhi';
 
 const source = `interface User { name: string; }`;
-const types = extractTypes(source);
-const code = generateDhiSchema(types);
+const { types, imports } = extractTypes(source);
+const code = generateDhiSchema(types, imports);
 ```
 
 ## Parser
 
 Powered by [oxc-parser](https://www.npmjs.com/package/oxc-parser) — a Rust-based TypeScript parser compiled to WebAssembly. Fast and accurate.
+
+## Comparison
+
+| Feature | ts-to-zod | ts-to-dhi |
+|---------|-----------|-----------|
+| Target | Zod | dhi (77x faster) |
+| JSDoc validators | ✅ Advanced | ✅ Basic |
+| Tuples | ❌ | ✅ |
+| Intersections | ❌ | ✅ |
+| Speed | Medium | **Very fast** |
