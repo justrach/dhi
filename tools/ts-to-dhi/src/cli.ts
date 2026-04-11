@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, dirname, basename, extname } from "path";
-import { extractTypes } from "./parser.js";
+import { extractTypes, type ParsedType } from "./parser.js";
 import { generateDhiSchema } from "./generator.js";
-
 interface Config {
   input?: string;
   output?: string;
@@ -111,7 +110,7 @@ function parseArgs(args: string[]): CliOptions | null {
   return { input: resolve(input), output: resolve(output), watch, config };
 }
 
-function generate(inputFile: string, outputFile: string): boolean {
+function generate(inputFile: string, outputFile: string | undefined): boolean {
   if (!existsSync(inputFile)) {
     console.error(`❌ Error: File not found: ${inputFile}`);
     return false;
@@ -142,35 +141,44 @@ function generate(inputFile: string, outputFile: string): boolean {
   
   console.log(`✅ Found ${types.length} type definition(s)`);
   
-  console.log("📝 Generating dhi schemas...");
-  const output = generateDhiSchema(types);
-  
+  console.log("🔨 Generating dhi schemas...");
+  let output: string;
   try {
-    writeFileSync(outputFile, output);
-    console.log(`✨ Written to ${outputFile}`);
+    output = generateDhiSchema(types);
+  } catch (err) {
+    console.error(`❌ Generation error: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+  
+  // Determine output file
+  const finalOutputFile = outputFile ?? getDefaultOutputFile(inputFile);
+  
+  console.log(`💾 Writing ${finalOutputFile}...`);
+  try {
+    writeFileSync(finalOutputFile, output, "utf-8");
   } catch (err) {
     console.error(`❌ Error writing file: ${err instanceof Error ? err.message : err}`);
     return false;
   }
   
-  // Print summary
-  console.log("\n📦 Generated schemas:");
-  for (const type of types) {
-    const icon = type.kind === "interface" ? "🔹" : "🔸";
-    console.log(`  ${icon} ${type.name}Schema (${type.properties.length} properties)`);
-  }
-  
+  console.log(`✨ Done! Generated ${finalOutputFile}`);
   return true;
 }
 
+function getDefaultOutputFile(inputFile: string): string {
+  const dir = dirname(inputFile);
+  const name = basename(inputFile, extname(inputFile));
+  return resolve(dir, `${name}.schemas.ts`);
+}
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (!options) return;
 
   const { input, output, watch } = options;
-
   // Initial generation
-  generate(input, output);
+  if (!generate(input, output)) {
+    process.exit(1);
+  }
 
   // Watch mode
   if (watch) {
@@ -183,15 +191,13 @@ async function main(): Promise<void> {
         try {
           generate(input, output);
         } catch (err) {
-          console.error("❌ Error:", err instanceof Error ? err.message : err);
+          console.error(`❌ Generation error: ${err instanceof Error ? err.message : err}`);
         }
-        console.log("\n👀 Watching for changes...");
       }
     });
+    
+    console.log("Press Ctrl+C to stop watching");
   }
 }
 
-main().catch((err) => {
-  console.error("❌ Fatal error:", err);
-  process.exit(1);
-});
+main();
