@@ -114,6 +114,57 @@ export function generateDhiSchema(types) {
  */
 function propertyToDhiSchema(prop) {
     let schema = typeToDhiSchema(prop.type);
+    // Apply JSDoc validators
+    if (prop.jsdoc) {
+        const { jsdoc } = prop;
+        // Number validators
+        if (jsdoc.minimum !== undefined) {
+            schema = `${schema}.min(${jsdoc.minimum})`;
+        }
+        if (jsdoc.maximum !== undefined) {
+            schema = `${schema}.max(${jsdoc.maximum})`;
+        }
+        // String validators
+        if (jsdoc.minLength !== undefined) {
+            schema = `${schema}.min(${jsdoc.minLength})`;
+        }
+        if (jsdoc.maxLength !== undefined) {
+            schema = `${schema}.max(${jsdoc.maxLength})`;
+        }
+        if (jsdoc.pattern) {
+            schema = `${schema}.regex(${jsdoc.pattern})`;
+        }
+        if (jsdoc.format) {
+            // Map common formats to dhi methods
+            switch (jsdoc.format) {
+                case "email":
+                    schema = `${schema}.email()`;
+                    break;
+                case "url":
+                    schema = `${schema}.url()`;
+                    break;
+                case "uuid":
+                    schema = `${schema}.uuid()`;
+                    break;
+                case "cuid":
+                    schema = `${schema}.cuid()`;
+                    break;
+                case "datetime":
+                    schema = `${schema}.datetime()`;
+                    break;
+                case "date":
+                    // dhi doesn't have .date() for strings, use regex or keep as string
+                    break;
+                case "ipv4":
+                case "ipv6":
+                    // Custom regex would be needed
+                    break;
+                default:
+                    // Unknown format, could add comment
+                    break;
+            }
+        }
+    }
     if (prop.optional) {
         schema = `${schema}.optional()`;
     }
