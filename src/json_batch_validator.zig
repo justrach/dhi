@@ -48,8 +48,8 @@ pub fn validateJsonArray(
     field_specs: []const FieldSpec,
     allocator: std.mem.Allocator,
 ) ![]ValidationResult {
-    var results = std.ArrayList(ValidationResult).init(allocator);
-    defer results.deinit();
+    var results: std.ArrayList(ValidationResult) = .empty;
+    defer results.deinit(allocator);
     
     // Parse JSON
     const parsed = try std.json.parseFromSlice(
@@ -65,10 +65,10 @@ pub fn validateJsonArray(
     // Validate each item
     for (array.items) |item| {
         const result = validateJsonObject(item.object, field_specs);
-        try results.append(result);
+        try results.append(allocator, result);
     }
     
-    return try results.toOwnedSlice();
+    return try results.toOwnedSlice(allocator);
 }
 
 /// Validate a single JSON object against field specs

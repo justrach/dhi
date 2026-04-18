@@ -96,6 +96,8 @@ class MultipleOf:
     __slots__ = ('multiple_of',)
 
     def __init__(self, multiple_of: Union[int, float]):
+        if multiple_of == 0:
+            raise ValueError("multiple_of must be non-zero")
         object.__setattr__(self, 'multiple_of', multiple_of)
 
     def __repr__(self) -> str:

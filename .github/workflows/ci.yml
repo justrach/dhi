@@ -17,10 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.15.2
+      - name: Setup Zig 0.16.0
+        shell: bash
+        run: |
+          case "${{ runner.os }}-${{ runner.arch }}" in
+            Linux-X64)    ZIG_DIR="zig-x86_64-linux-0.16.0" ;;
+            Linux-ARM64)  ZIG_DIR="zig-aarch64-linux-0.16.0" ;;
+            macOS-ARM64)  ZIG_DIR="zig-aarch64-macos-0.16.0" ;;
+            macOS-X64)    ZIG_DIR="zig-x86_64-macos-0.16.0" ;;
+            *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}"; exit 1 ;;
+          esac
+          curl -fsSL "https://ziglang.org/download/0.16.0/${ZIG_DIR}.tar.xz" -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "${PWD}/${ZIG_DIR}" >> "$GITHUB_PATH"
 
       - name: Build (ReleaseFast)
         run: zig build -Doptimize=ReleaseFast
@@ -34,6 +43,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Zig 0.16.0
+        shell: bash
+        run: |
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "${PWD}/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Build Zig library
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Setup Python
         uses: actions/setup-python@v5

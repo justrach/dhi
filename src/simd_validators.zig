@@ -80,14 +80,12 @@ pub fn validateEmailFast(email: []const u8) bool {
     // SIMD validation of characters (parallel check)
     var j: usize = 0;
     while (j + 16 <= email.len) : (j += 16) {
-        const chunk: @Vector(16, u8) = email[j..][0..16].*;
-        
         // Simplified SIMD validation - check each byte individually with fallback
         // For email validation, we'll use a simplified approach that works
         var all_valid = true;
         for (0..16) |idx| {
             if (j + idx >= email.len) break;
-            const c = chunk[idx];
+            const c = email[j + idx];
             const is_valid_char = (c >= 'a' and c <= 'z') or
                                  (c >= 'A' and c <= 'Z') or
                                  (c >= '0' and c <= '9') or
