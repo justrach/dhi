@@ -35,10 +35,12 @@ jobs:
         working-directory: js-bindings
         run: bun install
 
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.16.0
+      - name: Setup Zig 0.16.0
+        shell: bash
+        run: |
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "${PWD}/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
 
       - name: Build N-API native addon
         run: |
