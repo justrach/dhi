@@ -685,8 +685,8 @@ pub fn parseJsonArray(
     }
     pos += 1;
 
-    var objects = std.ArrayList([]?ParsedValue).init(allocator);
-    defer objects.deinit();
+    var objects: std.ArrayList([]?ParsedValue) = .empty;
+    defer objects.deinit(allocator);
 
     while (pos < json.len) {
         pos = skipWhitespaceSIMD(json, pos);
@@ -711,12 +711,12 @@ pub fn parseJsonArray(
         // Parse object
         const remaining = json[pos..];
         const result = try parseJsonObject(remaining, field_specs, allocator);
-        try objects.append(result.values);
+        try objects.append(allocator, result.values);
         pos += result.end_pos;
     }
 
     return .{
-        .objects = try objects.toOwnedSlice(),
+        .objects = try objects.toOwnedSlice(allocator),
         .end_pos = pos,
     };
 }
@@ -728,7 +728,7 @@ pub fn parseJsonArray(
 /// Process escape sequences in a JSON string.
 /// Allocates a new buffer for the result.
 pub fn processEscapes(input: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    var result = std.ArrayListUnmanaged(u8){};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var i: usize = 0;

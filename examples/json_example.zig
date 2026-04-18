@@ -18,7 +18,7 @@ const Product = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -193,8 +193,8 @@ pub fn main() !void {
             \\{"id": 3, "name": "Item 3", "price": 30.00, "in_stock": true}
         ;
 
-        var stream = std.io.fixedBufferStream(ndjson);
-        
+        var stream = std.Io.Reader.fixed(ndjson);
+
         const callback = struct {
             fn process(result: validator.ValidationResult(Product)) !void {
                 if (result.isValid()) {
@@ -206,7 +206,7 @@ pub fn main() !void {
             }
         }.process;
 
-        try json_validator.streamValidate(Product, stream.reader(), allocator, callback);
+        try json_validator.streamValidate(Product, &stream, allocator, callback);
 
         std.debug.print("  Streaming complete\n", .{});
     }

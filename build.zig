@@ -86,10 +86,10 @@ pub fn build(b: *std.Build) void {
             }),
             .linkage = .dynamic,
         });
-        napi_lib.addIncludePath(.{ .cwd_relative = node_include });
+        napi_lib.root_module.addIncludePath(.{ .cwd_relative = node_include });
         napi_lib.root_module.addImport("validators_comprehensive", validators_comprehensive_mod);
         // Link against libc (required on macOS/Linux for N-API)
-        napi_lib.linkLibC();
+        napi_lib.root_module.link_libc = true;
         // N-API symbols are resolved at runtime by Node.js - allow undefined symbols
         napi_lib.linker_allow_shlib_undefined = true;
         b.installArtifact(napi_lib);

@@ -7,6 +7,24 @@ const json_validator = @import("json_validator");
 const ITERATIONS = 1_000_000;
 const BATCH_SIZE = 1000;
 
+// Simple monotonic-clock timer (std.time.Timer was removed in Zig 0.16.0).
+const Timer = struct {
+    start_ns: u64,
+    fn nowNs() u64 {
+        var ts: std.c.timespec = undefined;
+        _ = std.c.clock_gettime(.MONOTONIC, &ts);
+        return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+    }
+
+    pub fn start() !Timer {
+        return .{ .start_ns = nowNs() };
+    }
+
+    pub fn read(self: *Timer) u64 {
+        return nowNs() - self.start_ns;
+    }
+};
+
 const User = struct {
     name: []const u8,
     email: []const u8,
@@ -17,7 +35,7 @@ fn benchmarkSingleValidation(allocator: std.mem.Allocator) !void {
     const Age = validator.BoundedInt(u8, 18, 90);
     const Name = validator.BoundedString(1, 40);
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     const start = timer.read();
 
     var i: usize = 0;
@@ -51,7 +69,7 @@ fn benchmarkBatchValidation(allocator: std.mem.Allocator) !void {
         \\]
     ;
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     const start = timer.read();
 
     var i: usize = 0;
@@ -79,7 +97,7 @@ fn benchmarkJSONParsing(allocator: std.mem.Allocator) !void {
         \\{"name": "Rach", "email": "rach@example.com", "age": 27}
     ;
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     const start = timer.read();
 
     var i: usize = 0;
@@ -100,7 +118,7 @@ fn benchmarkJSONParsing(allocator: std.mem.Allocator) !void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

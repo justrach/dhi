@@ -165,16 +165,8 @@ pub fn batchValidate(comptime T: type, json_array: []const u8, allocator: std.me
 }
 
 /// StreamValidate processes NDJSON (newline-delimited JSON) with constant memory.
-/// Processes NDJSON (newline-delimited JSON) with constant memory.
-pub fn streamValidate(comptime T: type, reader: anytype, allocator: std.mem.Allocator, callback: fn (validator.ValidationResult(T)) anyerror!void) !void {
-    var line_buf: [4096]u8 = undefined;
-
-    while (true) {
-        const line = reader.readUntilDelimiterOrEof(&line_buf, '\n') catch |err| {
-            if (err == error.EndOfStream) break;
-            return err;
-        } orelse break;
-
+pub fn streamValidate(comptime T: type, reader: *std.Io.Reader, allocator: std.mem.Allocator, callback: fn (validator.ValidationResult(T)) anyerror!void) !void {
+    while (try reader.takeDelimiter('\n')) |line| {
         if (line.len == 0) continue;
 
         const result = parseAndValidate(T, line, allocator);
