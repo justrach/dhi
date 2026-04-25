@@ -17,6 +17,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/json_validator.zig"),
     });
     json_validator_mod.addImport("validator", validator_mod);
+    const json_batch_validator_mod = b.addModule("json_batch_validator", .{
+        .root_source_file = b.path("src/json_batch_validator.zig"),
+    });
 
     // Create SIMD JSON parser module
     const simd_json_mod = b.addModule("simd_json_parser", .{
@@ -236,6 +239,17 @@ pub fn build(b: *std.Build) void {
 
     const run_simd_json_tests = b.addRunArtifact(simd_json_tests);
 
+    // Tests for JSON batch validator module
+    const json_batch_validator_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/json_batch_validator.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_json_batch_validator_tests = b.addRunArtifact(json_batch_validator_tests);
+
     // Test step runs all tests
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_validator_tests.step);
@@ -243,6 +257,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_json_validator_tests.step);
     test_step.dependOn(&run_model_tests.step);
     test_step.dependOn(&run_simd_json_tests.step);
+    test_step.dependOn(&run_json_batch_validator_tests.step);
 
     // Benchmark executable
     const benchmark = b.addExecutable(.{
@@ -260,4 +275,18 @@ pub fn build(b: *std.Build) void {
     const run_benchmark = b.addRunArtifact(benchmark);
     const bench_step = b.step("bench", "Run performance benchmarks");
     bench_step.dependOn(&run_benchmark.step);
+
+    const json_batch_benchmark = b.addExecutable(.{
+        .name = "json_batch_hot_paths",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/json_batch_hot_paths.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    json_batch_benchmark.root_module.addImport("json_batch_validator", json_batch_validator_mod);
+
+    const run_json_batch_benchmark = b.addRunArtifact(json_batch_benchmark);
+    const bench_json_batch_step = b.step("bench-json-batch", "Run JSON batch validator benchmarks");
+    bench_json_batch_step.dependOn(&run_json_batch_benchmark.step);
 }
