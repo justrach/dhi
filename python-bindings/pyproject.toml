@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dhi"
-version = "1.1.21"
+version = "1.2.0"
 description = "Ultra-fast data validation for Python - 24M validations/sec, powered by Zig"
 readme = "README.md"
 requires-python = ">=3.9"
