@@ -531,7 +531,7 @@ def _resolve_hints(cls) -> dict:
 
     try:
         return get_type_hints(cls, globalns=globalns, localns=localns, include_extras=True)
-    except Exception:
+    except (NameError, AttributeError):
         # Forward references that can't be resolved yet (e.g., mutually recursive types)
         # Return empty dict; user should call model_rebuild() after all types are defined
         return {}

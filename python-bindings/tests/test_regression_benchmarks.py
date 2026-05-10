@@ -14,6 +14,7 @@ Baseline measured on Apple Silicon (M-series), March 2026:
 import time
 import pytest
 from dhi import _dhi_native
+from dhi.batch import validate_ints_batch
 
 
 def generate_users(n: int):
@@ -113,3 +114,36 @@ class TestValidationCorrectness:
         ]
         results, valid_count = _dhi_native.validate_batch_direct(users, FIELD_SPECS)
         assert valid_count == 2
+
+    def test_batch_invalid_int_type_fails_without_leaking_python_error(self):
+        users = [{"age": "bad"}]
+        for spec in [
+            ("int", 0, 100),
+            ("int_gt", 0),
+            ("int_gte", 0),
+            ("int_lt", 0),
+            ("int_lte", 0),
+            ("int_positive",),
+            ("int_non_negative",),
+            ("int_multiple_of", 2),
+        ]:
+            results, valid_count = _dhi_native.validate_batch_direct(users, {"age": spec})
+            assert results == [False]
+            assert valid_count == 0
+
+
+class TestIntRangeBatchDirect:
+    """Ensure the native direct integer-list batch API works and is wired into Python."""
+
+    def test_direct_int_range_batch_mixed_values(self):
+        results, valid_count = _dhi_native.validate_int_range_batch_direct(
+            [18, 25, 90, 17, 91, "bad"], 18, 90
+        )
+        assert results == [True, True, True, False, False, False]
+        assert valid_count == 3
+
+    def test_validate_ints_batch_uses_direct_native_path(self):
+        result = validate_ints_batch([1, 5, 10, 11], 1, 10)
+        assert result.results == [True, True, True, False]
+        assert result.valid_count == 3
+        assert result.invalid_count == 1

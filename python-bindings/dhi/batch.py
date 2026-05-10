@@ -143,6 +143,11 @@ def validate_ints_batch(
     count = len(values)
     
     # Use native extension if available
+    if _dhi_native and hasattr(_dhi_native, 'validate_int_range_batch_direct'):
+        results, valid_count = _dhi_native.validate_int_range_batch_direct(
+            values, min_val, max_val
+        )
+        return BatchValidationResult(results, valid_count, count)
     if _dhi_native and hasattr(_dhi_native, 'validate_int_batch_simd'):
         results, valid_count = _dhi_native.validate_int_batch_simd(
             values, min_val, max_val

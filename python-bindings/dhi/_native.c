@@ -6,6 +6,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 // =============================================================================
@@ -94,6 +96,137 @@ extern int dhi_skip_json_value(
 extern unsigned long long dhi_hash_field_name(const char* name, size_t len);
 
 // =============================================================================
+// INLINE FAST VALIDATORS - avoid FFI overhead in batch hot paths
+// =============================================================================
+
+// Inline string length check (matches dhi_validate_string_length in Zig)
+static inline int inline_validate_string_length(const char* str, size_t min_len, size_t max_len) {
+    if (!str) return 0;
+    size_t len = strlen(str);
+    return (len >= min_len && len <= max_len) ? 1 : 0;
+}
+
+#if !((defined(__clang__) || defined(__GNUC__)) && !defined(DHI_FORCE_SCALAR_UUID))
+// 256-byte lookup table for scalar UUID fallback (1 = hex digit, 0 = not)
+static const unsigned char HEX_TABLE[256] = {
+    ['0']=1,['1']=1,['2']=1,['3']=1,['4']=1,['5']=1,['6']=1,['7']=1,['8']=1,['9']=1,
+    ['a']=1,['b']=1,['c']=1,['d']=1,['e']=1,['f']=1,
+    ['A']=1,['B']=1,['C']=1,['D']=1,['E']=1,['F']=1,
+};
+
+static inline int inline_validate_uuid_scalar_len(const char* str, Py_ssize_t len) {
+    if (!str || len != 36) return 0;
+    if (str[8] != '-' || str[13] != '-' || str[18] != '-' || str[23] != '-') return 0;
+    unsigned acc = 1;
+    #define UUID_H(i) acc &= HEX_TABLE[(unsigned char)str[i]]
+    UUID_H(0);UUID_H(1);UUID_H(2);UUID_H(3);UUID_H(4);UUID_H(5);UUID_H(6);UUID_H(7);
+    UUID_H(9);UUID_H(10);UUID_H(11);UUID_H(12);
+    UUID_H(14);UUID_H(15);UUID_H(16);UUID_H(17);
+    UUID_H(19);UUID_H(20);UUID_H(21);UUID_H(22);
+    UUID_H(24);UUID_H(25);UUID_H(26);UUID_H(27);UUID_H(28);UUID_H(29);
+    UUID_H(30);UUID_H(31);UUID_H(32);UUID_H(33);UUID_H(34);UUID_H(35);
+    #undef UUID_H
+    return (int)acc;
+}
+#endif
+
+#if (defined(__clang__) || defined(__GNUC__)) && !defined(DHI_FORCE_SCALAR_UUID)
+typedef signed char dhi_v32i8 __attribute__((vector_size(32)));
+typedef unsigned char dhi_v32u8 __attribute__((vector_size(32)));
+typedef uint64_t dhi_v4u64 __attribute__((vector_size(32)));
+#define DHI_V32U8_SPLAT(x) ((dhi_v32u8){ \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x), \
+    (unsigned char)(x),(unsigned char)(x),(unsigned char)(x),(unsigned char)(x) \
+})
+
+// UUID format: 8-4-4-4-12 hex chars. Gather 32 hex bytes and validate them with vector compares.
+static inline int inline_validate_uuid_vector_len(const char* str, Py_ssize_t len) {
+    if (!str || len != 36) return 0;
+    if (str[8] != '-' || str[13] != '-' || str[18] != '-' || str[23] != '-') return 0;
+
+    const dhi_v32i8 gathered = (dhi_v32i8){
+        (signed char)str[0],  (signed char)str[1],  (signed char)str[2],  (signed char)str[3],
+        (signed char)str[4],  (signed char)str[5],  (signed char)str[6],  (signed char)str[7],
+        (signed char)str[9],  (signed char)str[10], (signed char)str[11], (signed char)str[12],
+        (signed char)str[14], (signed char)str[15], (signed char)str[16], (signed char)str[17],
+        (signed char)str[19], (signed char)str[20], (signed char)str[21], (signed char)str[22],
+        (signed char)str[24], (signed char)str[25], (signed char)str[26], (signed char)str[27],
+        (signed char)str[28], (signed char)str[29], (signed char)str[30], (signed char)str[31],
+        (signed char)str[32], (signed char)str[33], (signed char)str[34], (signed char)str[35],
+    };
+    const dhi_v32u8 c = __builtin_convertvector(gathered, dhi_v32u8);
+    const dhi_v32u8 lower = c | DHI_V32U8_SPLAT(0x20);
+    const dhi_v32u8 is_digit = (dhi_v32u8)((c >= DHI_V32U8_SPLAT('0')) & (c <= DHI_V32U8_SPLAT('9')));
+    const dhi_v32u8 is_alpha = (dhi_v32u8)((lower >= DHI_V32U8_SPLAT('a')) & (lower <= DHI_V32U8_SPLAT('f')));
+    const dhi_v32u8 valid = is_digit | is_alpha;
+    const dhi_v4u64 words = (dhi_v4u64)valid;
+    return (words[0] & words[1] & words[2] & words[3]) == UINT64_MAX;
+}
+#endif
+
+static inline int inline_validate_uuid_len(const char* str, Py_ssize_t len) {
+#if (defined(__clang__) || defined(__GNUC__)) && !defined(DHI_FORCE_SCALAR_UUID)
+    return inline_validate_uuid_vector_len(str, len);
+#else
+    return inline_validate_uuid_scalar_len(str, len);
+#endif
+}
+
+// IPv4 validation
+static inline int inline_validate_ipv4(const char* str) {
+    if (!str) return 0;
+    int parts = 0;
+    int current = 0;
+    int has_digit = 0;
+    int digit_count = 0;
+    for (const char* p = str; ; p++) {
+        char c = *p;
+        if (c == '.') {
+            if (!has_digit || current > 255) return 0;
+            parts++;
+            current = 0;
+            has_digit = 0;
+            digit_count = 0;
+        } else if (c >= '0' && c <= '9') {
+            current = current * 10 + (c - '0');
+            has_digit = 1;
+            if (++digit_count > 3) return 0;
+        } else if (c == '\0') {
+            break;
+        } else {
+            return 0;
+        }
+    }
+    return (parts == 3 && has_digit && current <= 255) ? 1 : 0;
+}
+
+// Basic URL validation (http:// or https:// + has dot in domain)
+static inline int inline_validate_url(const char* str) {
+    if (!str) return 0;
+    const char* rest;
+    if (str[0]=='h' && str[1]=='t' && str[2]=='t' && str[3]=='p') {
+        if (str[4]=='s' && str[5]==':' && str[6]=='/' && str[7]=='/') {
+            rest = str + 8;
+        } else if (str[4]==':' && str[5]=='/' && str[6]=='/') {
+            rest = str + 7;
+        } else {
+            return 0;
+        }
+    } else {
+        return 0;
+    }
+    // need at least one '.' after protocol and >2 chars
+    if (!rest[0] || !rest[1] || !rest[2]) return 0;
+    return strchr(rest, '.') ? 1 : 0;
+}
+
+// =============================================================================
 // FNV-1a HASH - Fast hash for JSON field matching (computed at compile time)
 // =============================================================================
 static inline uint64_t fnv1a_hash_inline(const char *str, size_t len) {
@@ -103,6 +236,16 @@ static inline uint64_t fnv1a_hash_inline(const char *str, size_t len) {
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+static inline int py_object_as_long_valid(PyObject* obj, long* out) {
+    long value = PyLong_AsLong(obj);
+    if (value == -1 && PyErr_Occurred()) {
+        PyErr_Clear();
+        return 0;
+    }
+    *out = value;
+    return 1;
 }
 
 // Python wrapper: validate_int(value, min, max) -> bool
@@ -117,6 +260,36 @@ static PyObject* py_validate_int(PyObject* self, PyObject* args) {
     return PyBool_FromLong(result);
 }
 
+// Python wrapper: validate_int_range_batch_direct(values, min, max) -> (list[bool], int)
+static PyObject* py_validate_int_range_batch_direct(PyObject* self, PyObject* args) {
+    PyObject* values_list;
+    long min, max;
+
+    if (!PyArg_ParseTuple(args, "O!ll", &PyList_Type, &values_list, &min, &max)) {
+        return NULL;
+    }
+
+    Py_ssize_t count = PyList_GET_SIZE(values_list);
+    PyObject* result_list = PyList_New(count);
+    if (!result_list) {
+        return NULL;
+    }
+
+    Py_ssize_t valid_count = 0;
+    for (Py_ssize_t i = 0; i < count; i++) {
+        PyObject* item = PyList_GET_ITEM(values_list, i);  // borrowed ref
+        long value = 0;
+        int is_valid = py_object_as_long_valid(item, &value) && (value >= min && value <= max);
+
+        if (is_valid) valid_count++;
+        PyObject* bool_obj = is_valid ? Py_True : Py_False;
+        Py_INCREF(bool_obj);
+        PyList_SET_ITEM(result_list, i, bool_obj);
+    }
+
+    return Py_BuildValue("(Nn)", result_list, valid_count);
+}
+
 // Python wrapper: validate_string_length(str, min_len, max_len) -> bool
 static PyObject* py_validate_string_length(PyObject* self, PyObject* args) {
     const char* str;
@@ -126,7 +299,7 @@ static PyObject* py_validate_string_length(PyObject* self, PyObject* args) {
         return NULL;
     }
     
-    int result = dhi_validate_string_length(str, (size_t)min_len, (size_t)max_len);
+    int result = inline_validate_string_length(str, (size_t)min_len, (size_t)max_len);
     return PyBool_FromLong(result);
 }
 
@@ -204,7 +377,59 @@ struct FieldSpec {
     enum ValidatorType validator_type;
     long param1;
     long param2;
+    PyObject* last_utf8_obj;
+    const char* last_utf8;
+    Py_ssize_t last_utf8_len;
 };
+
+static inline const char* get_field_spec_utf8(
+    struct FieldSpec* spec,
+    PyObject* obj,
+    Py_ssize_t* len
+) {
+    if (spec->last_utf8_obj == obj && spec->last_utf8_len >= 0) {
+        *len = spec->last_utf8_len;
+        return spec->last_utf8;
+    }
+
+    const char* utf8 = PyUnicode_AsUTF8AndSize(obj, len);
+    if (!utf8) {
+        PyErr_Clear();
+        spec->last_utf8_obj = NULL;
+        spec->last_utf8 = NULL;
+        spec->last_utf8_len = 0;
+        *len = 0;
+        return NULL;
+    }
+
+    spec->last_utf8_obj = obj;
+    spec->last_utf8 = utf8;
+    spec->last_utf8_len = *len;
+    return utf8;
+}
+
+static inline const char* get_field_spec_utf8_ptr(
+    struct FieldSpec* spec,
+    PyObject* obj
+) {
+    if (spec->last_utf8_obj == obj) {
+        return spec->last_utf8;
+    }
+
+    const char* utf8 = PyUnicode_AsUTF8(obj);
+    if (!utf8) {
+        PyErr_Clear();
+        spec->last_utf8_obj = NULL;
+        spec->last_utf8 = NULL;
+        spec->last_utf8_len = 0;
+        return NULL;
+    }
+
+    spec->last_utf8_obj = obj;
+    spec->last_utf8 = utf8;
+    spec->last_utf8_len = -1;
+    return utf8;
+}
 
 // OPTIMIZED: validate_batch_direct with enum dispatch
 static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
@@ -236,10 +461,14 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
     while (PyDict_Next(field_specs_dict, &pos, &field_name, &spec)) {
         field_specs[field_idx].field_name_obj = field_name;  // Cache PyObject* (borrowed ref)
         field_specs[field_idx].field_name = PyUnicode_AsUTF8(field_name);
+        field_specs[field_idx].last_utf8_obj = NULL;
+        field_specs[field_idx].last_utf8 = NULL;
+        field_specs[field_idx].last_utf8_len = 0;
         
         if (PyTuple_Check(spec) && PyTuple_Size(spec) >= 1) {
             const char* type_str = PyUnicode_AsUTF8(PyTuple_GET_ITEM(spec, 0));
-            field_specs[field_idx].validator_type = parse_validator_type(type_str);
+            if (!type_str) PyErr_Clear();
+            field_specs[field_idx].validator_type = type_str ? parse_validator_type(type_str) : VAL_UNKNOWN;
             
             // Extract params (do this once, not per item!)
             field_specs[field_idx].param1 = 0;
@@ -262,7 +491,7 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
         free(field_specs);
         return PyErr_NoMemory();
     }
-    
+
     // Initialize all as valid
     for (Py_ssize_t i = 0; i < count; i++) {
         results[i] = 1;
@@ -306,82 +535,98 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
             
             switch (field_specs[f].validator_type) {
                 case VAL_INT: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int(value, field_specs[f].param1, field_specs[f].param2);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) &&
+                               (value >= field_specs[f].param1 && value <= field_specs[f].param2);
                     break;
                 }
                 case VAL_INT_GT: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_gt(value, field_specs[f].param1);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) &&
+                               (value > field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_GTE: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_gte(value, field_specs[f].param1);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) &&
+                               (value >= field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_LT: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_lt(value, field_specs[f].param1);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) &&
+                               (value < field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_LTE: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_lte(value, field_specs[f].param1);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) &&
+                               (value <= field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_POSITIVE: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_positive(value);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) && (value > 0);
                     break;
                 }
                 case VAL_INT_NON_NEGATIVE: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_non_negative(value);
+                    long value = 0;
+                    is_valid = py_object_as_long_valid(field_value, &value) && (value >= 0);
                     break;
                 }
                 case VAL_INT_MULTIPLE_OF: {
-                    long value = PyLong_AsLong(field_value);
-                    is_valid = dhi_validate_int_multiple_of(value, field_specs[f].param1);
+                    long value = 0;
+                    long divisor = field_specs[f].param1;
+                    is_valid = py_object_as_long_valid(field_value, &value) &&
+                               (divisor != 0 && value % divisor == 0);
                     break;
                 }
                 case VAL_STRING: {
-                    const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = dhi_validate_string_length(value, (size_t)field_specs[f].param1, (size_t)field_specs[f].param2);
+                    Py_ssize_t slen = 0;
+                    const char* value = PyUnicode_AsUTF8AndSize(field_value, &slen);
+                    if (!value) { PyErr_Clear(); is_valid = 0; break; }
+                    is_valid = ((size_t)slen >= (size_t)field_specs[f].param1 &&
+                                (size_t)slen <= (size_t)field_specs[f].param2);
                     break;
                 }
                 case VAL_EMAIL: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = dhi_validate_email(value);
+                    if (!value) { PyErr_Clear(); is_valid = 0; break; }
+                    is_valid = inline_validate_email(value);
                     break;
                 }
                 case VAL_URL: {
                     const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = dhi_validate_url(value);
+                    if (!value) { PyErr_Clear(); is_valid = 0; break; }
+                    is_valid = inline_validate_url(value);
                     break;
                 }
                 case VAL_UUID: {
-                    const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = dhi_validate_uuid(value);
+                    Py_ssize_t slen = 0;
+                    const char* value = get_field_spec_utf8(&field_specs[f], field_value, &slen);
+                    is_valid = inline_validate_uuid_len(value, slen);
                     break;
                 }
                 case VAL_IPV4: {
-                    const char* value = PyUnicode_AsUTF8(field_value);
-                    is_valid = dhi_validate_ipv4(value);
+                    const char* value = get_field_spec_utf8_ptr(&field_specs[f], field_value);
+                    is_valid = inline_validate_ipv4(value);
                     break;
                 }
                 case VAL_BASE64: {
                     const char* value = PyUnicode_AsUTF8(field_value);
+                    if (!value) { PyErr_Clear(); is_valid = 0; break; }
                     is_valid = dhi_validate_base64(value);
                     break;
                 }
                 case VAL_ISO_DATE: {
                     const char* value = PyUnicode_AsUTF8(field_value);
+                    if (!value) { PyErr_Clear(); is_valid = 0; break; }
                     is_valid = dhi_validate_iso_date(value);
                     break;
                 }
                 case VAL_ISO_DATETIME: {
                     const char* value = PyUnicode_AsUTF8(field_value);
+                    if (!value) { PyErr_Clear(); is_valid = 0; break; }
                     is_valid = dhi_validate_iso_datetime(value);
                     break;
                 }
@@ -404,6 +649,12 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
     
     // Convert results to Python list (FAST: use singleton bools, no allocations!)
     PyObject* result_list = PyList_New(count);
+    if (!result_list) {
+        free(field_specs);
+        free(results);
+        return NULL;
+    }
+
     for (Py_ssize_t i = 0; i < count; i++) {
         PyObject* bool_obj = results[i] ? Py_True : Py_False;
         Py_INCREF(bool_obj);  // Must incref singleton
@@ -415,7 +666,7 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
     free(results);
     
     // Return (results, valid_count)
-    return Py_BuildValue("(Ni)", result_list, (Py_ssize_t)valid_count);
+    return Py_BuildValue("(Nn)", result_list, (Py_ssize_t)valid_count);
 }
 
 // Helpers: safely extract numeric values from PyObject (handles int/float mix)
@@ -3700,6 +3951,8 @@ static PyTypeObject DhiDecoderType = {
 static PyMethodDef DhiNativeMethods[] = {
     {"validate_int", py_validate_int, METH_VARARGS,
      "Validate integer bounds (value, min, max) -> bool"},
+    {"validate_int_range_batch_direct", py_validate_int_range_batch_direct, METH_VARARGS,
+     "Validate integer bounds for a list: (values, min, max) -> (list[bool], int)"},
     {"validate_string_length", py_validate_string_length, METH_VARARGS,
      "Validate string length (str, min_len, max_len) -> bool"},
     {"validate_email", py_validate_email, METH_VARARGS,
