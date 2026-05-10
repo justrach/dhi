@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/dhi.svg)](https://www.npmjs.com/package/dhi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**Drop-in Zod 4 replacement. Average 20x faster. Zero code changes.**
+**Drop-in Zod 4 replacement. Average 13.8x faster than Zod 4, with 1.3.1 URL and IPv4 hot paths 2.9x and 2.4x faster than before. Zero code changes.**
 
 ```diff
 - import { z } from 'zod';
@@ -28,6 +28,9 @@ That's it. Same API. Same types. Full Zod 4 compatibility. Just faster.
 
 | Category | Average Speedup |
 |----------|-----------------|
+| Full benchmark suite | **13.8x faster than Zod 4** |
+| URL validator | **30.17M/s** — **8.0x vs Zod**; **2.9x faster than pre-1.3.1** |
+| IPv4 validator | **22.28M/s** — **1.1x vs Zod**; **2.4x faster than pre-1.3.1** |
 | Number Formats | **30-50x faster** |
 | StringBool | **32x faster** |
 | Coercion | **23-56x faster** |
@@ -36,7 +39,7 @@ That's it. Same API. Same types. Full Zod 4 compatibility. Just faster.
 | Objects | **4-7x faster** |
 | Arrays | **8x faster** |
 
-> Benchmarks run automatically via CI. See [benchmark results](../docs/benchmarks/benchmark-results.json) for raw data.
+> Release 1.3.1 benchmark command: `bun run benchmarks/benchmark-vs-all.ts`. Pre-1.3.1 comparison used the previous release-branch commit before the TypeScript fast paths.
 
 ---
 
