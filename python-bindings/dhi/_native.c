@@ -2995,7 +2995,7 @@ static inline char* json_parse_string_simd(const char *json, size_t *pos, size_t
 }
 
 // Legacy C version for fallback
-__attribute__((always_inline))
+__attribute__((always_inline, unused))
 static inline char* json_parse_string(const char *json, size_t *pos, size_t len,
                                 size_t *out_len, int *needs_unescape) {
     size_t start = *pos;
@@ -3080,6 +3080,7 @@ static PyObject* json_unescape_string(const char *str, size_t len) {
 }
 
 // Parse JSON integer
+__attribute__((unused))
 static int json_parse_integer(const char *json, size_t *pos, size_t len, long *out) {
     size_t start = *pos;
     int negative = 0;
@@ -3103,7 +3104,7 @@ static int json_parse_integer(const char *json, size_t *pos, size_t len, long *o
 }
 
 // Parse JSON number (int or float) - optimized for small integers
-__attribute__((always_inline))
+__attribute__((always_inline, unused))
 static inline PyObject* json_parse_number(const char *json, size_t *pos, size_t len) {
     size_t i = *pos;
     int is_negative = 0;
@@ -3201,7 +3202,6 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
     if (i < len && json[i] >= '0' && json[i] <= '9') {
         long value = 0;
         int digit_count = 0;
-        size_t start_digits = i;
 
         while (i < len && json[i] >= '0' && json[i] <= '9') {
             value = value * 10 + (json[i] - '0');
@@ -3248,6 +3248,7 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
 }
 
 // Skip a JSON value (for unknown fields)
+__attribute__((unused))
 static int json_skip_value(const char *json, size_t *pos, size_t len) {
     SKIP_WS(json, *pos, len);
     if (*pos >= len) return 0;
