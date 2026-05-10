@@ -110,23 +110,70 @@ function fastValidateDate(s: string): boolean {
 }
 
 function fastValidateEmail(s: string): boolean {
-  if (s.length < 3 || s.length > 320) return false;
+  const len = s.length;
+  if (len < 3 || len > 320) return false;
   const atIdx = s.indexOf('@');
-  if (atIdx < 1 || atIdx > s.length - 3) return false;
-  // Validate local part
+  if (atIdx < 1 || atIdx > len - 3) return false;
+
   for (let i = 0; i < atIdx; i++) {
     const c = s.charCodeAt(i);
     if (c > 127 || !EMAIL_LOCAL[c]) return false;
   }
-  // Validate domain part
-  const domain = s.substring(atIdx + 1);
-  if (domain.indexOf('.') === -1) return false;
-  if (domain.charCodeAt(0) === 45 || domain.charCodeAt(domain.length - 1) === 45) return false;
-  for (let i = 0; i < domain.length; i++) {
-    const c = domain.charCodeAt(i);
+
+  const domainStart = atIdx + 1;
+  if (s.indexOf('.', domainStart) === -1) return false;
+  if (s.charCodeAt(domainStart) === 45 || s.charCodeAt(len - 1) === 45) return false;
+  for (let i = domainStart; i < len; i++) {
+    const c = s.charCodeAt(i);
     if (c > 127 || !EMAIL_DOMAIN[c]) return false;
   }
   return true;
+}
+
+function fastValidateUrl(s: string): boolean {
+  const len = s.length;
+  let start: number;
+  if (len >= 10 && s.charCodeAt(0) === 104 && s.charCodeAt(1) === 116 &&
+      s.charCodeAt(2) === 116 && s.charCodeAt(3) === 112) {
+    if (s.charCodeAt(4) === 115 && s.charCodeAt(5) === 58 &&
+        s.charCodeAt(6) === 47 && s.charCodeAt(7) === 47) {
+      start = 8;
+    } else if (s.charCodeAt(4) === 58 && s.charCodeAt(5) === 47 &&
+               s.charCodeAt(6) === 47) {
+      start = 7;
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  if (len - start < 3) return false;
+  return s.indexOf('.', start) !== -1;
+}
+
+function fastValidateIpv4(s: string): boolean {
+  const len = s.length;
+  if (len < 7 || len > 15) return false;
+
+  let parts = 0;
+  let current = 0;
+  let digits = 0;
+
+  for (let i = 0; i < len; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 48 && c <= 57) {
+      current = current * 10 + c - 48;
+      if (++digits > 3 || current > 255) return false;
+    } else if (c === 46) {
+      if (digits === 0 || ++parts > 3) return false;
+      current = 0;
+      digits = 0;
+    } else {
+      return false;
+    }
+  }
+
+  return parts === 3 && digits > 0 && current <= 255;
 }
 
 // Shared empty path for optimistic (no-error) parsing - avoids allocation
@@ -539,7 +586,7 @@ export class DhiString extends DhiType<string, string> {
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid email' }]) };
           break;
         case 'url':
-          if (!wasmValidateString('validate_url_simd', current))
+          if (!fastValidateUrl(current))
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid url' }]) };
           break;
         case 'uuid':
@@ -563,7 +610,7 @@ export class DhiString extends DhiType<string, string> {
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid emoji' }]) };
           break;
         case 'ipv4':
-          if (!wasmValidateString('validate_ipv4_simd', current))
+          if (!fastValidateIpv4(current))
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv4 address' }]) };
           break;
         case 'ipv6':
@@ -572,7 +619,7 @@ export class DhiString extends DhiType<string, string> {
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv6 address' }]) };
           break;
         case 'ip':
-          if (!wasmValidateString('validate_ipv4_simd', current) &&
+          if (!fastValidateIpv4(current) &&
               !/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(current))
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IP address' }]) };
           break;
@@ -1239,7 +1286,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
           case 'url': {
             const fname = `_url${idx}`;
             names.push(fname);
-            vars.push((s: string) => wasmValidateString('validate_url_simd', s));
+            vars.push(fastValidateUrl);
             code += `if(!${fname}(${vi}))return null;`;
             break;
           }
