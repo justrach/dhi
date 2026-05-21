@@ -14,7 +14,7 @@ import type {
   GenerateOptions,
   GeneratedSDK,
   HttpMethod,
-} from './types';
+} from './types.js';
 
 export class SDKGenerator {
   private api: ExtractedAPI;
