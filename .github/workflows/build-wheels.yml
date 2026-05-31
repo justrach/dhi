@@ -103,7 +103,7 @@ jobs:
           # CIBW_FREE_THREADED_SUPPORT from cibuildwheel 2.x.
           CIBW_ENABLE: cpython-freethreading
           CIBW_BEFORE_BUILD: |
-            pip install setuptools wheel
+            pip install "setuptools>=77.0.0" wheel "packaging>=24.2"
           CIBW_BUILD_VERBOSITY: 1
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.0
         with:
