@@ -237,16 +237,37 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
     if type_origin in (list, set, frozenset) and type_args:
         item_type = type_args[0]
 
-    # Handle Optional[T] = Union[T, None] - extract T if it's a BaseModel
+    # Handle Optional[T] = Union[T, None].
+    # For a *single-type* Optional (exactly one non-None member) we validate the
+    # value against the inner type and allow None. Multi-member unions
+    # (e.g. Union[int, str]) keep pass-through behavior. (Issue #56: the pure-
+    # Python fallback previously left ``check_type`` as the Union object, so
+    # Optional fields received NO type checking and accepted int/bool/list.)
     optional_model = None
+    allow_none = False
     if type_origin is Union:
         non_none_args = [a for a in type_args if a is not type(None)]
+        allow_none = len(non_none_args) != len(type_args)
         if len(non_none_args) == 1:
             inner_type = non_none_args[0]
             if _is_basemodel_subclass(inner_type):
                 optional_model = inner_type
+            else:
+                inner_origin = get_origin(inner_type)
+                if inner_origin is None and isinstance(inner_type, type):
+                    # Optional[scalar] -> validate against the scalar type
+                    check_type = inner_type
+                elif inner_origin in (list, set, frozenset):
+                    check_type = inner_origin
+                    inner_args = get_args(inner_type)
+                    if inner_args:
+                        item_type = inner_args[0]
 
     def validator(value: Any) -> Any:
+        # None handling for Optional[T] (Union[..., None]) — accept None and
+        # skip all further type/constraint checks. (Issue #56)
+        if value is None and allow_none:
+            return None
         # Type checking
         if strict:
             if type(value) is not check_type:
@@ -465,6 +486,7 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
         and decimal_places is None
         and not unique_items
         and nested_model is None
+        and not allow_none  # Optional[T]: None handling stays in Python (Issue #56)
         and check_type in _TYPE_CODES
     )
 
@@ -523,6 +545,14 @@ def _resolve_hints(cls) -> dict:
 
     Passes the module's global namespace and includes the class itself
     in localns so self-referencing models work.
+
+    Robustness (Issue #56): with ``from __future__ import annotations`` (PEP 563)
+    every annotation is a string, so a *single* unresolvable name made
+    ``get_type_hints`` raise for the whole class. The previous behavior swallowed
+    that into an empty dict, which silently disabled ALL validation for the model
+    (missing/invalid required fields were accepted with no error). We now fall
+    back to resolving annotations field-by-field so good fields still validate,
+    and we warn (never silently no-op) about the ones that truly can't resolve.
     """
     # Build namespace: module globals + the class itself for self-references
     module = sys.modules.get(cls.__module__, None)
@@ -531,10 +561,39 @@ def _resolve_hints(cls) -> dict:
 
     try:
         return get_type_hints(cls, globalns=globalns, localns=localns, include_extras=True)
-    except (NameError, AttributeError):
-        # Forward references that can't be resolved yet (e.g., mutually recursive types)
-        # Return empty dict; user should call model_rebuild() after all types are defined
-        return {}
+    except Exception:
+        # Whole-class resolution failed — almost always one bad/forward annotation
+        # under PEP 563. Resolve each annotation independently so the rest of the
+        # model is still validated. Walk the MRO base-first so subclass
+        # annotations override inherited ones, matching get_type_hints().
+        raw_hints: dict = {}
+        for klass in reversed(cls.__mro__):
+            raw_hints.update(getattr(klass, '__annotations__', {}))
+
+        resolved: dict = {}
+        unresolved: list = []
+        for name, ann in raw_hints.items():
+            if isinstance(ann, str):
+                try:
+                    # Mirror get_type_hints: evaluate the stringized annotation in
+                    # the class's module globals + local namespace.
+                    ann = eval(ann, globalns, localns)  # noqa: S307 - trusted source annotations
+                except Exception:
+                    unresolved.append(name)
+                    continue
+            resolved[name] = ann
+
+        if unresolved:
+            import warnings
+            warnings.warn(
+                f"dhi: could not resolve type annotations for "
+                f"{cls.__module__}.{getattr(cls, '__qualname__', cls.__name__)} "
+                f"field(s) {unresolved!r}; these fields will NOT be validated. "
+                f"Define the referenced types and call model_rebuild() to fix. "
+                f"(dhi never silently disables validation — see issue #56.)",
+                stacklevel=3,
+            )
+        return resolved
 
 
 def _compile_model_fields(cls, hints: dict) -> None:

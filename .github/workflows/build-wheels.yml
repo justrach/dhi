@@ -94,16 +94,18 @@ jobs:
           file zig-out/lib/libdhi.* || true
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21.3
+        uses: pypa/cibuildwheel@v3.4.1
         env:
-          CIBW_BUILD: cp39-* cp310-* cp311-* cp312-* cp313-* cp313t-* cp314-*
+          CIBW_BUILD: cp39-* cp310-* cp311-* cp312-* cp313-* cp313t-* cp314-* cp314t-*
           CIBW_SKIP: "*-musllinux_* *-manylinux_i686 *-win32"
           CIBW_ARCHS: ${{ matrix.cibw-archs }}
+          # Enable free-threaded (cp313t/cp314t) builds. Replaces the removed
+          # CIBW_FREE_THREADED_SUPPORT from cibuildwheel 2.x.
+          CIBW_ENABLE: cpython-freethreading
           CIBW_BEFORE_BUILD: |
             pip install setuptools wheel
           CIBW_BUILD_VERBOSITY: 1
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.0
-          CIBW_FREE_THREADED_SUPPORT: 1
         with:
           package-dir: ./python-bindings
           output-dir: wheelhouse

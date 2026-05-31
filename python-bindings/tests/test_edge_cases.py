@@ -608,6 +608,51 @@ class TestUnionTypes:
         m2 = M(v=None)
         assert m2.v is None
 
+    def test_optional_str_type_checked(self):
+        """Optional[str] must type-check the inner type (Issue #56).
+
+        Regression: the pure-Python fallback used to leave check_type as the
+        Union object, so Optional fields accepted int/bool/list silently.
+        """
+        class M(BaseModel):
+            v: Optional[str] = None
+
+        assert M(v="ok").v == "ok"
+        assert M(v=None).v is None
+        for bad in (123, True, ["x"]):
+            with pytest.raises(ValidationErrors):
+                M(v=bad)
+
+    def test_optional_int_type_checked(self):
+        """Optional[int] rejects str/list but accepts int and None (Issue #56)."""
+        class M(BaseModel):
+            v: Optional[int] = None
+
+        assert M(v=42).v == 42
+        assert M(v=None).v is None
+        for bad in ("8000", ["x"]):
+            with pytest.raises(ValidationErrors):
+                M(v=bad)
+
+    def test_optional_list_item_type_checked(self):
+        """Optional[List[int]] validates item types and allows None (Issue #56)."""
+        class M(BaseModel):
+            v: Optional[List[int]] = None
+
+        assert M(v=[1, 2, 3]).v == [1, 2, 3]
+        assert M(v=None).v is None
+        with pytest.raises(ValidationErrors):
+            M(v=[1, "two", 3])
+
+    def test_multi_member_union_still_passthrough(self):
+        """Union[int, str] keeps pass-through behavior (only Optional tightened)."""
+        class M(BaseModel):
+            v: Union[int, str]
+
+        assert M(v=42).v == 42
+        assert M(v="123").v == "123"
+        assert isinstance(M(v="123").v, str)
+
 
 # ============================================================
 # Test: Validator Edge Cases
