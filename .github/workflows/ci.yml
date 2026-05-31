@@ -15,7 +15,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Zig 0.16.0
         shell: bash
@@ -46,7 +46,7 @@ jobs:
         python-version: ['3.12', '3.13', '3.14', '3.14t']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Zig 0.16.0
         shell: bash
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
