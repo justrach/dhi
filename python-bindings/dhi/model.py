@@ -279,6 +279,14 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
             # Coerce compatible types
             if check_type in (int, float) and not isinstance(value, check_type):
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    # Issue #57: a fractional float must NOT be silently truncated
+                    # to int. Whole-valued floats (5.0 -> 5) are still accepted.
+                    if check_type is int and isinstance(value, float):
+                        if not math.isfinite(value) or not value.is_integer():
+                            raise ValidationError(
+                                field_name,
+                                f"Expected int, got float with fractional part: {value}"
+                            )
                     try:
                         value = check_type(value)
                     except (ValueError, TypeError, OverflowError):

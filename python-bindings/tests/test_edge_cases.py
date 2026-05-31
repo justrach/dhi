@@ -366,15 +366,16 @@ class TestTypeCoercion:
         assert m.v == 5.0
         assert isinstance(m.v, float)
 
-    def test_float_to_int_coercion(self):
-        """dhi allows float→int coercion for convenience (unlike strict Pydantic v2)"""
+    def test_fractional_float_to_int_rejected(self):
+        """Issue #57: a fractional float for an int field must be rejected,
+        not silently truncated (matches Pydantic v2)."""
         class M(BaseModel):
             v: int
 
-        # dhi coerces float to int (truncates)
-        m = M(v=5.5)
-        assert m.v == 5
-        assert isinstance(m.v, int)
+        with pytest.raises(ValidationErrors):
+            M(v=5.5)
+        with pytest.raises(ValidationErrors):
+            M(v=1.5)
 
     def test_float_whole_number_to_int(self):
         """float that is a whole number (5.0) coerces to int"""

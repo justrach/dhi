@@ -682,6 +682,14 @@ static double as_double_coerce(PyObject* obj) {
     return PyFloat_AsDouble(obj);
 }
 
+// Issue #57: a float with a fractional part must NOT be silently truncated to
+// an int. Whole-valued floats (5.0 -> 5) are still accepted; inf/nan and any
+// fractional value (1.5) are rejected. Returns 1 if `f` is not an integral float.
+static inline int dhi_float_has_fraction(PyObject* f) {
+    double d = PyFloat_AsDouble(f);
+    return !isfinite(d) || d != floor(d);
+}
+
 // =============================================================================
 // PRE-COMPILED FIELD SPECS — eliminates per-call constraint tuple unpacking
 // =============================================================================
@@ -879,6 +887,14 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
                 }
                 if (!PyLong_Check(result)) {
                     if (PyFloat_Check(result)) {
+                        if (dhi_float_has_fraction(result)) {
+                            Py_DECREF(result);
+                            field_name = PyUnicode_AsUTF8(fs->name_obj);
+                            if (!errors) { errors = PyList_New(0); if (!errors) { Py_DECREF(obj_dict); return NULL; } }
+                            PyObject *fmsg = PyUnicode_FromFormat("%s: Expected int, got float with fractional part", field_name);
+                            PyObject *ferr = Py_BuildValue("(OO)", fs->name_obj, fmsg); Py_DECREF(fmsg);
+                            PyList_Append(errors, ferr); Py_DECREF(ferr); continue;
+                        }
                         PyObject *new_val = PyNumber_Long(result);
                         if (!new_val) { Py_DECREF(result); PyErr_Clear();
                             field_name = PyUnicode_AsUTF8(fs->name_obj);
@@ -1173,6 +1189,11 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
             if (!PyLong_Check(result)) {
                 if (PyFloat_Check(result)) {
                     // Coerce float to int
+                    if (dhi_float_has_fraction(result)) {
+                        Py_DECREF(result);
+                        return PyErr_Format(PyExc_ValueError,
+                            "%s: Expected int, got float with fractional part", field_name);
+                    }
                     PyObject* new_val = PyNumber_Long(result);
                     if (!new_val) {
                         Py_DECREF(result);
@@ -1692,6 +1713,14 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
                 }
                 if (!PyLong_Check(result)) {
                     if (PyFloat_Check(result)) {
+                        if (dhi_float_has_fraction(result)) {
+                            Py_DECREF(result);
+                            field_name = PyUnicode_AsUTF8(fs->name_obj);
+                            if (!errors) { errors = PyList_New(0); }
+                            PyObject *fmsg = PyUnicode_FromFormat("%s: Expected int, got float with fractional part", field_name);
+                            PyObject *ferr = Py_BuildValue("(OO)", fs->name_obj, fmsg); Py_DECREF(fmsg);
+                            PyList_Append(errors, ferr); Py_DECREF(ferr); continue;
+                        }
                         PyObject *new_val = PyNumber_Long(result);
                         if (!new_val) { Py_DECREF(result); PyErr_Clear();
                             field_name = PyUnicode_AsUTF8(fs->name_obj);
@@ -2565,6 +2594,14 @@ static int DhiStruct_init(DhiStructObject *self, PyObject *args, PyObject *kwarg
                 }
                 if (!PyLong_Check(result)) {
                     if (PyFloat_Check(result)) {
+                        if (dhi_float_has_fraction(result)) {
+                            Py_DECREF(result);
+                            field_name = PyUnicode_AsUTF8(fs->name_obj);
+                            if (!errors) { errors = PyList_New(0); }
+                            PyObject *fmsg = PyUnicode_FromFormat("%s: Expected int, got float with fractional part", field_name);
+                            PyObject *ferr = Py_BuildValue("(OO)", fs->name_obj, fmsg); Py_DECREF(fmsg);
+                            PyList_Append(errors, ferr); Py_DECREF(ferr); continue;
+                        }
                         PyObject *new_val = PyNumber_Long(result);
                         if (!new_val) { Py_DECREF(result); PyErr_Clear();
                             field_name = PyUnicode_AsUTF8(fs->name_obj);
@@ -3996,6 +4033,14 @@ static struct PyModuleDef dhi_native_module = {
 PyMODINIT_FUNC PyInit__dhi_native(void) {
     PyObject *module = PyModule_Create(&dhi_native_module);
     if (!module) return NULL;
+
+    // Issue #58: declare that this extension is safe to run without the GIL, so
+    // importing it on a free-threaded (cp313t/cp314t) interpreter does NOT
+    // re-enable the GIL. The validators are stateless C functions over Python
+    // args and the compiled specs are read-only after class creation.
+#ifdef Py_GIL_DISABLED
+    PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
+#endif
 
     // Initialize and register DhiStructType
     if (PyType_Ready(&DhiStructType) < 0) {
