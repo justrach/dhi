@@ -97,3 +97,7 @@ jobs:
       - name: Run feature tests
         working-directory: js-bindings
         run: bun run tests/test-all-features.ts
+
+      - name: Run Standard Schema + JSON Schema import tests
+        working-directory: js-bindings
+        run: bun run tests/test-standard-schema-and-jsonschema.ts
