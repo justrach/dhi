@@ -131,8 +131,12 @@ jobs:
           # Test gate: install each built wheel and run the full test suite against
           # it, per Python version, BEFORE anything is published — this is what
           # stops a broken wheel from ever reaching PyPI.
+          # NOTE: use {package} (the package-dir, ./python-bindings), NOT {project}
+          # (the repo root) — the tests live in python-bindings/tests, so {project}/tests
+          # resolves to a nonexistent dir and pytest exits 4 (no tests collected),
+          # failing every build.
           CIBW_TEST_REQUIRES: pytest
-          CIBW_TEST_COMMAND: python -m pytest {project}/tests -q
+          CIBW_TEST_COMMAND: python -m pytest {package}/tests -q
           # Skip the test run only on emulated aarch64 wheels (pytest under QEMU is
           # extremely slow); the wheels are still built and shipped.
           CIBW_TEST_SKIP: "*-manylinux_aarch64 *-musllinux_aarch64"
