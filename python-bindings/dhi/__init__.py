@@ -72,6 +72,9 @@ from .model import BaseModel
 # --- Struct (high-performance, msgspec-like) ---
 from .struct import Struct, Decoder
 
+# --- JSON Schema import (define-once / cross-language, Issue #55) ---
+from .schema_import import from_json_schema, load_schema
+
 # --- Network types ---
 from .networks import (
     EmailStr, NameEmail,
@@ -154,6 +157,9 @@ __all__ = [
 
     # Struct (high-performance)
     "Struct", "Decoder",
+
+    # JSON Schema import (Issue #55)
+    "from_json_schema", "load_schema",
 
     # Network types
     "EmailStr", "NameEmail",
