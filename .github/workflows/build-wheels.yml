@@ -113,10 +113,13 @@ jobs:
           CIBW_ARCHS: ${{ matrix.cibw-archs }}
           # Build free-threaded wheels. cibuildwheel 3.x enables CPython 3.14
           # free-threading (cp314t) by default, but 3.13 free-threading (cp313t)
-          # is still experimental and must be opted into via CIBW_ENABLE — without
-          # this, cp313t wheels are silently dropped (v1.3.3 shipped them on PyPI).
-          # CIBW_ENABLE is the current mechanism; CIBW_FREE_THREADED_SUPPORT is the
-          # deprecated 2.x flag and is correctly absent.
+          # is still experimental and must be opted into here — without this,
+          # cp313t wheels are silently dropped (v1.3.3 shipped them on PyPI).
+          # Note: cibuildwheel 3.4.1 warns that the `cpython-freethreading` enable
+          # value is itself being phased out as free-threading goes default — but
+          # in this pinned version it is STILL required to emit cp313t. Drop it only
+          # once cibuildwheel selects cp313t by default. (The old 2.x flag was
+          # CIBW_FREE_THREADED_SUPPORT, which is correctly absent.)
           CIBW_ENABLE: cpython-freethreading
           CIBW_BEFORE_BUILD: |
             pip install "setuptools>=77.0.0" wheel "packaging>=24.2"
