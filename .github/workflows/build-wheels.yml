@@ -25,7 +25,12 @@ jobs:
             arch: arm64
             target: aarch64-macos-none
             artifact: zig-lib-macos-arm64
-          - os: macos-13
+          # x86_64 macOS dylib is CROSS-COMPILED on the arm64 runner (Zig targets
+          # any OS/arch from any host). This deliberately avoids the deprecated,
+          # scarce macos-13 Intel runner gating the whole Zig matrix — which in
+          # turn gates every build_wheels job. Verified locally: arm64 host +
+          # -Dtarget=x86_64-macos-none -> valid x86_64 Mach-O dylib.
+          - os: macos-latest
             arch: x86_64
             target: x86_64-macos-none
             artifact: zig-lib-macos-x86_64
