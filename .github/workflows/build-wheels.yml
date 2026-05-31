@@ -111,9 +111,13 @@ jobs:
           CIBW_BUILD: cp39-* cp310-* cp311-* cp312-* cp313-* cp313t-* cp314-* cp314t-*
           CIBW_SKIP: "*-musllinux_* *-manylinux_i686 *-win32"
           CIBW_ARCHS: ${{ matrix.cibw-archs }}
-          # Build free-threaded (cp313t/cp314t) wheels. In cibuildwheel 3.x these
-          # are built by default for stable 3.13/3.14 when selected above; the
-          # legacy `CIBW_ENABLE: cpython-freethreading` is deprecated and omitted.
+          # Build free-threaded wheels. cibuildwheel 3.x enables CPython 3.14
+          # free-threading (cp314t) by default, but 3.13 free-threading (cp313t)
+          # is still experimental and must be opted into via CIBW_ENABLE — without
+          # this, cp313t wheels are silently dropped (v1.3.3 shipped them on PyPI).
+          # CIBW_ENABLE is the current mechanism; CIBW_FREE_THREADED_SUPPORT is the
+          # deprecated 2.x flag and is correctly absent.
+          CIBW_ENABLE: cpython-freethreading
           CIBW_BEFORE_BUILD: |
             pip install "setuptools>=77.0.0" wheel "packaging>=24.2"
           # Test gate: install each built wheel and run the full test suite against
