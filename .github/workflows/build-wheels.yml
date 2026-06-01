@@ -118,15 +118,17 @@ jobs:
           # Test gate: install each built wheel and run the test suite against it,
           # per Python version, BEFORE anything is published — this is what stops a
           # broken wheel from ever reaching PyPI.
-          # CRITICAL: use CIBW_TEST_SOURCES so cibuildwheel COPIES tests/ into an
-          # isolated test dir and runs from there. Pointing pytest at {package}/tests
-          # inside the project tree instead puts the repo on sys.path, so `import dhi`
+          # CRITICAL: use CIBW_TEST_SOURCES so cibuildwheel COPIES the tests into a
+          # temp dir OUTSIDE the source tree and runs from there. Pointing pytest at
+          # the in-tree tests instead puts the repo on sys.path, so `import dhi`
           # resolves to the uncompiled SOURCE package (no _dhi_native.so) and shadows
           # the installed wheel — _dhi_native is None and every native test crashes.
-          # Copying tests out means the only importable `dhi` is the wheel under test.
+          # NOTE: test-sources paths are relative to the REPO ROOT (cibuildwheel's
+          # working dir), NOT the package-dir — hence python-bindings/tests, and the
+          # test command references that same copied relative path.
           CIBW_TEST_REQUIRES: pytest
-          CIBW_TEST_SOURCES: tests
-          CIBW_TEST_COMMAND: python -m pytest tests -q
+          CIBW_TEST_SOURCES: python-bindings/tests
+          CIBW_TEST_COMMAND: python -m pytest python-bindings/tests -q
           # Skip the test run only on emulated aarch64 wheels (pytest under QEMU is
           # extremely slow); the wheels are still built and shipped.
           CIBW_TEST_SKIP: "*-manylinux_aarch64 *-musllinux_aarch64"
