@@ -1,6 +1,6 @@
 {
   "name": "dhi",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Ultra-fast Zod 4 drop-in replacement - 20x faster average, full API parity, SIMD WASM, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -99,6 +99,7 @@
     "ai": "^6.0.71",
     "arktype": "^2.1.29",
     "typescript": "^5.9.3",
+    "yuku-parser": "^0.4.4",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.1"
   },
@@ -112,8 +113,5 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "dependencies": {
-    "yuku-parser": "^0.4.4"
   }
 }
