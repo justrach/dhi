@@ -2499,9 +2499,17 @@ static PyObject* py_dump_json_compiled(PyObject* self_unused, PyObject* args) {
 // Stores field values in a C array instead of Python __dict__.
 // This eliminates PyDict overhead and provides ~6x speedup over BaseModel.
 
-// Instance object - stores field values directly in C array
+// Instance object - stores field values directly in C array.
+// MUST use PyObject_VAR_HEAD (not PyObject_HEAD): the type sets tp_itemsize, so
+// CPython treats instances as variable-sized and writes the item count into
+// ob_size at tp_alloc time. With a plain PyObject_HEAD, ob_size would alias
+// values[0], and populating field 0 would clobber it — corrupting Py_SIZE().
+// On CPython <=3.10 a heap subclass stores __dict__ at a negative offset computed
+// from Py_SIZE(obj), so a corrupted ob_size yields a wild __dict__ pointer and a
+// SIGBUS in GC at interpreter shutdown. VAR_HEAD gives ob_size its own slot ahead
+// of values[], so it stays = n_fields and the dict-offset math is correct.
 typedef struct {
-    PyObject_HEAD
+    PyObject_VAR_HEAD
     PyObject *values[];  // Flexible array member - holds field values
 } DhiStructObject;
 
