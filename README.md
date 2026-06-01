@@ -28,7 +28,7 @@ Zig:        Zero-cost. Comptime. No runtime.
 - **TypeScript** — a drop-in [Zod 4](https://zod.dev) replacement (`z.object`, full API parity) running on a 28KB SIMD WASM module in browsers/edge, or an N-API native addon on Node.js.
 - **Zig** — `comptime`-generated models with zero runtime cost, zero allocations on the happy path.
 
-You keep your existing code and API; dhi swaps in the engine underneath. No schema rewrites, no new mental model.
+You keep your existing code and API; dhi swaps in the engine underneath. No schema rewrites, no new mental model — and **zero runtime dependencies** on either registry.
 
 ### Contents
 
@@ -154,11 +154,11 @@ BaseModel layer: 546K model_validate/sec | 6.4M model_dump/sec
 ## Install
 
 ```bash
-pip install dhi          # Python (wheels for macOS arm64 + Linux x86_64)
+pip install dhi          # Python 3.9–3.14 (incl. free-threading); wheels for macOS arm64 + Linux x86_64/aarch64
 npm install dhi          # TypeScript (Node 18+ / Bun / Deno)
 ```
 
-Pure Python fallback included — no native extension required to get started.
+**Zero runtime dependencies** on both PyPI and npm. A pure-Python fallback is bundled, so `pip install dhi` works even where the native extension can't build.
 
 ---
 
