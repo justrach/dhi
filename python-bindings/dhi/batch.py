@@ -182,6 +182,13 @@ def validate_strings_batch(
     count = len(strings)
     
     # Use native extension if available
+    if _dhi_native and hasattr(_dhi_native, 'validate_string_length_batch_direct'):
+        # Zero-encode fast path: native reads char length straight off each str
+        # (no UTF-8 encoding, no throwaway bytes objects).
+        results, valid_count = _dhi_native.validate_string_length_batch_direct(
+            strings, min_len, max_len
+        )
+        return BatchValidationResult(results, valid_count, count)
     if _dhi_native and hasattr(_dhi_native, 'validate_string_length_batch'):
         encoded = [s.encode('utf-8') for s in strings]
         results, valid_count = _dhi_native.validate_string_length_batch(

@@ -16,6 +16,8 @@ Usage:
     user = User(name="John", email="john@example.com", age=30)
 """
 
+from __future__ import annotations
+
 from typing import Any, ClassVar, get_type_hints, get_origin, get_args
 from typing import Annotated
 import sys

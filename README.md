@@ -20,6 +20,29 @@ Zig:        Zero-cost. Comptime. No runtime.
 
 ---
 
+## What is dhi?
+
+**dhi** (Sanskrit: *intellect, insight*) is a validation library with a single Zig core compiled to three targets, so the *same* validation rules and error semantics run everywhere you do:
+
+- **Python** — a drop-in [Pydantic](https://docs.pydantic.dev) replacement (`BaseModel`, `Field`, 80+ types) backed by a native C extension over SIMD batch validators.
+- **TypeScript** — a drop-in [Zod 4](https://zod.dev) replacement (`z.object`, full API parity) running on a 28KB SIMD WASM module in browsers/edge, or an N-API native addon on Node.js.
+- **Zig** — `comptime`-generated models with zero runtime cost, zero allocations on the happy path.
+
+You keep your existing code and API; dhi swaps in the engine underneath. No schema rewrites, no new mental model.
+
+### Contents
+
+- [Drop-in usage](#you-dont-have-to-change-your-code) — Python, TypeScript, Zig
+- [Benchmarks](#the-numbers) — the numbers, vs Zod 4 and the Python field
+- [Install](#install)
+- [Repo structure](#repo-structure)
+- [Zod 4 feature parity](#full-zod-4-feature-parity)
+- [Pydantic-compatible types](#80-pydantic-compatible-types)
+- [Why is it this fast?](#why-is-it-this-fast)
+- [Run the benchmarks yourself](#run-the-benchmarks-yourself)
+
+---
+
 ## You don't have to change your code.
 
 ### Python — drop-in Pydantic replacement
@@ -308,10 +331,6 @@ MIT
 ---
 
 **dhi** — the fastest validation library for every language you use.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for Rach's Agentic Contribution Template before opening a PR.
 
 ## Contributing
 

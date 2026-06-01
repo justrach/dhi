@@ -290,6 +290,45 @@ static PyObject* py_validate_int_range_batch_direct(PyObject* self, PyObject* ar
     return Py_BuildValue("(Nn)", result_list, valid_count);
 }
 
+// Python wrapper: validate_string_length_batch_direct(strings, min_len, max_len) -> (list[bool], int)
+// Zero-allocation: reads character count straight off each str object (PyUnicode_GET_LENGTH),
+// matching the canonical model path (_native.c string-length check) and the pure-Python
+// fallback's len(s). No UTF-8 encoding pass, no throwaway bytes objects.
+static PyObject* py_validate_string_length_batch_direct(PyObject* self, PyObject* args) {
+    PyObject* strings_list;
+    Py_ssize_t min_len, max_len;
+
+    if (!PyArg_ParseTuple(args, "O!nn", &PyList_Type, &strings_list, &min_len, &max_len)) {
+        return NULL;
+    }
+
+    Py_ssize_t count = PyList_GET_SIZE(strings_list);
+    PyObject* result_list = PyList_New(count);
+    if (!result_list) {
+        return NULL;
+    }
+
+    Py_ssize_t valid_count = 0;
+    for (Py_ssize_t i = 0; i < count; i++) {
+        PyObject* item = PyList_GET_ITEM(strings_list, i);  // borrowed ref
+        Py_ssize_t slen;
+        if (__builtin_expect(PyUnicode_Check(item), 1)) {
+            slen = PyUnicode_GET_LENGTH(item);  // O(1), char count
+        } else {
+            slen = PyObject_Length(item);       // mirrors len(s) for non-str
+            if (slen < 0) { PyErr_Clear(); slen = -1; }
+        }
+        int is_valid = (slen >= 0) && (slen >= min_len) && (slen <= max_len);
+
+        if (is_valid) valid_count++;
+        PyObject* bool_obj = is_valid ? Py_True : Py_False;
+        Py_INCREF(bool_obj);
+        PyList_SET_ITEM(result_list, i, bool_obj);
+    }
+
+    return Py_BuildValue("(Nn)", result_list, valid_count);
+}
+
 // Python wrapper: validate_string_length(str, min_len, max_len) -> bool
 static PyObject* py_validate_string_length(PyObject* self, PyObject* args) {
     const char* str;
@@ -3991,6 +4030,8 @@ static PyMethodDef DhiNativeMethods[] = {
      "Validate integer bounds (value, min, max) -> bool"},
     {"validate_int_range_batch_direct", py_validate_int_range_batch_direct, METH_VARARGS,
      "Validate integer bounds for a list: (values, min, max) -> (list[bool], int)"},
+    {"validate_string_length_batch_direct", py_validate_string_length_batch_direct, METH_VARARGS,
+     "Validate char-length bounds for a list of str: (strings, min_len, max_len) -> (list[bool], int)"},
     {"validate_string_length", py_validate_string_length, METH_VARARGS,
      "Validate string length (str, min_len, max_len) -> bool"},
     {"validate_email", py_validate_email, METH_VARARGS,
