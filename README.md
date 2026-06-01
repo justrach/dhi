@@ -4,7 +4,7 @@
 
 # dhi
 
-**523x faster than Pydantic. 31x faster than msgspec-ext. 20x faster than Zod. Same API.**
+**33M Python batch rows/sec. 461M direct int validations/sec. 13.8x faster than Zod 4 on the TypeScript suite. Same API.**
 
 One validation core. Three ecosystems. Zero compromise.
 
@@ -13,10 +13,33 @@ One validation core. Three ecosystems. Zero compromise.
 [![MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ```
-Python:     24,100,000 validations/sec (523x faster than Pydantic, 31x faster than msgspec-ext)
-TypeScript: 20x faster than Zod 4 (avg), up to 50x on number formats
+Python:     33.2M rows/sec on name+email+age batches; 461M ints/sec direct range batches
+TypeScript: 13.8x faster than Zod 4 on the full suite; URL and IPv4 hot paths are 2.9x/2.4x faster in 1.3.1
 Zig:        Zero-cost. Comptime. No runtime.
 ```
+
+---
+
+## What is dhi?
+
+**dhi** (Sanskrit: *intellect, insight*) is a validation library with a single Zig core compiled to three targets, so the *same* validation rules and error semantics run everywhere you do:
+
+- **Python** — a drop-in [Pydantic](https://docs.pydantic.dev) replacement (`BaseModel`, `Field`, 80+ types) backed by a native C extension over SIMD batch validators.
+- **TypeScript** — a drop-in [Zod 4](https://zod.dev) replacement (`z.object`, full API parity) running on a 28KB SIMD WASM module in browsers/edge, or an N-API native addon on Node.js.
+- **Zig** — `comptime`-generated models with zero runtime cost, zero allocations on the happy path.
+
+You keep your existing code and API; dhi swaps in the engine underneath. No schema rewrites, no new mental model.
+
+### Contents
+
+- [Drop-in usage](#you-dont-have-to-change-your-code) — Python, TypeScript, Zig
+- [Benchmarks](#the-numbers) — the numbers, vs Zod 4 and the Python field
+- [Install](#install)
+- [Repo structure](#repo-structure)
+- [Zod 4 feature parity](#full-zod-4-feature-parity)
+- [Pydantic-compatible types](#80-pydantic-compatible-types)
+- [Why is it this fast?](#why-is-it-this-fast)
+- [Run the benchmarks yourself](#run-the-benchmarks-yourself)
 
 ---
 
@@ -53,7 +76,7 @@ const User = z.object({
   createdAt: z.iso.datetime(),   // Zod 4 ISO namespace
 });
 
-const user = User.parse(data); // same API, 20x faster
+const user = User.parse(data); // same API, 13.8x faster on the benchmark suite
 ```
 
 **Two backends — same API:**
@@ -97,6 +120,9 @@ const user = try User.parse(.{
 
 | Category | Speedup vs Zod 4 |
 |----------|------------------|
+| Overall benchmark suite | **13.8x faster** |
+| URL validator | **30.17M/s** — **8.0x vs Zod**; **2.9x faster than pre-1.3.1** |
+| IPv4 validator | **22.28M/s** — **1.1x vs Zod**; **2.4x faster than pre-1.3.1** |
 | Number Formats | **30-50x faster** |
 | StringBool | **32x faster** |
 | Coercion | **23-56x faster** |
@@ -105,17 +131,19 @@ const user = try User.parse(.{
 | Objects | **4-7x faster** |
 | Arrays | **8x faster** |
 
-> Benchmarks auto-generated via CI. See [raw data](docs/benchmarks/benchmark-results.json).
+> Release 1.3.1 benchmark command: `bun run benchmarks/benchmark-vs-all.ts`. Pre-1.3.1 comparison used the previous release-branch commit before the TypeScript fast paths.
 
 ### Python
 
-| Library | Throughput | vs dhi |
-|---------|------------|--------|
-| **dhi** | **24.1M/sec** | — |
-| msgspec (C) | 5.8M/sec | 4.2x slower |
-| satya (Rust + PyO3) | 2.1M/sec | 11.5x slower |
-| msgspec-ext (msgspec + validators) | 777K/sec | 31x slower |
-| Pydantic v2 | 46K/sec | **523x slower** |
+| Workload | Throughput | Improvement |
+|----------|------------|-------------|
+| `name+email+age` batch | **33.18M rows/sec** | **~28% faster** than the earlier 26M rows/sec baseline |
+| `name+email+age+url` batch | **25.35M rows/sec** | **~27% faster** than the earlier 20M rows/sec baseline |
+| `name+email+age+url+uuid` batch | **20.51M rows/sec** | **~28% faster** than the earlier 16M rows/sec baseline |
+| `all 6 (+ ipv4)` batch | **16.13M rows/sec** | **~47% faster** than the earlier 11M rows/sec baseline |
+| UUID-only batch | **112.78M rows/sec** | Vectorized UUID hot path |
+| IPv4-only batch | **68.98M rows/sec** | C-inlined IPv4 hot path |
+| Direct int range list | **461.19M ints/sec** | New native list batch path |
 
 BaseModel layer: 546K model_validate/sec | 6.4M model_dump/sec
 
@@ -148,7 +176,7 @@ docs/             → Benchmark charts, shared docs
 
 **Which package should I use?**
 - **TypeScript/JS**: `npm install dhi` — replaces Zod, works in browsers + edge + Node.js
-- **Python**: `pip install dhi` — replaces Pydantic, 523x faster validation
+- **Python**: `pip install dhi` — replaces Pydantic-style validation with 33M+ row/sec native batches
 - **Zig**: Import `src/` directly — zero-cost comptime validation
 
 ## Full Zod 4 Feature Parity
@@ -303,10 +331,6 @@ MIT
 ---
 
 **dhi** — the fastest validation library for every language you use.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for Rach's Agentic Contribution Template before opening a PR.
 
 ## Contributing
 

@@ -14,7 +14,7 @@ import type {
   ExtractedSchema,
   HttpMethod,
   SchemaType,
-} from './types';
+} from './types.js';
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 

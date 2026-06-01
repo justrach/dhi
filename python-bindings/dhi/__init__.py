@@ -17,7 +17,7 @@ Example:
     user = User(name="Alice", age=25, email="alice@example.com")
 """
 
-__version__ = "1.1.21"
+__version__ = "1.3.4"
 __author__ = "Rach Pradhan"
 
 # --- Core validators (original API) ---
@@ -71,6 +71,9 @@ from .model import BaseModel
 
 # --- Struct (high-performance, msgspec-like) ---
 from .struct import Struct, Decoder
+
+# --- JSON Schema import (define-once / cross-language, Issue #55) ---
+from .schema_import import from_json_schema, load_schema
 
 # --- Network types ---
 from .networks import (
@@ -154,6 +157,9 @@ __all__ = [
 
     # Struct (high-performance)
     "Struct", "Decoder",
+
+    # JSON Schema import (Issue #55)
+    "from_json_schema", "load_schema",
 
     # Network types
     "EmailStr", "NameEmail",

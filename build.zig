@@ -69,14 +69,34 @@ pub fn build(b: *std.Build) void {
     wasm_lib.rdynamic = true;
     b.installArtifact(wasm_lib);
 
+    // validators_comprehensive module (shared between Envoy, N-API, and benchmarks)
+    const validators_comprehensive_mod = b.addModule("validators_comprehensive", .{
+        .root_source_file = b.path("src/validators_comprehensive.zig"),
+    });
+
+    // Build WASM for Envoy proxy middleware
+    const envoy_wasm = b.addExecutable(.{
+        .name = "dhi-envoy",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/envoy_wasm_filter.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+            }),
+            .optimize = optimize,
+        }),
+    });
+    envoy_wasm.entry = .disabled;
+    envoy_wasm.rdynamic = true;
+    envoy_wasm.root_module.addImport("validators_comprehensive", validators_comprehensive_mod);
+    const install_envoy_wasm = b.addInstallArtifact(envoy_wasm, .{});
+    const envoy_step = b.step("envoy", "Build Envoy WASM filter");
+    envoy_step.dependOn(&install_envoy_wasm.step);
+
     // Build N-API native addon for Node.js
     const node_include = b.option([]const u8, "node_include", "Path to Node.js include directory for N-API") orelse "";
 
     if (node_include.len > 0) {
-        const validators_comprehensive_mod = b.addModule("validators_comprehensive", .{
-            .root_source_file = b.path("src/validators_comprehensive.zig"),
-        });
-
         const napi_lib = b.addLibrary(.{
             .name = "dhi_native",
             .root_module = b.createModule(.{
@@ -244,6 +264,24 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_model_tests.step);
     test_step.dependOn(&run_simd_json_tests.step);
 
+    // Additional modules for comprehensive benchmarks
+    const batch_validator_mod = b.addModule("batch_validator", .{
+        .root_source_file = b.path("src/batch_validator.zig"),
+    });
+
+    const simd_string_mod = b.addModule("simd_string", .{
+        .root_source_file = b.path("src/simd_string.zig"),
+    });
+
+    const simd_validators_mod = b.addModule("simd_validators", .{
+        .root_source_file = b.path("src/simd_validators.zig"),
+    });
+
+    const ultra_validator_mod = b.addModule("ultra_validator", .{
+        .root_source_file = b.path("src/ultra_validator.zig"),
+    });
+    ultra_validator_mod.addImport("simd_validators", simd_validators_mod);
+
     // Benchmark executable
     const benchmark = b.addExecutable(.{
         .name = "benchmark",
@@ -256,6 +294,12 @@ pub fn build(b: *std.Build) void {
     benchmark.root_module.addImport("validator", validator_mod);
     benchmark.root_module.addImport("combinators", combinators_mod);
     benchmark.root_module.addImport("json_validator", json_validator_mod);
+    benchmark.root_module.addImport("batch_validator", batch_validator_mod);
+    benchmark.root_module.addImport("simd_string", simd_string_mod);
+    benchmark.root_module.addImport("simd_validators", simd_validators_mod);
+    benchmark.root_module.addImport("ultra_validator", ultra_validator_mod);
+    benchmark.root_module.addImport("validators_comprehensive", validators_comprehensive_mod);
+    benchmark.root_module.addImport("model", model_mod);
 
     const run_benchmark = b.addRunArtifact(benchmark);
     const bench_step = b.step("bench", "Run performance benchmarks");

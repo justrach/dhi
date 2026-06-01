@@ -16,6 +16,8 @@
  *   const sdk = generator.generate();
  */
 
-export { RouteExtractor } from './extractor';
-export { SDKGenerator } from './generator';
-export * from './types';
+export { RouteExtractor } from './extractor.js';
+export { SDKGenerator } from './generator.js';
+export { generateEnvoyFromOpenApi, parseOpenApiDocument } from './envoy.js';
+export type { EnvoyGenerateOptions, EnvoyGenerationResult } from './envoy.js';
+export * from './types.js';

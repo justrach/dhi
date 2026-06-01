@@ -8,7 +8,7 @@ on:
 
 jobs:
   build_zig_library:
-    name: Build Zig Library (${{ matrix.arch }})
+    name: Build Zig Library (${{ matrix.artifact }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -16,15 +16,27 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             target: x86_64-linux-gnu
+            artifact: zig-lib-linux-x86_64
           - os: ubuntu-latest
             arch: aarch64
             target: aarch64-linux-gnu
+            artifact: zig-lib-linux-aarch64
           - os: macos-latest
             arch: arm64
             target: aarch64-macos-none
+            artifact: zig-lib-macos-arm64
+          # x86_64 macOS dylib is CROSS-COMPILED on the arm64 runner (Zig targets
+          # any OS/arch from any host). This deliberately avoids the deprecated,
+          # scarce macos-13 Intel runner gating the whole Zig matrix — which in
+          # turn gates every build_wheels job. Verified locally: arm64 host +
+          # -Dtarget=x86_64-macos-none -> valid x86_64 Mach-O dylib.
+          - os: macos-latest
+            arch: x86_64
+            target: x86_64-macos-none
+            artifact: zig-lib-macos-x86_64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Zig 0.16.0
         shell: bash
@@ -46,7 +58,7 @@ jobs:
       - name: Upload Zig library artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zig-lib-${{ matrix.arch }}
+          name: ${{ matrix.artifact }}
           path: |
             zig-out/lib/libdhi.*
             zig-out/lib/dhi.*
@@ -57,23 +69,28 @@ jobs:
     needs: build_zig_library
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             arch: x86_64
-            zig-artifact: zig-lib-x86_64
+            zig-artifact: zig-lib-linux-x86_64
             cibw-archs: x86_64
           - os: ubuntu-latest
             arch: aarch64
-            zig-artifact: zig-lib-aarch64
+            zig-artifact: zig-lib-linux-aarch64
             cibw-archs: aarch64
           - os: macos-latest
             arch: arm64
-            zig-artifact: zig-lib-arm64
+            zig-artifact: zig-lib-macos-arm64
             cibw-archs: arm64
+          - os: macos-13
+            arch: x86_64
+            zig-artifact: zig-lib-macos-x86_64
+            cibw-archs: x86_64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up QEMU
         if: matrix.arch == 'aarch64'
@@ -94,16 +111,37 @@ jobs:
           file zig-out/lib/libdhi.* || true
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21.3
+        uses: pypa/cibuildwheel@v3.4.1
         env:
-          CIBW_BUILD: cp39-* cp310-* cp311-* cp312-* cp313-* cp313t-* cp314-*
+          CIBW_BUILD: cp39-* cp310-* cp311-* cp312-* cp313-* cp313t-* cp314-* cp314t-*
           CIBW_SKIP: "*-musllinux_* *-manylinux_i686 *-win32"
           CIBW_ARCHS: ${{ matrix.cibw-archs }}
+          # Build free-threaded wheels. cibuildwheel 3.x enables CPython 3.14
+          # free-threading (cp314t) by default, but 3.13 free-threading (cp313t)
+          # is still experimental and must be opted into here — without this,
+          # cp313t wheels are silently dropped (v1.3.3 shipped them on PyPI).
+          # Note: cibuildwheel 3.4.1 warns that the `cpython-freethreading` enable
+          # value is itself being phased out as free-threading goes default — but
+          # in this pinned version it is STILL required to emit cp313t. Drop it only
+          # once cibuildwheel selects cp313t by default. (The old 2.x flag was
+          # CIBW_FREE_THREADED_SUPPORT, which is correctly absent.)
+          CIBW_ENABLE: cpython-freethreading
           CIBW_BEFORE_BUILD: |
-            pip install setuptools wheel
+            pip install "setuptools>=77.0.0" wheel "packaging>=24.2"
+          # Test gate: install each built wheel and run the full test suite against
+          # it, per Python version, BEFORE anything is published — this is what
+          # stops a broken wheel from ever reaching PyPI.
+          # NOTE: use {package} (the package-dir, ./python-bindings), NOT {project}
+          # (the repo root) — the tests live in python-bindings/tests, so {project}/tests
+          # resolves to a nonexistent dir and pytest exits 4 (no tests collected),
+          # failing every build.
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: python -m pytest {package}/tests -q
+          # Skip the test run only on emulated aarch64 wheels (pytest under QEMU is
+          # extremely slow); the wheels are still built and shipped.
+          CIBW_TEST_SKIP: "*-manylinux_aarch64 *-musllinux_aarch64"
           CIBW_BUILD_VERBOSITY: 1
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.0
-          CIBW_FREE_THREADED_SUPPORT: 1
         with:
           package-dir: ./python-bindings
           output-dir: wheelhouse
@@ -119,7 +157,7 @@ jobs:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build sdist
         run: |

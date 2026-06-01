@@ -15,7 +15,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Zig 0.16.0
         shell: bash
@@ -38,11 +38,15 @@ jobs:
         run: zig build test
 
   python-test:
-    name: Python Tests
+    name: Python Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14', '3.14t']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Zig 0.16.0
         shell: bash
@@ -54,10 +58,10 @@ jobs:
       - name: Build Zig library
         run: zig build -Doptimize=ReleaseFast
 
-      - name: Setup Python
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -75,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -93,3 +97,7 @@ jobs:
       - name: Run feature tests
         working-directory: js-bindings
         run: bun run tests/test-all-features.ts
+
+      - name: Run Standard Schema + JSON Schema import tests
+        working-directory: js-bindings
+        run: bun run tests/test-standard-schema-and-jsonschema.ts

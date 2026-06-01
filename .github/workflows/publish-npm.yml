@@ -18,7 +18,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -60,6 +60,10 @@ jobs:
       - name: Run N-API tests
         working-directory: js-bindings
         run: bun run tests/test-napi-compat.ts
+
+      - name: Run Standard Schema + JSON Schema import tests
+        working-directory: js-bindings
+        run: bun run tests/test-standard-schema-and-jsonschema.ts
 
       - name: Verify WASM exists
         run: |

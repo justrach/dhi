@@ -4,10 +4,10 @@
 
 ## 🚀 Performance
 
-**24 million validations/sec** - 4x faster than msgspec (C), 31x faster than msgspec-ext, 523x faster than Pydantic
+**33.18M rows/sec** on `name+email+age` batches, **16.13M rows/sec** on six-field batches, and **461.19M ints/sec** on the direct integer-list batch path.
 
 ```python
-# Validate 10,000 users in 0.36ms
+# Validate 10,000 users in about 0.30ms
 from dhi import _dhi_native
 
 users = [{"name": "Alice", "email": "alice@example.com", "age": 25}, ...]
@@ -19,12 +19,12 @@ field_specs = {
 }
 
 results, valid_count = _dhi_native.validate_batch_direct(users, field_specs)
-# 24M users/sec! 🔥
+# 33M rows/sec on name+email+age batches
 ```
 
 ## ✨ Features
 
-- **⚡ Fastest**: 4x faster than msgspec (C), 31x faster than msgspec-ext, 523x faster than Pydantic
+- **⚡ Fastest**: 33.18M rows/sec on `name+email+age`, 25.35M rows/sec with URL checks, and 461.19M ints/sec for direct integer-list validation
 - **🎯 24+ Validators**: Email, URL, UUID, IPv4, dates, numbers, strings
 - **🔋 Zero Python Overhead**: C extension extracts directly from dicts
 - **🌍 General Purpose**: Works with any dict structure
@@ -63,14 +63,16 @@ print(f"Valid: {valid_count}/{len(users)}")
 
 ## 🏆 Benchmarks
 
-10,000 users validated with email, URL, and positive-int checks:
+Release 1.3.1 native batch results on 10,000-row batches:
 
 ```
-dhi (Zig+C):      24M users/sec  🥇
-msgspec (C):       5.8M users/sec  (4.2x slower)
-satya (Rust):      2.1M users/sec  (11.5x slower)
-msgspec-ext:       777K users/sec  (31x slower)
-Pydantic V2:        46K users/sec  (523x slower)
+name+email+age:             33.18M rows/sec  (~28% faster than the earlier 26M baseline)
+name+email+age+url:         25.35M rows/sec  (~27% faster than the earlier 20M baseline)
+name+email+age+url+uuid:    20.51M rows/sec  (~28% faster than the earlier 16M baseline)
+all 6 (+ ipv4):             16.13M rows/sec  (~47% faster than the earlier 11M baseline)
+uuid only:                 112.78M rows/sec
+ipv4 only:                  68.98M rows/sec
+direct int range list:     461.19M ints/sec
 ```
 
 ## 📝 License

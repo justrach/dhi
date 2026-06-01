@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  envoy:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - httpbin
+
+  httpbin:
+    image: kennethreitz/httpbin
+    ports:
+      - "8001:80"

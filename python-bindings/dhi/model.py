@@ -237,16 +237,37 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
     if type_origin in (list, set, frozenset) and type_args:
         item_type = type_args[0]
 
-    # Handle Optional[T] = Union[T, None] - extract T if it's a BaseModel
+    # Handle Optional[T] = Union[T, None].
+    # For a *single-type* Optional (exactly one non-None member) we validate the
+    # value against the inner type and allow None. Multi-member unions
+    # (e.g. Union[int, str]) keep pass-through behavior. (Issue #56: the pure-
+    # Python fallback previously left ``check_type`` as the Union object, so
+    # Optional fields received NO type checking and accepted int/bool/list.)
     optional_model = None
+    allow_none = False
     if type_origin is Union:
         non_none_args = [a for a in type_args if a is not type(None)]
+        allow_none = len(non_none_args) != len(type_args)
         if len(non_none_args) == 1:
             inner_type = non_none_args[0]
             if _is_basemodel_subclass(inner_type):
                 optional_model = inner_type
+            else:
+                inner_origin = get_origin(inner_type)
+                if inner_origin is None and isinstance(inner_type, type):
+                    # Optional[scalar] -> validate against the scalar type
+                    check_type = inner_type
+                elif inner_origin in (list, set, frozenset):
+                    check_type = inner_origin
+                    inner_args = get_args(inner_type)
+                    if inner_args:
+                        item_type = inner_args[0]
 
     def validator(value: Any) -> Any:
+        # None handling for Optional[T] (Union[..., None]) — accept None and
+        # skip all further type/constraint checks. (Issue #56)
+        if value is None and allow_none:
+            return None
         # Type checking
         if strict:
             if type(value) is not check_type:
@@ -258,6 +279,14 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
             # Coerce compatible types
             if check_type in (int, float) and not isinstance(value, check_type):
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    # Issue #57: a fractional float must NOT be silently truncated
+                    # to int. Whole-valued floats (5.0 -> 5) are still accepted.
+                    if check_type is int and isinstance(value, float):
+                        if not math.isfinite(value) or not value.is_integer():
+                            raise ValidationError(
+                                field_name,
+                                f"Expected int, got float with fractional part: {value}"
+                            )
                     try:
                         value = check_type(value)
                     except (ValueError, TypeError, OverflowError):
@@ -465,6 +494,7 @@ def _build_validator(field_name: str, base_type: Type, constraints: List[Any], c
         and decimal_places is None
         and not unique_items
         and nested_model is None
+        and not allow_none  # Optional[T]: None handling stays in Python (Issue #56)
         and check_type in _TYPE_CODES
     )
 
@@ -523,6 +553,14 @@ def _resolve_hints(cls) -> dict:
 
     Passes the module's global namespace and includes the class itself
     in localns so self-referencing models work.
+
+    Robustness (Issue #56): with ``from __future__ import annotations`` (PEP 563)
+    every annotation is a string, so a *single* unresolvable name made
+    ``get_type_hints`` raise for the whole class. The previous behavior swallowed
+    that into an empty dict, which silently disabled ALL validation for the model
+    (missing/invalid required fields were accepted with no error). We now fall
+    back to resolving annotations field-by-field so good fields still validate,
+    and we warn (never silently no-op) about the ones that truly can't resolve.
     """
     # Build namespace: module globals + the class itself for self-references
     module = sys.modules.get(cls.__module__, None)
@@ -532,9 +570,38 @@ def _resolve_hints(cls) -> dict:
     try:
         return get_type_hints(cls, globalns=globalns, localns=localns, include_extras=True)
     except Exception:
-        # Forward references that can't be resolved yet (e.g., mutually recursive types)
-        # Return empty dict; user should call model_rebuild() after all types are defined
-        return {}
+        # Whole-class resolution failed — almost always one bad/forward annotation
+        # under PEP 563. Resolve each annotation independently so the rest of the
+        # model is still validated. Walk the MRO base-first so subclass
+        # annotations override inherited ones, matching get_type_hints().
+        raw_hints: dict = {}
+        for klass in reversed(cls.__mro__):
+            raw_hints.update(getattr(klass, '__annotations__', {}))
+
+        resolved: dict = {}
+        unresolved: list = []
+        for name, ann in raw_hints.items():
+            if isinstance(ann, str):
+                try:
+                    # Mirror get_type_hints: evaluate the stringized annotation in
+                    # the class's module globals + local namespace.
+                    ann = eval(ann, globalns, localns)  # noqa: S307 - trusted source annotations
+                except Exception:
+                    unresolved.append(name)
+                    continue
+            resolved[name] = ann
+
+        if unresolved:
+            import warnings
+            warnings.warn(
+                f"dhi: could not resolve type annotations for "
+                f"{cls.__module__}.{getattr(cls, '__qualname__', cls.__name__)} "
+                f"field(s) {unresolved!r}; these fields will NOT be validated. "
+                f"Define the referenced types and call model_rebuild() to fix. "
+                f"(dhi never silently disables validation — see issue #56.)",
+                stacklevel=3,
+            )
+        return resolved
 
 
 def _compile_model_fields(cls, hints: dict) -> None:
@@ -756,6 +823,28 @@ def _compile_model_fields(cls, hints: dict) -> None:
     cls.__dhi_use_ultra_fast__ = cls.__dhi_full_native__ and not has_custom
 
 
+# Reference to the generic BaseModel.__init__, marked _dhi_managed once BaseModel
+# is defined. Used by the metaclass to decide when it may safely override __init__.
+_GENERIC_INIT = None
+
+
+def _make_fast_init(_compiled, _extra_mode):
+    """Specialized __init__ for ultra-fast classes that need no post-init.
+
+    Captures the compiled C specs + extra-mode as cell variables so the hot
+    path avoids the generic __init__'s per-call ``type(self)`` plus ~4 class
+    attribute lookups (``__dhi_use_ultra_fast__``/``__dhi_compiled_specs__``/
+    ``__dhi_extra_mode_int__``/``__dhi_needs_post_init__``). Mirrors the JS
+    EMPTY_PATH win: same result, less per-call overhead. Measured ~+17%.
+    """
+    def __init__(self, **kwargs):
+        result = _dhi_native.init_model_full(self, kwargs, _compiled, _extra_mode)
+        if result is not None:
+            raise ValidationErrors([ValidationError(f, m) for f, m in result])
+    __init__._dhi_managed = True
+    return __init__
+
+
 class _ModelMeta(type):
     """Metaclass for BaseModel that compiles validators at class creation."""
 
@@ -820,6 +909,20 @@ class _ModelMeta(type):
 
         # Combined flag: needs any post-init processing (private attrs or post_init override)
         cls.__dhi_needs_post_init__ = bool(private_attrs) or has_post_init
+
+        # Install a specialized fast __init__ when it is safe to do so. We only
+        # touch __init__ if the class doesn't define its own AND the __init__ it
+        # would otherwise inherit is dhi-managed (never override a user's custom
+        # __init__ defined on this class or any ancestor).
+        if '__init__' not in namespace and getattr(cls.__init__, '_dhi_managed', False):
+            if cls.__dhi_use_ultra_fast__ and not cls.__dhi_needs_post_init__:
+                # Hot path: capture specs in a closure, skip per-call lookups.
+                cls.__init__ = _make_fast_init(
+                    cls.__dhi_compiled_specs__, cls.__dhi_extra_mode_int__)
+            elif _GENERIC_INIT is not None:
+                # Pin the generic init so we don't inherit a parent's specialized
+                # __init__ (which captured the parent's specs, not ours).
+                cls.__init__ = _GENERIC_INIT
 
         return cls
 
@@ -1813,5 +1916,11 @@ class BaseModel(metaclass=_ModelMeta):
         param_names = ', '.join(p.__name__ if hasattr(p, '__name__') else str(p) for p in params)
         return f'{cls.__name__}[{param_names}]'
 
+
+# Capture the generic BaseModel.__init__ so the metaclass can (a) recognize it as
+# dhi-managed (safe to override) and (b) pin it on classes that don't qualify for
+# the specialized fast init. Must run after BaseModel is fully defined.
+_GENERIC_INIT = BaseModel.__init__
+_GENERIC_INIT._dhi_managed = True
 
 __all__ = ["BaseModel", "IncEx"]

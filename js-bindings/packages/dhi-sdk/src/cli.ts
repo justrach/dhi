@@ -11,11 +11,12 @@
 
 import { Command } from 'commander';
 import { resolve, dirname, join } from 'path';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { RouteExtractor } from './extractor';
-import { SDKGenerator } from './generator';
-import type { GenerateOptions } from './types';
+import { RouteExtractor } from './extractor.js';
+import { SDKGenerator } from './generator.js';
+import { generateEnvoyFromOpenApi, parseOpenApiDocument, type EnvoyGenerateOptions } from './envoy.js';
+import type { GenerateOptions } from './types.js';
 
 const program = new Command();
 
@@ -46,6 +47,42 @@ program
       process.exit(1);
     }
   });
+
+program
+  .command('envoy')
+  .description('Generate Envoy WASM validation config from an OpenAPI spec')
+  .argument('<openapi>', 'Path to OpenAPI JSON or YAML file')
+  .option('-o, --output <file>', 'Output file (defaults to stdout)')
+  .option('--mode <mode>', 'Output mode: rules, filter, or full', 'filter')
+  .option('--wasm-path <path>', 'Path to dhi-envoy.wasm inside Envoy', '/etc/envoy/dhi-envoy.wasm')
+  .option('--cluster-name <name>', 'Upstream cluster name for --mode full', 'api_service')
+  .option('--upstream-host <host>', 'Upstream host for --mode full', 'api')
+  .option('--upstream-port <port>', 'Upstream port for --mode full', '8080')
+  .option('--listen-port <port>', 'Listener port for --mode full', '8000')
+  .option('--dns-lookup-family <family>', 'Envoy STRICT_DNS lookup family: AUTO, V4_ONLY, or V6_ONLY', 'V4_ONLY')
+  .option('--fail-open', 'Let Envoy continue traffic if the Proxy-Wasm plugin fails')
+  .action(async (input: string, opts) => {
+    try {
+      await generateEnvoyConfig(resolve(input), {
+        output: opts.output ? resolve(opts.output) : undefined,
+        mode: parseEnvoyMode(opts.mode),
+        wasmPath: opts.wasmPath,
+        clusterName: opts.clusterName,
+        upstreamHost: opts.upstreamHost,
+        upstreamPort: parsePort(opts.upstreamPort, 'upstream-port'),
+        listenPort: parsePort(opts.listenPort, 'listen-port'),
+        dnsLookupFamily: parseDnsLookupFamily(opts.dnsLookupFamily),
+        failOpen: opts.failOpen === true,
+      });
+    } catch (error) {
+      console.error('Error:', (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+interface EnvoyCliOptions extends EnvoyGenerateOptions {
+  output?: string;
+}
 
 async function generateSDK(options: GenerateOptions) {
   console.log('');
@@ -121,6 +158,53 @@ async function generateSDK(options: GenerateOptions) {
   console.log('    // Fully typed!');
   console.log('    const result = await api.users.create({ name: \'Alice\' });');
   console.log('');
+}
+
+async function generateEnvoyConfig(input: string, options: EnvoyCliOptions) {
+  if (!existsSync(input)) {
+    throw new Error(`OpenAPI file not found: ${input}`);
+  }
+
+  const source = await readFile(input, 'utf8');
+  const spec = parseOpenApiDocument(source, input);
+  const result = generateEnvoyFromOpenApi(spec, options);
+
+  if (result.routeCount === 0) {
+    throw new Error('No JSON request body schemas were found in the OpenAPI spec');
+  }
+
+  if (options.output) {
+    await mkdir(dirname(options.output), { recursive: true });
+    await writeFile(options.output, result.output);
+    console.log(`Generated Envoy ${options.mode ?? 'filter'} config for ${result.routeCount} routes: ${options.output}`);
+  } else {
+    console.log(result.output);
+  }
+
+  if (result.warnings.length > 0) {
+    console.warn('Warnings:');
+    for (const warning of result.warnings) {
+      console.warn(`  - ${warning}`);
+    }
+  }
+}
+
+function parseEnvoyMode(mode: string): EnvoyGenerateOptions['mode'] {
+  if (mode === 'rules' || mode === 'filter' || mode === 'full') return mode;
+  throw new Error(`Invalid --mode '${mode}'. Expected one of: rules, filter, full`);
+}
+
+function parsePort(value: string, name: string): number {
+  const port = Number.parseInt(value, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid --${name} '${value}'`);
+  }
+  return port;
+}
+
+function parseDnsLookupFamily(value: string): EnvoyGenerateOptions['dnsLookupFamily'] {
+  if (value === 'AUTO' || value === 'V4_ONLY' || value === 'V6_ONLY') return value;
+  throw new Error(`Invalid --dns-lookup-family '${value}'. Expected one of: AUTO, V4_ONLY, V6_ONLY`);
 }
 
 // Run CLI

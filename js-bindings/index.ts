@@ -17,6 +17,8 @@ export {
   type output,
   ZodError,
   DhiType,
+  fromJsonSchema,
+  type FromJsonSchemaOptions,
 } from "./schema.js";
 
 // Re-export z as default for compatibility

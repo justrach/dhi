@@ -68,11 +68,20 @@ for (let i = 97; i <= 122; i++) EMAIL_DOMAIN[i] = 1; // a-z
 for (let i = 48; i <= 57; i++) EMAIL_DOMAIN[i] = 1;  // 0-9
 EMAIL_DOMAIN[46] = 1; EMAIL_DOMAIN[45] = 1; // . -
 
-// UUID regex compiled once → V8 Irregexp JITs this to native code
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function fastValidateUuid(s: string): boolean {
-  return s.length === 36 && UUID_RE.test(s);
+  // Branchless hex scan beats V8 regex for this fixed 8-4-4-4-12 layout
+  // (~50M/s vs ~36M/s isolated). HEX_CHARS lookup; high bytes rejected via c>>7.
+  if (s.length !== 36) return false;
+  if (s.charCodeAt(8) !== 45 || s.charCodeAt(13) !== 45 ||
+      s.charCodeAt(18) !== 45 || s.charCodeAt(23) !== 45) return false;
+  let bad = 0;
+  for (let i = 0; i < 8; i++)   { const c = s.charCodeAt(i);  bad |= (c >> 7) | (1 - HEX_CHARS[c & 127]); }
+  for (let i = 9; i < 13; i++)  { const c = s.charCodeAt(i);  bad |= (c >> 7) | (1 - HEX_CHARS[c & 127]); }
+  for (let i = 14; i < 18; i++) { const c = s.charCodeAt(i);  bad |= (c >> 7) | (1 - HEX_CHARS[c & 127]); }
+  for (let i = 19; i < 23; i++) { const c = s.charCodeAt(i);  bad |= (c >> 7) | (1 - HEX_CHARS[c & 127]); }
+  for (let i = 24; i < 36; i++) { const c = s.charCodeAt(i);  bad |= (c >> 7) | (1 - HEX_CHARS[c & 127]); }
+  return bad === 0;
 }
 
 function fastValidateBase64(s: string): boolean {
@@ -110,23 +119,70 @@ function fastValidateDate(s: string): boolean {
 }
 
 function fastValidateEmail(s: string): boolean {
-  if (s.length < 3 || s.length > 320) return false;
+  const len = s.length;
+  if (len < 3 || len > 320) return false;
   const atIdx = s.indexOf('@');
-  if (atIdx < 1 || atIdx > s.length - 3) return false;
-  // Validate local part
+  if (atIdx < 1 || atIdx > len - 3) return false;
+
   for (let i = 0; i < atIdx; i++) {
     const c = s.charCodeAt(i);
     if (c > 127 || !EMAIL_LOCAL[c]) return false;
   }
-  // Validate domain part
-  const domain = s.substring(atIdx + 1);
-  if (domain.indexOf('.') === -1) return false;
-  if (domain.charCodeAt(0) === 45 || domain.charCodeAt(domain.length - 1) === 45) return false;
-  for (let i = 0; i < domain.length; i++) {
-    const c = domain.charCodeAt(i);
+
+  const domainStart = atIdx + 1;
+  if (s.indexOf('.', domainStart) === -1) return false;
+  if (s.charCodeAt(domainStart) === 45 || s.charCodeAt(len - 1) === 45) return false;
+  for (let i = domainStart; i < len; i++) {
+    const c = s.charCodeAt(i);
     if (c > 127 || !EMAIL_DOMAIN[c]) return false;
   }
   return true;
+}
+
+function fastValidateUrl(s: string): boolean {
+  const len = s.length;
+  let start: number;
+  if (len >= 10 && s.charCodeAt(0) === 104 && s.charCodeAt(1) === 116 &&
+      s.charCodeAt(2) === 116 && s.charCodeAt(3) === 112) {
+    if (s.charCodeAt(4) === 115 && s.charCodeAt(5) === 58 &&
+        s.charCodeAt(6) === 47 && s.charCodeAt(7) === 47) {
+      start = 8;
+    } else if (s.charCodeAt(4) === 58 && s.charCodeAt(5) === 47 &&
+               s.charCodeAt(6) === 47) {
+      start = 7;
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  if (len - start < 3) return false;
+  return s.indexOf('.', start) !== -1;
+}
+
+function fastValidateIpv4(s: string): boolean {
+  const len = s.length;
+  if (len < 7 || len > 15) return false;
+
+  let parts = 0;
+  let current = 0;
+  let digits = 0;
+
+  for (let i = 0; i < len; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 48 && c <= 57) {
+      current = current * 10 + c - 48;
+      if (++digits > 3 || current > 255) return false;
+    } else if (c === 46) {
+      if (digits === 0 || ++parts > 3) return false;
+      current = 0;
+      digits = 0;
+    } else {
+      return false;
+    }
+  }
+
+  return parts === 3 && digits > 0 && current <= 255;
 }
 
 // Shared empty path for optimistic (no-error) parsing - avoids allocation
@@ -343,14 +399,28 @@ export abstract class DhiType<Output = any, Input = Output> {
 
   abstract _parse(value: unknown, path: (string | number)[]): SafeParseResult<Output>;
 
+  /**
+   * Cheap, allocation-free validity probe used by unions to reject non-matching
+   * members without building a ZodError per miss. Contract:
+   *   true      -> definitely valid (caller still runs _parse to apply transforms)
+   *   false     -> definitely invalid (skip; no allocation)
+   *   undefined -> can't decide cheaply; caller falls back to _parse
+   * Default is conservative (undefined). Leaf types override for the fast reject.
+   */
+  _fastValid(_value: unknown): boolean | undefined {
+    return undefined;
+  }
+
   parse(value: unknown): Output {
-    const result = this._parse(value, []);
+    // EMPTY_PATH is shared & never mutated (child paths use [...path, key]), so
+    // reusing it avoids a fresh array allocation on every top-level call.
+    const result = this._parse(value, EMPTY_PATH);
     if (!result.success) throw result.error;
     return result.data;
   }
 
   safeParse(value: unknown): SafeParseResult<Output> {
-    return this._parse(value, []);
+    return this._parse(value, EMPTY_PATH);
   }
 
   async parseAsync(value: unknown): Promise<Output> {
@@ -510,6 +580,11 @@ export abstract class DhiType<Output = any, Input = Output> {
 export class DhiString extends DhiType<string, string> {
   private checks: Array<{ type: string; value?: any; message?: string }> = [];
 
+  _fastValid(value: unknown): boolean | undefined {
+    if (typeof value !== 'string') return false;
+    return this.checks.length === 0 ? true : undefined;
+  }
+
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<string> {
     if (typeof value !== 'string') {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected string, received ' + typeof value, expected: 'string', received: typeof value }]) };
@@ -539,7 +614,7 @@ export class DhiString extends DhiType<string, string> {
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid email' }]) };
           break;
         case 'url':
-          if (!wasmValidateString('validate_url_simd', current))
+          if (!fastValidateUrl(current))
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid url' }]) };
           break;
         case 'uuid':
@@ -563,7 +638,7 @@ export class DhiString extends DhiType<string, string> {
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid emoji' }]) };
           break;
         case 'ipv4':
-          if (!wasmValidateString('validate_ipv4_simd', current))
+          if (!fastValidateIpv4(current))
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv4 address' }]) };
           break;
         case 'ipv6':
@@ -572,7 +647,7 @@ export class DhiString extends DhiType<string, string> {
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv6 address' }]) };
           break;
         case 'ip':
-          if (!wasmValidateString('validate_ipv4_simd', current) &&
+          if (!fastValidateIpv4(current) &&
               !/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(current))
             return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IP address' }]) };
           break;
@@ -761,6 +836,11 @@ export class DhiString extends DhiType<string, string> {
 export class DhiNumber extends DhiType<number, number> {
   private checks: Array<{ type: string; value?: any; message?: string }> = [];
 
+  _fastValid(value: unknown): boolean | undefined {
+    if (typeof value !== 'number' || Number.isNaN(value)) return false;
+    return this.checks.length === 0 ? true : undefined;
+  }
+
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<number> {
     if (typeof value !== 'number' || Number.isNaN(value)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected number, received ' + typeof value, expected: 'number', received: typeof value }]) };
@@ -935,6 +1015,8 @@ export class DhiBoolean extends DhiType<boolean, boolean> {
     return { success: true, data: value };
   }
 
+  _fastValid(value: unknown): boolean { return typeof value === 'boolean'; }
+
   protected _toJsonSchemaCore(): Record<string, any> {
     return { type: 'boolean' };
   }
@@ -988,6 +1070,8 @@ export class DhiUndefined extends DhiType<undefined, undefined> {
     }
     return { success: true, data: undefined };
   }
+
+  _fastValid(value: unknown): boolean { return value === undefined; }
 }
 
 export class DhiNull extends DhiType<null, null> {
@@ -997,6 +1081,8 @@ export class DhiNull extends DhiType<null, null> {
     }
     return { success: true, data: null };
   }
+
+  _fastValid(value: unknown): boolean { return value === null; }
 
   protected _toJsonSchemaCore(): Record<string, any> {
     return { type: 'null' };
@@ -1075,6 +1161,8 @@ export class DhiLiteral<T extends string | number | boolean | bigint | null | un
     return { success: true, data: input as T };
   }
 
+  _fastValid(value: unknown): boolean { return this._values.includes(value as T); }
+
   protected _toJsonSchemaCore(): Record<string, any> {
     if (this._values.length === 1) {
       return { const: this._values[0] };
@@ -1104,6 +1192,8 @@ export class DhiEnum<T extends readonly [string, ...string[]]> extends DhiType<T
     }
     return { success: true, data: value as T[number] };
   }
+
+  _fastValid(value: unknown): boolean { return typeof value === 'string' && this._set.has(value); }
 
   extract<U extends T[number]>(values: readonly U[]): DhiEnum<[U, ...U[]]> {
     return new DhiEnum(values as any);
@@ -1239,7 +1329,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
           case 'url': {
             const fname = `_url${idx}`;
             names.push(fname);
-            vars.push((s: string) => wasmValidateString('validate_url_simd', s));
+            vars.push(fastValidateUrl);
             code += `if(!${fname}(${vi}))return null;`;
             break;
           }
@@ -1629,31 +1719,37 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
       return { success: true, data: value as any };
     }
 
-    // General path: full validation with path tracking
-    // Use a reusable child path to avoid spreading on every iteration
+    // General path: full validation with path tracking.
+    // Reuse one child-path array (avoid spreading per element). Allocate the
+    // result array and issues array lazily: most elements don't transform and
+    // most arrays are valid, so the common case returns the input untouched
+    // (matching the primitive fast-paths above, which also return `value`).
     const childPath = path.concat(0 as any);
     const lastIdx = childPath.length - 1;
-    const result: T["_output"][] = new Array(len);
-    const issues: ZodIssue[] = [];
+    let result: T["_output"][] | null = null;
+    let issues: ZodIssue[] | null = null;
 
     for (let i = 0; i < len; i++) {
       childPath[lastIdx] = i;
       const r = elem._parse(value[i], childPath);
       if (!r.success) {
-        // Create a fresh path copy for the error (since childPath is reused)
+        if (!issues) issues = [];
+        // Fresh path copy for the error (childPath is reused/mutated).
         for (const issue of r.error.issues) {
           issues.push({ ...issue, path: [...issue.path] });
         }
-      } else {
+      } else if (r.data !== value[i]) {
+        // A transform changed the element — materialize a result array now.
+        if (!result) result = (value as any[]).slice();
         result[i] = r.data;
       }
     }
 
-    if (issues.length > 0) {
+    if (issues) {
       return { success: false, error: new ZodError(issues) };
     }
 
-    return { success: true, data: result };
+    return { success: true, data: (result || value) as any };
   }
 
   min(length: number, message?: string): this { this.checks.push({ type: 'min', value: length, message }); return this; }
@@ -1845,11 +1941,16 @@ export class DhiUnion<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
   constructor(private options: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<UnionOutput<T>> {
-    const issues: ZodIssue[] = [];
-    for (const option of this.options) {
+    const options = this.options;
+    for (let i = 0; i < options.length; i++) {
+      const option = options[i];
+      // Cheap probe first: a definite-miss is skipped without building a
+      // ZodError (the old code _parse'd every option and spread its issues,
+      // which were then discarded — pure waste). Only confirm/transform when
+      // the probe says yes or "don't know".
+      if (option._fastValid(value) === false) continue;
       const result = option._parse(value, path);
       if (result.success) return result;
-      issues.push(...result.error.issues);
     }
     return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input' }]) };
   }
@@ -2384,6 +2485,193 @@ declare module './schema' {
 }
 
 // ============================================================================
+// JSON Schema import — "define once, hydrate anywhere" (Issue #55, Proposal B)
+// The inverse of `.toJsonSchema()`: build a dhi schema from a JSON Schema doc so
+// a single schema (e.g. a shared `*.schema.json`) can drive both the Python and
+// TS bindings identically. Mirrors the mappings in the `_toJsonSchemaCore()`
+// overrides above.
+// ============================================================================
+
+export interface FromJsonSchemaOptions {
+  /**
+   * Root document used to resolve local `$ref`s (e.g. `#/$defs/Foo`).
+   * Defaults to the schema passed to `fromJsonSchema`.
+   */
+  root?: Record<string, any>;
+}
+
+function _resolveRef(ref: string, root: Record<string, any>): any {
+  if (!ref.startsWith('#')) {
+    throw new Error(`dhi.fromJsonSchema: only local $ref (starting with '#') are supported, got '${ref}'`);
+  }
+  const parts = ref
+    .slice(1)
+    .split('/')
+    .filter(Boolean)
+    .map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  let node: any = root;
+  for (const part of parts) {
+    if (node == null || typeof node !== 'object') {
+      throw new Error(`dhi.fromJsonSchema: could not resolve $ref '${ref}'`);
+    }
+    node = node[part];
+  }
+  if (node === undefined) throw new Error(`dhi.fromJsonSchema: could not resolve $ref '${ref}'`);
+  return node;
+}
+
+function _withMeta(node: any, schema: DhiType<any, any>): DhiType<any, any> {
+  let out = schema;
+  if (typeof node.description === 'string') out = out.describe(node.description);
+  if ('default' in node) out = out.default(node.default);
+  return out;
+}
+
+function _buildString(node: any): DhiType<any, any> {
+  let s = new DhiString();
+  if (typeof node.minLength === 'number') s = s.min(node.minLength);
+  if (typeof node.maxLength === 'number') s = s.max(node.maxLength);
+  if (typeof node.pattern === 'string') s = s.regex(new RegExp(node.pattern));
+  switch (node.format) {
+    case 'email': s = s.email(); break;
+    case 'uri':
+    case 'url': s = s.url(); break;
+    case 'uuid': s = s.uuid(); break;
+    case 'date-time': s = s.datetime(); break;
+    case 'date': s = s.date(); break;
+    case 'time': s = s.time(); break;
+    case 'duration': s = s.duration(); break;
+    case 'ipv4': s = s.ipv4(); break;
+    case 'ipv6': s = s.ipv6(); break;
+  }
+  return s;
+}
+
+function _buildNumber(node: any, isInt: boolean): DhiType<any, any> {
+  let n = new DhiNumber();
+  if (isInt) n = n.int();
+  if (typeof node.minimum === 'number') n = n.min(node.minimum);
+  if (typeof node.maximum === 'number') n = n.max(node.maximum);
+  if (typeof node.exclusiveMinimum === 'number') n = n.gt(node.exclusiveMinimum);
+  if (typeof node.exclusiveMaximum === 'number') n = n.lt(node.exclusiveMaximum);
+  if (typeof node.multipleOf === 'number') n = n.multipleOf(node.multipleOf);
+  return n;
+}
+
+function _buildArray(node: any, root: Record<string, any>, seen: Map<any, DhiType<any, any>>): DhiType<any, any> {
+  const items = node.items && !Array.isArray(node.items)
+    ? _jsonSchemaToDhi(node.items, root, seen)
+    : new DhiAny();
+  let a = new DhiArray(items as any);
+  if (typeof node.minItems === 'number') a = a.min(node.minItems);
+  if (typeof node.maxItems === 'number') a = a.max(node.maxItems);
+  return a;
+}
+
+function _buildObject(node: any, root: Record<string, any>, seen: Map<any, DhiType<any, any>>): DhiType<any, any> {
+  const props = node.properties || {};
+  const required: string[] = Array.isArray(node.required) ? node.required : [];
+  const shape: Record<string, DhiType<any, any>> = {};
+  for (const key of Object.keys(props)) {
+    let field = _jsonSchemaToDhi(props[key], root, seen);
+    if (!required.includes(key)) field = field.optional();
+    shape[key] = field;
+  }
+  let obj = new DhiObject(shape);
+  if (node.additionalProperties === false) obj = obj.strict();
+  return obj;
+}
+
+function _jsonSchemaToDhi(node: any, root: Record<string, any>, seen: Map<any, DhiType<any, any>>): DhiType<any, any> {
+  // Boolean schemas: `true` accepts anything, `false` accepts nothing.
+  if (node === true) return new DhiAny();
+  if (node === false) return new DhiNever();
+  if (node == null || typeof node !== 'object') return new DhiAny();
+
+  // $ref (local only) — guard cycles with a lazy thunk.
+  if (typeof node.$ref === 'string') {
+    const target = _resolveRef(node.$ref, root);
+    if (seen.has(target)) {
+      const cached = seen.get(target)!;
+      return new DhiLazy(() => cached);
+    }
+    return _jsonSchemaToDhi(target, root, seen);
+  }
+
+  // Combinators.
+  const variants = node.anyOf || node.oneOf;
+  if (Array.isArray(variants)) {
+    const opts = variants.map((s: any) => _jsonSchemaToDhi(s, root, seen));
+    const schema = opts.length === 1 ? opts[0] : new DhiUnion(opts as any);
+    return _withMeta(node, schema);
+  }
+  if (Array.isArray(node.allOf)) {
+    const parts = node.allOf.map((s: any) => _jsonSchemaToDhi(s, root, seen));
+    const schema = parts.reduce((acc: DhiType<any, any>, cur: DhiType<any, any>) => new DhiIntersection(acc, cur));
+    return _withMeta(node, schema);
+  }
+
+  // const / enum.
+  if ('const' in node) return _withMeta(node, new DhiLiteral(node.const));
+  if (Array.isArray(node.enum)) {
+    const vals: any[] = node.enum;
+    if (vals.length > 0 && vals.every((v) => typeof v === 'string')) {
+      return _withMeta(node, new DhiEnum(vals as [string, ...string[]]));
+    }
+    const lits = vals.map((v) => new DhiLiteral(v));
+    return _withMeta(node, lits.length === 1 ? lits[0] : new DhiUnion(lits as any));
+  }
+
+  // type — may be an array (e.g. ["string", "null"]) or include OpenAPI nullable.
+  let type = node.type;
+  let nullable = node.nullable === true;
+  if (Array.isArray(type)) {
+    const nonNull = type.filter((t: string) => t !== 'null');
+    if (type.includes('null')) nullable = true;
+    if (nonNull.length === 1) {
+      type = nonNull[0];
+    } else {
+      const opts = nonNull.map((t: string) => _jsonSchemaToDhi({ ...node, type: t, nullable: undefined }, root, seen));
+      let schema: DhiType<any, any> = opts.length === 1 ? opts[0] : new DhiUnion(opts as any);
+      if (nullable) schema = new DhiNullable(schema);
+      return _withMeta(node, schema);
+    }
+  }
+
+  let schema: DhiType<any, any>;
+  switch (type) {
+    case 'string': schema = _buildString(node); break;
+    case 'integer': schema = _buildNumber(node, true); break;
+    case 'number': schema = _buildNumber(node, false); break;
+    case 'boolean': schema = new DhiBoolean(); break;
+    case 'null': schema = new DhiNull(); break;
+    case 'array': schema = _buildArray(node, root, seen); break;
+    case 'object': schema = _buildObject(node, root, seen); break;
+    default:
+      // No explicit type: infer object when shape-like, otherwise accept anything.
+      schema = (node.properties || node.required) ? _buildObject(node, root, seen) : new DhiAny();
+  }
+  if (nullable) schema = new DhiNullable(schema);
+  return _withMeta(node, schema);
+}
+
+/**
+ * Build a dhi schema from a JSON Schema document — the inverse of
+ * `schema.toJsonSchema()`. Supports objects/arrays/strings/numbers/booleans,
+ * enums, const, `anyOf`/`oneOf`/`allOf`, local `$ref` (`#/$defs/...`),
+ * nullable (`type: [..., "null"]` and OpenAPI `nullable: true`), and the same
+ * string/number constraints dhi emits.
+ *
+ * @example
+ *   const Chat = z.fromJsonSchema(chatRequestSchema);
+ *   Chat.parse(await req.json());
+ */
+export function fromJsonSchema(doc: Record<string, any>, options?: FromJsonSchemaOptions): DhiType<any, any> {
+  const root = options?.root ?? doc;
+  return _jsonSchemaToDhi(doc, root, new Map());
+}
+
+// ============================================================================
 // Main Export: z namespace (Zod 4 compatible)
 // ============================================================================
 
@@ -2575,10 +2863,14 @@ export const z = {
       io?: 'input' | 'output';
     }
   ): Record<string, any> => {
-    // For now we generate draft-2020-12 compatible schema
-    // The target param is accepted for API compatibility but doesn't change output yet
+    // For now we generate draft-2020-12 compatible schema.
+    // The target param is accepted for API compatibility but doesn't change output yet.
     return schema.toJsonSchema();
   },
+
+  // Issue #55: JSON Schema import — hydrate a dhi schema from a JSON Schema doc
+  // (the inverse of toJSONSchema, for define-once cross-language schema sharing).
+  fromJsonSchema,
 } as const;
 
 // Type-level utilities
