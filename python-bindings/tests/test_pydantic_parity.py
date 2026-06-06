@@ -376,6 +376,30 @@ class TestBaseModel:
         assert "name" in schema["required"]
         assert "score" not in schema["required"]
 
+    def test_model_json_schema_supports_openapi_ref_template_and_nested_models(self):
+        class Address(BaseModel):
+            city: str
+
+        class User(BaseModel):
+            name: str
+            address: Address
+            tags: List[str] = []
+
+        schema = User.model_json_schema(ref_template="#/components/schemas/{model}")
+        json.dumps(schema)
+
+        assert schema["properties"]["address"] == {
+            "$ref": "#/components/schemas/Address"
+        }
+        assert schema["properties"]["tags"] == {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+        }
+        assert schema["$defs"]["Address"]["properties"]["city"] == {
+            "type": "string"
+        }
+
     def test_model_repr(self):
         class M(BaseModel):
             x: int
