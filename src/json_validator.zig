@@ -8,11 +8,12 @@ const validator = @import("validator");
 ///   const user = try parseAndValidate(User, json_string, allocator);
 pub fn parseAndValidate(comptime T: type, json_str: []const u8, allocator: std.mem.Allocator) !T {
     // Parse JSON to intermediate representation
-    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
-    defer parsed.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), json_str, .{});
 
     // Convert to target type with validation
-    return try fromJsonValue(T, parsed.value, allocator);
+    return try fromJsonValue(T, parsed, allocator);
 }
 
 /// Convert a JSON Value to a typed struct with validation
@@ -48,7 +49,7 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
 
                 // Handle missing fields
                 if (json_value == null) {
-                    if (@typeInfo(field.type) == .@"optional") {
+                    if (@typeInfo(field.type) == .optional) {
                         @field(result, field.name) = null;
                     } else {
                         try errors.add(field.name, "Required field missing");
@@ -68,17 +69,17 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
                         try errors.add(field.name, msg);
                         // Set default values based on type
                         @field(result, field.name) = switch (@typeInfo(field.type)) {
-                            .@"bool" => false,
-                            .@"int" => 0,
-                            .@"float" => 0.0,
-                            .@"pointer" => |ptr_info| blk: {
+                            .bool => false,
+                            .int => 0,
+                            .float => 0.0,
+                            .pointer => |ptr_info| blk: {
                                 if (ptr_info.size == .slice and ptr_info.child == u8) {
                                     break :blk "";
                                 } else {
                                     return error.UnsupportedType;
                                 }
                             },
-                            .@"optional" => null,
+                            .optional => null,
                             else => return error.UnsupportedType,
                         };
                     }
@@ -107,8 +108,8 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
 /// Check if a type is []const u8 (an allocated string slice)
 fn isStringSliceType(comptime T: type) bool {
     const info = @typeInfo(T);
-    if (info == .@"pointer") {
-        const ptr = info.@"pointer";
+    if (info == .pointer) {
+        const ptr = info.pointer;
         return ptr.size == .slice and ptr.child == u8;
     }
     return false;
@@ -119,10 +120,10 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
     const type_info = @typeInfo(T);
 
     return switch (type_info) {
-        .@"bool" => if (value == .bool) value.bool else error.TypeMismatch,
-        .@"int" => if (value == .integer) std.math.cast(T, value.integer) orelse error.IntegerOverflow else error.TypeMismatch,
-        .@"float" => if (value == .float) @as(T, @floatCast(value.float)) else if (value == .integer) @as(T, @floatFromInt(value.integer)) else error.TypeMismatch,
-        .@"pointer" => |ptr_info| {
+        .bool => if (value == .bool) value.bool else error.TypeMismatch,
+        .int => if (value == .integer) std.math.cast(T, value.integer) orelse error.IntegerOverflow else error.TypeMismatch,
+        .float => if (value == .float) @as(T, @floatCast(value.float)) else if (value == .integer) @as(T, @floatFromInt(value.integer)) else error.TypeMismatch,
+        .pointer => |ptr_info| {
             if (ptr_info.size == .slice and ptr_info.child == u8) {
                 if (value == .string) {
                     return try allocator.dupe(u8, value.string);
@@ -131,7 +132,7 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
             }
             return error.UnsupportedType;
         },
-        .@"optional" => |opt_info| {
+        .optional => |opt_info| {
             if (value == .null) return null;
             return try fromJsonValueTyped(opt_info.child, value, allocator);
         },
@@ -142,12 +143,13 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
 /// BatchValidate validates multiple JSON objects from an array.
 /// Validates multiple JSON objects from an array.
 pub fn batchValidate(comptime T: type, json_array: []const u8, allocator: std.mem.Allocator) ![]validator.ValidationResult(T) {
-    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_array, .{});
-    defer parsed.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), json_array, .{});
 
-    if (parsed.value != .array) return error.ExpectedArray;
+    if (parsed != .array) return error.ExpectedArray;
 
-    const items = parsed.value.array.items;
+    const items = parsed.array.items;
     var results = try allocator.alloc(validator.ValidationResult(T), items.len);
 
     for (items, 0..) |item, i| {
@@ -224,7 +226,7 @@ test "parseAndValidate - missing required field" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name": "Bob"}
     ;
 
@@ -238,7 +240,7 @@ test "parseAndValidate - type mismatch" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name": "Carol", "age": "not a number"}
     ;
 
@@ -253,7 +255,7 @@ test "parseAndValidate - with validation conventions" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name_ne": "", "email": "invalid", "age": 27}
     ;
 
