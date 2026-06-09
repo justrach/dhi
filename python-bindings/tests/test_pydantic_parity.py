@@ -400,6 +400,53 @@ class TestBaseModel:
             "type": "string"
         }
 
+    def test_model_json_schema_supports_fixed_tuple_schemas(self):
+        class M(BaseModel):
+            value: tuple[int, str]
+
+        schema = M.model_json_schema()
+
+        assert schema["properties"]["value"] == {
+            "type": "array",
+            "prefixItems": [
+                {"type": "integer"},
+                {"type": "string"},
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+        }
+
+    def test_model_json_schema_marks_set_like_schemas_unique(self):
+        class M(BaseModel):
+            tags: set[str]
+            frozen_tags: frozenset[int]
+
+        schema = M.model_json_schema()
+
+        assert schema["properties"]["tags"] == {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "string"},
+        }
+        assert schema["properties"]["frozen_tags"] == {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "integer"},
+        }
+
+    def test_model_json_schema_resolves_self_reference_defs(self):
+        class Node(BaseModel):
+            value: int
+            child: "Node"
+
+        schema = Node.model_json_schema()
+        json.dumps(schema)
+
+        assert schema["properties"]["child"] == {"$ref": "#/$defs/Node"}
+        assert schema["$defs"]["Node"]["properties"]["child"] == {
+            "$ref": "#/$defs/Node"
+        }
+
     def test_model_repr(self):
         class M(BaseModel):
             x: int

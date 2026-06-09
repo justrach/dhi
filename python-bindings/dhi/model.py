@@ -171,7 +171,8 @@ def _annotation_to_json_schema(
     base_type, constraints = _extract_constraints(annotation)
 
     if _is_basemodel_subclass(base_type):
-        if base_type is not root_model and base_type.__name__ not in definitions:
+        if base_type.__name__ not in definitions:
+            definitions[base_type.__name__] = {}
             definitions[base_type.__name__] = _model_to_json_schema(
                 base_type,
                 definitions=definitions,
@@ -186,6 +187,25 @@ def _annotation_to_json_schema(
 
     if origin in (list, List, set, Set, frozenset, FrozenSet, tuple, Tuple):
         schema: Dict[str, Any] = {"type": "array"}
+
+        if origin in (set, Set, frozenset, FrozenSet):
+            schema["uniqueItems"] = True
+
+        if origin in (tuple, Tuple) and args and args[-1] is not Ellipsis:
+            schema["prefixItems"] = [
+                _annotation_to_json_schema(
+                    item_type,
+                    definitions=definitions,
+                    ref_template=ref_template,
+                    by_alias=by_alias,
+                    root_model=root_model,
+                )
+                for item_type in args
+            ]
+            schema["minItems"] = len(args)
+            schema["maxItems"] = len(args)
+            return schema
+
         if args:
             item_type = args[0]
             if item_type is Ellipsis:
