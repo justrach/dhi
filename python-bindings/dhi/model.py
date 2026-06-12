@@ -33,6 +33,7 @@ import re
 import math
 import copy
 import sys
+import types
 import json as _json
 from typing import (
     Any, Callable, ClassVar, Dict, FrozenSet, Iterator, List, Literal, Mapping,
@@ -103,6 +104,224 @@ def _is_basemodel_subclass(typ: Any) -> bool:
         # Avoid circular import issues
         return isinstance(typ, type) and hasattr(typ, '__dhi_fields__')
     except (TypeError, AttributeError):
+        return False
+
+
+def _is_union_annotation(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    return origin is Union or origin is types.UnionType or isinstance(annotation, types.UnionType)
+
+
+def _model_ref(model_cls: type, ref_template: str) -> str:
+    return ref_template.format(model=model_cls.__name__)
+
+
+def _model_to_json_schema(
+    model_cls: type,
+    *,
+    definitions: Dict[str, Dict[str, Any]],
+    ref_template: str,
+    by_alias: bool,
+) -> Dict[str, Any]:
+    schema: Dict[str, Any] = {
+        "title": model_cls.__name__,
+        "type": "object",
+        "properties": {},
+    }
+    required: List[str] = []
+
+    for field_name, field_data in model_cls.__dhi_fields__.items():
+        field_info = field_data.get('field_info') or model_cls.model_fields.get(field_name)
+        prop = _annotation_to_json_schema(
+            field_data['annotation'],
+            definitions=definitions,
+            ref_template=ref_template,
+            by_alias=by_alias,
+        )
+        _apply_schema_constraints(prop, field_data.get('constraints', []), field_info)
+
+        if not field_data['required'] and field_data.get('default_factory') is None:
+            default = field_data.get('default', _MISSING)
+            if default is not _MISSING and _is_json_schema_default(default):
+                prop["default"] = default
+
+        prop_name = field_name
+        if by_alias and field_info is not None:
+            prop_name = field_info.alias or field_name
+        schema["properties"][prop_name] = prop
+
+        if field_data['required']:
+            required.append(prop_name)
+
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _annotation_to_json_schema(
+    annotation: Any,
+    *,
+    definitions: Dict[str, Dict[str, Any]],
+    ref_template: str,
+    by_alias: bool,
+) -> Dict[str, Any]:
+    base_type, constraints = _extract_constraints(annotation)
+
+    if _is_basemodel_subclass(base_type):
+        if base_type.__name__ not in definitions:
+            definitions[base_type.__name__] = {}
+            definitions[base_type.__name__] = _model_to_json_schema(
+                base_type,
+                definitions=definitions,
+                ref_template=ref_template,
+                by_alias=by_alias,
+            )
+        return {"$ref": _model_ref(base_type, ref_template)}
+
+    origin = get_origin(base_type)
+    args = get_args(base_type)
+
+    if origin in (list, List, set, Set, frozenset, FrozenSet, tuple, Tuple):
+        schema: Dict[str, Any] = {"type": "array"}
+
+        if origin in (set, Set, frozenset, FrozenSet):
+            schema["uniqueItems"] = True
+
+        if origin in (tuple, Tuple) and args and args[-1] is not Ellipsis:
+            schema["prefixItems"] = [
+                _annotation_to_json_schema(
+                    item_type,
+                    definitions=definitions,
+                    ref_template=ref_template,
+                    by_alias=by_alias,
+                )
+                for item_type in args
+            ]
+            schema["minItems"] = len(args)
+            schema["maxItems"] = len(args)
+            return schema
+
+        if args:
+            item_type = args[0]
+            if item_type is Ellipsis:
+                item_type = Any
+            schema["items"] = _annotation_to_json_schema(
+                item_type,
+                definitions=definitions,
+                ref_template=ref_template,
+                by_alias=by_alias,
+            )
+        else:
+            schema["items"] = {}
+        return schema
+
+    if origin in (dict, Dict, Mapping):
+        schema = {"type": "object"}
+        if len(args) == 2:
+            schema["additionalProperties"] = _annotation_to_json_schema(
+                args[1],
+                definitions=definitions,
+                ref_template=ref_template,
+                by_alias=by_alias,
+            )
+        return schema
+
+    if _is_union_annotation(base_type):
+        return {
+            "anyOf": [
+                _annotation_to_json_schema(
+                    arg,
+                    definitions=definitions,
+                    ref_template=ref_template,
+                    by_alias=by_alias,
+                )
+                for arg in args
+            ]
+        }
+
+    type_map = {
+        str: {"type": "string"},
+        int: {"type": "integer"},
+        float: {"type": "number"},
+        bool: {"type": "boolean"},
+        bytes: {"type": "string", "format": "binary"},
+        list: {"type": "array", "items": {}},
+        dict: {"type": "object"},
+        Any: {},
+        type(None): {"type": "null"},
+    }
+
+    schema = dict(type_map.get(base_type, {"type": "string"}))
+    _apply_schema_constraints(schema, constraints, None)
+    return schema
+
+
+def _apply_schema_constraints(
+    schema: Dict[str, Any], constraints: List[Any], field_info: Optional[FieldInfo]
+) -> None:
+    for c in constraints:
+        if isinstance(c, Gt):
+            schema["exclusiveMinimum"] = c.gt
+        elif isinstance(c, Ge):
+            schema["minimum"] = c.ge
+        elif isinstance(c, Lt):
+            schema["exclusiveMaximum"] = c.lt
+        elif isinstance(c, Le):
+            schema["maximum"] = c.le
+        elif isinstance(c, MultipleOf):
+            schema["multipleOf"] = c.multiple_of
+        elif isinstance(c, MinLength):
+            schema["minLength"] = c.min_length
+        elif isinstance(c, MaxLength):
+            schema["maxLength"] = c.max_length
+        elif isinstance(c, Pattern):
+            schema["pattern"] = c.pattern
+        elif isinstance(c, FieldInfo):
+            _apply_field_info_schema(schema, c)
+        elif isinstance(c, StringConstraints):
+            if c.min_length is not None:
+                schema["minLength"] = c.min_length
+            if c.max_length is not None:
+                schema["maxLength"] = c.max_length
+            if c.pattern is not None:
+                schema["pattern"] = c.pattern
+
+    if field_info is not None:
+        _apply_field_info_schema(schema, field_info)
+
+
+def _apply_field_info_schema(schema: Dict[str, Any], field_info: FieldInfo) -> None:
+    if field_info.gt is not None:
+        schema["exclusiveMinimum"] = field_info.gt
+    if field_info.ge is not None:
+        schema["minimum"] = field_info.ge
+    if field_info.lt is not None:
+        schema["exclusiveMaximum"] = field_info.lt
+    if field_info.le is not None:
+        schema["maximum"] = field_info.le
+    if field_info.multiple_of is not None:
+        schema["multipleOf"] = field_info.multiple_of
+    if field_info.min_length is not None:
+        schema["minLength"] = field_info.min_length
+    if field_info.max_length is not None:
+        schema["maxLength"] = field_info.max_length
+    if field_info.pattern is not None:
+        schema["pattern"] = field_info.pattern
+    if field_info.title:
+        schema["title"] = field_info.title
+    if field_info.description:
+        schema["description"] = field_info.description
+    if field_info.examples:
+        schema["examples"] = field_info.examples
+    if field_info.json_schema_extra:
+        schema.update(field_info.json_schema_extra)
+
+
+def _is_json_schema_default(value: Any) -> bool:
+    try:
+        _json.dumps(value)
+        return True
+    except (TypeError, ValueError):
         return False
 
 
@@ -1646,87 +1865,32 @@ class BaseModel(metaclass=_ModelMeta):
         return _json.dumps(data, indent=indent, ensure_ascii=False)
 
     @classmethod
-    def model_json_schema(cls) -> Dict[str, Any]:
+    def model_json_schema(
+        cls,
+        by_alias: bool = True,
+        ref_template: str = '#/$defs/{model}',
+        schema_generator: Any = None,
+        mode: str = 'validation',
+    ) -> Dict[str, Any]:
         """Generate JSON Schema for this model.
 
-        Matches Pydantic's model_json_schema() classmethod.
+        Matches Pydantic's model_json_schema() classmethod for common callers.
+        Nested models are emitted as ``$ref`` entries with definitions in ``$defs``.
         """
-        schema: Dict[str, Any] = {
-            "title": cls.__name__,
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-
-        type_map = {
-            int: "integer",
-            float: "number",
-            str: "string",
-            bool: "boolean",
-            bytes: "string",
-        }
-
-        for field_name, field_info in cls.__dhi_fields__.items():
-            base_type = field_info['base_type']
-            constraints = field_info['constraints']
-
-            prop: Dict[str, Any] = {}
-
-            # Base type
-            json_type = type_map.get(base_type, "string")
-            prop["type"] = json_type
-
-            # Apply constraints to schema
-            for c in constraints:
-                if isinstance(c, Gt):
-                    prop["exclusiveMinimum"] = c.gt
-                elif isinstance(c, Ge):
-                    prop["minimum"] = c.ge
-                elif isinstance(c, Lt):
-                    prop["exclusiveMaximum"] = c.lt
-                elif isinstance(c, Le):
-                    prop["maximum"] = c.le
-                elif isinstance(c, MultipleOf):
-                    prop["multipleOf"] = c.multiple_of
-                elif isinstance(c, MinLength):
-                    prop["minLength"] = c.min_length
-                elif isinstance(c, MaxLength):
-                    prop["maxLength"] = c.max_length
-                elif isinstance(c, Pattern):
-                    prop["pattern"] = c.pattern
-                elif isinstance(c, FieldInfo):
-                    if c.gt is not None:
-                        prop["exclusiveMinimum"] = c.gt
-                    if c.ge is not None:
-                        prop["minimum"] = c.ge
-                    if c.lt is not None:
-                        prop["exclusiveMaximum"] = c.lt
-                    if c.le is not None:
-                        prop["maximum"] = c.le
-                    if c.multiple_of is not None:
-                        prop["multipleOf"] = c.multiple_of
-                    if c.min_length is not None:
-                        prop["minLength"] = c.min_length
-                    if c.max_length is not None:
-                        prop["maxLength"] = c.max_length
-                    if c.pattern is not None:
-                        prop["pattern"] = c.pattern
-                    if c.title:
-                        prop["title"] = c.title
-                    if c.description:
-                        prop["description"] = c.description
-                    if c.examples:
-                        prop["examples"] = c.examples
-
-            # Default value
-            if not field_info['required']:
-                prop["default"] = field_info['default']
-
-            schema["properties"][field_name] = prop
-
-            if field_info['required']:
-                schema["required"].append(field_name)
-
+        definitions: Dict[str, Dict[str, Any]] = {}
+        schema = _model_to_json_schema(
+            cls,
+            definitions=definitions,
+            ref_template=ref_template,
+            by_alias=by_alias,
+        )
+        if cls.__name__ in definitions:
+            # Recursive/self-referential model: match Pydantic by placing the
+            # root schema in $defs and returning a $ref to it.
+            definitions[cls.__name__] = schema
+            return {'$ref': _model_ref(cls, ref_template), '$defs': definitions}
+        if definitions:
+            schema['$defs'] = definitions
         return schema
 
     def model_copy(

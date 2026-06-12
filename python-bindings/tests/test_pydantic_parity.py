@@ -376,6 +376,98 @@ class TestBaseModel:
         assert "name" in schema["required"]
         assert "score" not in schema["required"]
 
+    def test_model_json_schema_supports_openapi_ref_template_and_nested_models(self):
+        class Address(BaseModel):
+            city: str
+
+        class User(BaseModel):
+            name: str
+            address: Address
+            tags: List[str] = []
+
+        schema = User.model_json_schema(ref_template="#/components/schemas/{model}")
+        json.dumps(schema)
+
+        assert schema["properties"]["address"] == {
+            "$ref": "#/components/schemas/Address"
+        }
+        assert schema["properties"]["tags"] == {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+        }
+        assert schema["$defs"]["Address"]["properties"]["city"] == {
+            "type": "string"
+        }
+
+    def test_model_json_schema_supports_fixed_tuple_schemas(self):
+        class M(BaseModel):
+            value: tuple[int, str]
+            homogeneous: tuple[int, ...]
+
+        schema = M.model_json_schema()
+
+        assert schema["properties"]["value"] == {
+            "type": "array",
+            "prefixItems": [
+                {"type": "integer"},
+                {"type": "string"},
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+        }
+        assert schema["properties"]["homogeneous"] == {
+            "type": "array",
+            "items": {"type": "integer"},
+        }
+
+    def test_model_json_schema_marks_set_like_schemas_unique(self):
+        class M(BaseModel):
+            tags: set[str]
+            frozen_tags: frozenset[int]
+
+        schema = M.model_json_schema()
+
+        assert schema["properties"]["tags"] == {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "string"},
+        }
+        assert schema["properties"]["frozen_tags"] == {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "integer"},
+        }
+
+    def test_model_json_schema_resolves_self_reference_defs(self):
+        class Node(BaseModel):
+            value: int
+            child: "Node"
+
+        schema = Node.model_json_schema()
+        json.dumps(schema)
+
+        # Pydantic parity: recursive models return a root $ref into $defs.
+        assert schema["$ref"] == "#/$defs/Node"
+        node_def = schema["$defs"]["Node"]
+        assert node_def["title"] == "Node"
+        assert node_def["properties"]["value"] == {"type": "integer"}
+        assert node_def["properties"]["child"] == {"$ref": "#/$defs/Node"}
+
+    def test_model_json_schema_optional_self_reference(self):
+        from typing import Optional
+
+        class Tree(BaseModel):
+            value: int
+            child: Optional["Tree"] = None
+
+        schema = Tree.model_json_schema()
+        json.dumps(schema)
+
+        assert schema["$ref"] == "#/$defs/Tree"
+        child = schema["$defs"]["Tree"]["properties"]["child"]
+        assert {"$ref": "#/$defs/Tree"} in child["anyOf"]
+
     def test_model_repr(self):
         class M(BaseModel):
             x: int
