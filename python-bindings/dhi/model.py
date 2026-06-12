@@ -61,6 +61,8 @@ from .functional_validators import PrivateAttr, ComputedFieldInfo
 
 if HAS_NATIVE_EXT:
     from . import _dhi_native
+else:
+    _dhi_native = None  # pure-Python fallback (no C extension available)
 
 # Type variable for model methods returning Self
 _T = TypeVar('_T', bound='BaseModel')
@@ -107,9 +109,15 @@ def _is_basemodel_subclass(typ: Any) -> bool:
         return False
 
 
+# types.UnionType (X | Y syntax) only exists on Python >= 3.10
+_UNION_TYPE = getattr(types, 'UnionType', None)
+
+
 def _is_union_annotation(annotation: Any) -> bool:
     origin = get_origin(annotation)
-    return origin is Union or origin is types.UnionType or isinstance(annotation, types.UnionType)
+    if origin is Union:
+        return True
+    return _UNION_TYPE is not None and (origin is _UNION_TYPE or isinstance(annotation, _UNION_TYPE))
 
 
 def _model_ref(model_cls: type, ref_template: str) -> str:
