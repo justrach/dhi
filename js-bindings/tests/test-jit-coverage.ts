@@ -65,6 +65,37 @@ else { fail++; console.log('MISMATCH strict issue code:', JSON.stringify(r)); }
 check('optional missing', z.object({ a: z.string().optional() }), {});
 check('nullable null', z.object({ a: z.string().nullable() }), { a: null });
 
+// tuples
+check('tuple ok', z.object({ p: z.tuple([z.string(), z.number()]) }), { p: ['a', 1] });
+check('tuple wrong len', z.object({ p: z.tuple([z.string(), z.number()]) }), { p: ['a'] });
+check('tuple bad elem', z.object({ p: z.tuple([z.string(), z.number()]) }), { p: ['a', 'b'] });
+check('tuple w/ rest', z.object({ p: z.tuple([z.string()]).rest(z.number()) }), { p: ['a', 1, 2] });
+check('tuple rest bad', z.object({ p: z.tuple([z.string()]).rest(z.number()) }), { p: ['a', 1, 'x'] });
+
+// records
+check('record ok', z.object({ s: z.record(z.string(), z.number()) }), { s: { a: 1, b: 2 } });
+check('record bad val', z.object({ s: z.record(z.string(), z.number()) }), { s: { a: 'x' } });
+check('record key transform', z.object({ s: z.record(z.string().trim(), z.number()) }), { s: { ' a ': 1 } });
+check('record empty', z.object({ s: z.record(z.string(), z.number()) }), { s: {} });
+
+// discriminated unions
+const du = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('a'), x: z.number() }),
+  z.object({ kind: z.literal('b'), y: z.string() }),
+]);
+check('disc union a', z.object({ ev: du }), { ev: { kind: 'a', x: 1 } });
+check('disc union b', z.object({ ev: du }), { ev: { kind: 'b', y: 's' } });
+check('disc union bad kind', z.object({ ev: du }), { ev: { kind: 'z', x: 1 } });
+check('disc union bad field', z.object({ ev: du }), { ev: { kind: 'a', x: 'no' } });
+
+// top-level shapes (JIT on the schema itself)
+check('top-level array', z.array(z.object({ id: z.number() })), [{ id: 1 }, { id: 2 }]);
+check('top-level array bad', z.array(z.object({ id: z.number() })), [{ id: 'x' }]);
+check('top-level tuple', z.tuple([z.string(), z.number()]), ['a', 1]);
+check('top-level record', z.record(z.string(), z.number()), { a: 1 });
+check('top-level disc union', du, { kind: 'b', y: 's' });
+check('top-level array non-array', z.array(z.number()), 'nope');
+
 // copy-on-transform: original array must not be mutated
 const sch = z.object({ tags: z.array(z.string().trim()) });
 const input = { tags: [' a '] };

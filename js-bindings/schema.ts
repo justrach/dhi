@@ -1230,85 +1230,13 @@ export class DhiNativeEnum<T extends Record<string, string | number>> extends Dh
 }
 
 // ============================================================================
-// Object Schema
+// JIT compilation helpers (shared by DhiObject, DhiArray, and friends)
 // ============================================================================
 
-export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiType<
-  { [K in RequiredKeys<T> & string]: T[K]["_output"] } & { [K in OptionalKeys<T> & string]?: T[K]["_output"] },
-  { [K in RequiredKeys<T> & string]: T[K]["_input"] } & { [K in OptionalKeys<T> & string]?: T[K]["_input"] }
-> {
-  readonly shape: T;
-  private _keys: string[];
-  private _unknownKeys: 'strip' | 'strict' | 'passthrough' = 'strip';
-  private _catchall?: DhiType<any, any>;
-  private _jit: ((value: any) => any) | null | undefined = undefined; // undefined = not compiled yet
-
-  constructor(shape: T) {
-    super();
-    this.shape = shape;
-    this._keys = Object.keys(shape);
-  }
-
-  private _compileJIT(): ((value: any) => any) | null {
-    if (this._catchall) return null;
-
-    const mode = this._unknownKeys;
-    const keys = this._keys;
-    const shape = this.shape;
-    const closureVars: any[] = [];
-    const closureNames: string[] = [];
-    const bodyLines: string[] = [];
-
-    bodyLines.push('return function(v){');
-    bodyLines.push('if(typeof v!=="object"||v===null||Array.isArray(v))return null;');
-
-    if (mode === 'strict') {
-      // Reject unknown keys up front (error details produced by slow path)
-      closureNames.push('_known');
-      closureVars.push(new Set(keys));
-      bodyLines.push('var _ks=Object.keys(v);for(var _q=0;_q<_ks.length;_q++){if(!_known.has(_ks[_q]))return null;}');
-    }
-
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      const ks = JSON.stringify(key);
-      const vi = `v${i}`;
-      bodyLines.push(`var ${vi}=v[${ks}];`);
-
-      const schema = shape[key];
-      const emitted = this._emitFieldCheck(vi, schema, closureVars, closureNames, i);
-      if (!emitted) return null; // Can't JIT this schema, fallback
-      bodyLines.push(emitted);
-    }
-
-    // Build result object
-    if (mode === 'passthrough') {
-      // Copy unknown keys first, then overwrite with validated/transformed values
-      bodyLines.push('var _r={};var _ks=Object.keys(v);for(var _q=0;_q<_ks.length;_q++){_r[_ks[_q]]=v[_ks[_q]];}');
-      for (let i = 0; i < keys.length; i++) {
-        bodyLines.push(`_r[${JSON.stringify(keys[i])}]=v${i};`);
-      }
-      bodyLines.push('return _r;};');
-    } else {
-      bodyLines.push('return{');
-      for (let i = 0; i < keys.length; i++) {
-        bodyLines.push(`${JSON.stringify(keys[i])}:v${i},`);
-      }
-      bodyLines.push('};};');
-    }
-
-    try {
-      const fn = new Function(...closureNames, bodyLines.join('\n'));
-      return fn(...closureVars);
-    } catch {
-      return null;
-    }
-  }
-
-  // True if `schema` can legitimately produce null as output. Such schemas
-  // can't participate in JIT contexts that use null as the failure sentinel
-  // (union members, array element validators).
-  private _canOutputNull(schema: DhiType<any, any>): boolean {
+// True if `schema` can legitimately produce null as output. Such schemas
+// can't participate in JIT contexts that use null as the failure sentinel
+// (union members, array element validators).
+function jitCanOutputNull(schema: DhiType<any, any>): boolean {
     if (schema instanceof DhiNullable || schema instanceof DhiNull ||
         schema instanceof DhiAny || schema instanceof DhiUnknown ||
         schema instanceof DhiDefault || schema instanceof DhiOptional ||
@@ -1317,15 +1245,15 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     }
     if (schema instanceof DhiLiteral) return (schema as any).value === null;
     if (schema instanceof DhiUnion) {
-      return ((schema as any).options as DhiType<any, any>[]).some(o => this._canOutputNull(o));
+      return ((schema as any).options as DhiType<any, any>[]).some(o => jitCanOutputNull(o));
     }
     return false;
-  }
+}
 
-  // Compile a standalone validator for a single value: returns the
-  // (possibly transformed) value, or null on failure. Used for JITting
-  // array elements and union members.
-  private _compileValueFn(schema: DhiType<any, any>): ((v: any) => any) | null {
+// Compile a standalone validator for a single value: returns the
+// (possibly transformed) value, or null on failure. Used for JITting
+// array elements and union members.
+function jitCompileValueFn(schema: DhiType<any, any>): ((v: any) => any) | null {
     if (schema instanceof DhiObject) {
       if ((schema as any)._jit === undefined) {
         (schema as any)._jit = (schema as any)._compileJIT();
@@ -1334,7 +1262,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     }
     const vars: any[] = [];
     const names: string[] = [];
-    const check = this._emitFieldCheck('v', schema, vars, names, 0);
+    const check = jitEmitFieldCheck('v', schema, vars, names, 0);
     if (!check) return null;
     try {
       const fn = new Function(...names, `return function(v){${check}return v;};`);
@@ -1342,19 +1270,19 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     } catch {
       return null;
     }
-  }
+}
 
-  private _emitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], names: string[], idx: number): string | null {
+function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], names: string[], idx: number): string | null {
     // Unwrap optional/nullable
     if (schema instanceof DhiOptional) {
       const inner = (schema as any)._inner;
-      const innerCheck = this._emitFieldCheck(vi, inner, vars, names, idx);
+      const innerCheck = jitEmitFieldCheck(vi, inner, vars, names, idx);
       if (!innerCheck) return null;
       return `if(${vi}!==undefined){${innerCheck}}`;
     }
     if (schema instanceof DhiNullable) {
       const inner = (schema as any)._inner;
-      const innerCheck = this._emitFieldCheck(vi, inner, vars, names, idx);
+      const innerCheck = jitEmitFieldCheck(vi, inner, vars, names, idx);
       if (!innerCheck) return null;
       return `if(${vi}!==null){${innerCheck}}`;
     }
@@ -1507,7 +1435,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     if (schema instanceof DhiDefault) {
       const inner = (schema as any)._inner;
       const dflt = (schema as any)._default;
-      const innerCheck = this._emitFieldCheck(vi, inner, vars, names, idx);
+      const innerCheck = jitEmitFieldCheck(vi, inner, vars, names, idx);
       if (!innerCheck) return null;
       const fname = `_df${names.length}_${idx}`;
       names.push(fname);
@@ -1520,8 +1448,8 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
       const options = (schema as any).options as DhiType<any, any>[];
       const fns: Array<(v: any) => any> = [];
       for (const opt of options) {
-        if (this._canOutputNull(opt)) return null;
-        const fn = this._compileValueFn(opt);
+        if (jitCanOutputNull(opt)) return null;
+        const fn = jitCompileValueFn(opt);
         if (!fn) return null;
         fns.push(fn);
       }
@@ -1568,8 +1496,8 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
       // General path: any JIT-able element (nested objects, enums, literals,
       // checked primitives, unions, ...). Copy-on-transform keeps reference
       // semantics identical to the interpreted path.
-      if (this._canOutputNull(elem)) return null;
-      const elemFn = this._compileValueFn(elem);
+      if (jitCanOutputNull(elem)) return null;
+      const elemFn = jitCompileValueFn(elem);
       if (!elemFn) return null;
       const fname = `_el${names.length}_${idx}`;
       const ev = `_e${names.length}_${idx}`;
@@ -1585,8 +1513,187 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
         `}`;
     }
 
-    return null; // Unknown schema type, can't JIT
+  if (schema instanceof DhiTuple) {
+    const items = (schema as any).items as DhiType<any, any>[];
+    const rest = (schema as any)._rest as DhiType<any, any> | undefined;
+    const itemFns: Array<(v: any) => any> = [];
+    for (const item of items) {
+      if (jitCanOutputNull(item)) return null;
+      const fn = jitCompileValueFn(item);
+      if (!fn) return null;
+      itemFns.push(fn);
+    }
+    let restFn: ((v: any) => any) | null = null;
+    if (rest) {
+      if (jitCanOutputNull(rest)) return null;
+      restFn = jitCompileValueFn(rest);
+      if (!restFn) return null;
+    }
+    const n = items.length;
+    const fname = `_tp${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function tupleCheck(v: any) {
+      if (!Array.isArray(v)) return null;
+      if (!restFn && v.length !== n) return null;
+      if (v.length < n) return null;
+      const out = new Array(v.length);
+      for (let i = 0; i < n; i++) {
+        const r = itemFns[i](v[i]);
+        if (r === null) return null;
+        out[i] = r;
+      }
+      for (let i = n; i < v.length; i++) {
+        const r = restFn!(v[i]);
+        if (r === null) return null;
+        out[i] = r;
+      }
+      return out;
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
   }
+
+  if (schema instanceof DhiRecord) {
+    const keyS = (schema as any).keySchema;
+    const valS = (schema as any).valueSchema;
+    if (jitCanOutputNull(valS)) return null;
+    const valFn = jitCompileValueFn(valS);
+    if (!valFn) return null;
+    // Keys must be string schemas; transforms (trim etc.) are applied to keys
+    let keyFn: ((v: any) => any) | null = null;
+    if (keyS instanceof DhiString) {
+      if ((keyS as any).checks.length > 0) {
+        keyFn = jitCompileValueFn(keyS);
+        if (!keyFn) return null;
+      }
+    } else if (keyS instanceof DhiEnum) {
+      keyFn = jitCompileValueFn(keyS);
+      if (!keyFn) return null;
+    } else {
+      return null;
+    }
+    const fname = `_rc${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function recordCheck(v: any) {
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+      const out: Record<string, any> = {};
+      const ks = Object.keys(v);
+      for (let i = 0; i < ks.length; i++) {
+        let k = ks[i];
+        if (keyFn) {
+          k = keyFn(k);
+          if (k === null) return null;
+        }
+        const r = valFn(v[ks[i]]);
+        if (r === null) return null;
+        out[k] = r;
+      }
+      return out;
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+  }
+
+  if (schema instanceof DhiDiscriminatedUnion) {
+    const optionsMap = (schema as any)._optionsMap as Map<any, any>;
+    const discriminator = (schema as any).discriminator as string;
+    const jitMap = new Map<any, (v: any) => any>();
+    for (const [lit, option] of optionsMap) {
+      if ((option as any)._jit === undefined) {
+        (option as any)._jit = (option as any)._compileJIT();
+      }
+      const optJit = (option as any)._jit;
+      if (!optJit) return null;
+      jitMap.set(lit, optJit);
+    }
+    const fname = `_du${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function discUnionCheck(v: any) {
+      if (typeof v !== 'object' || v === null) return null;
+      const fn = jitMap.get(v[discriminator]);
+      if (!fn) return null;
+      return fn(v);
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+  }
+
+  return null; // Unknown schema type, can't JIT
+}
+
+// ============================================================================
+// Object Schema
+// ============================================================================
+
+export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiType<
+  { [K in RequiredKeys<T> & string]: T[K]["_output"] } & { [K in OptionalKeys<T> & string]?: T[K]["_output"] },
+  { [K in RequiredKeys<T> & string]: T[K]["_input"] } & { [K in OptionalKeys<T> & string]?: T[K]["_input"] }
+> {
+  readonly shape: T;
+  private _keys: string[];
+  private _unknownKeys: 'strip' | 'strict' | 'passthrough' = 'strip';
+  private _catchall?: DhiType<any, any>;
+  private _jit: ((value: any) => any) | null | undefined = undefined; // undefined = not compiled yet
+
+  constructor(shape: T) {
+    super();
+    this.shape = shape;
+    this._keys = Object.keys(shape);
+  }
+
+  private _compileJIT(): ((value: any) => any) | null {
+    if (this._catchall) return null;
+
+    const mode = this._unknownKeys;
+    const keys = this._keys;
+    const shape = this.shape;
+    const closureVars: any[] = [];
+    const closureNames: string[] = [];
+    const bodyLines: string[] = [];
+
+    bodyLines.push('return function(v){');
+    bodyLines.push('if(typeof v!=="object"||v===null||Array.isArray(v))return null;');
+
+    if (mode === 'strict') {
+      // Reject unknown keys up front (error details produced by slow path)
+      closureNames.push('_known');
+      closureVars.push(new Set(keys));
+      bodyLines.push('var _ks=Object.keys(v);for(var _q=0;_q<_ks.length;_q++){if(!_known.has(_ks[_q]))return null;}');
+    }
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const ks = JSON.stringify(key);
+      const vi = `v${i}`;
+      bodyLines.push(`var ${vi}=v[${ks}];`);
+
+      const schema = shape[key];
+      const emitted = jitEmitFieldCheck(vi, schema, closureVars, closureNames, i);
+      if (!emitted) return null; // Can't JIT this schema, fallback
+      bodyLines.push(emitted);
+    }
+
+    // Build result object
+    if (mode === 'passthrough') {
+      // Copy unknown keys first, then overwrite with validated/transformed values
+      bodyLines.push('var _r={};var _ks=Object.keys(v);for(var _q=0;_q<_ks.length;_q++){_r[_ks[_q]]=v[_ks[_q]];}');
+      for (let i = 0; i < keys.length; i++) {
+        bodyLines.push(`_r[${JSON.stringify(keys[i])}]=v${i};`);
+      }
+      bodyLines.push('return _r;};');
+    } else {
+      bodyLines.push('return{');
+      for (let i = 0; i < keys.length; i++) {
+        bodyLines.push(`${JSON.stringify(keys[i])}:v${i},`);
+      }
+      bodyLines.push('};};');
+    }
+
+    try {
+      const fn = new Function(...closureNames, bodyLines.join('\n'));
+      return fn(...closureVars);
+    } catch {
+      return null;
+    }
+  }
+
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<any> {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -1824,10 +1931,19 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
 
 export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][], T["_input"][]> {
   private checks: Array<{ type: string; value?: number; message?: string }> = [];
+  private _jit: ((value: any) => any) | null | undefined = undefined;
 
   constructor(private element: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"][]> {
+    // Top-level JIT fast path (compiled on first use); failures fall through
+    // to the interpreted path below for proper error reporting.
+    if (this._jit === undefined) this._jit = jitCompileValueFn(this);
+    if (this._jit) {
+      const r = this._jit(value);
+      if (r !== null) return { success: true, data: r };
+    }
+
     if (!Array.isArray(value)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected array, received ' + typeof value }]) };
     }
@@ -1940,6 +2056,7 @@ type TupleInput<T extends DhiType<any, any>[]> = { [K in keyof T]: T[K]["_input"
 
 export class DhiTuple<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> extends DhiType<TupleOutput<T>, TupleInput<T>> {
   private _rest?: DhiType<any, any>;
+  private _jit: ((value: any) => any) | null | undefined = undefined;
 
   constructor(private items: T) { super(); }
 
@@ -1950,6 +2067,12 @@ export class DhiTuple<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
   }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<TupleOutput<T>> {
+    if (this._jit === undefined) this._jit = jitCompileValueFn(this);
+    if (this._jit) {
+      const r = this._jit(value);
+      if (r !== null) return { success: true, data: r };
+    }
+
     if (!Array.isArray(value)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected array (tuple)' }]) };
     }
@@ -1989,9 +2112,17 @@ export class DhiTuple<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
 // ============================================================================
 
 export class DhiRecord<K extends DhiType<string, string>, V extends DhiType<any, any>> extends DhiType<Record<K["_output"], V["_output"]>, Record<K["_input"], V["_input"]>> {
+  private _jit: ((value: any) => any) | null | undefined = undefined;
+
   constructor(private keySchema: K, private valueSchema: V) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Record<K["_output"], V["_output"]>> {
+    if (this._jit === undefined) this._jit = jitCompileValueFn(this);
+    if (this._jit) {
+      const r = this._jit(value);
+      if (r !== null) return { success: true, data: r };
+    }
+
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected object' }]) };
     }
@@ -2118,6 +2249,7 @@ export class DhiDiscriminatedUnion<
   Options extends [DhiObject<any>, ...DhiObject<any>[]]
 > extends DhiType<Options[number]["_output"], Options[number]["_input"]> {
   private _optionsMap: Map<any, DhiObject<any>>;
+  private _jit: ((value: any) => any) | null | undefined = undefined;
 
   constructor(private discriminator: Discriminator, private options: Options) {
     super();
@@ -2131,6 +2263,12 @@ export class DhiDiscriminatedUnion<
   }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Options[number]["_output"]> {
+    if (this._jit === undefined) this._jit = jitCompileValueFn(this);
+    if (this._jit) {
+      const r = this._jit(value);
+      if (r !== null) return { success: true, data: r };
+    }
+
     if (typeof value !== 'object' || value === null) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected object' }]) };
     }
