@@ -1653,37 +1653,38 @@ static int json_append(char **buf, size_t *buf_size, size_t *pos, const char *st
 }
 
 // =============================================================================
-// init_model_full: ULTRA-OPTIMIZED init that handles EVERYTHING in C
-// Uses METH_FASTCALL for faster argument passing (no tuple unpacking)
+// init_model_core: ULTRA-OPTIMIZED init that handles EVERYTHING in C
 // Eliminates consumed set tracking for better performance
 // Returns: None on success, list of (field, msg) tuples on error
 // Sets __pydantic_fields_set__, __pydantic_private__, __pydantic_extra__ in C
+//
+// Keyword arguments come from EITHER:
+//   - kwargs: a Python dict (the classic init_model_full path), OR
+//   - kwvalues + kwnames: a vectorcall-style array (no dict allocation at all)
+// Exactly one of kwargs / kwnames may be non-NULL.
 // =============================================================================
-static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args, Py_ssize_t nargs) {
-    // METH_FASTCALL: args passed as C array - no PyArg_ParseTuple overhead!
-    if (nargs != 4) {
-        PyErr_SetString(PyExc_TypeError, "init_model_full requires 4 arguments");
-        return NULL;
+
+// Look up a keyword by name in a vectorcall kwnames tuple.
+// Fast path: pointer identity (kwnames from compiled code are interned).
+// Slow path: unicode equality (handles non-interned keys from **dict unpacking).
+static inline PyObject* dhi_kwnames_lookup(PyObject *const *kwvalues, PyObject *kwnames, PyObject *name) {
+    Py_ssize_t n = PyTuple_GET_SIZE(kwnames);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (PyTuple_GET_ITEM(kwnames, i) == name) return kwvalues[i];
     }
-
-    PyObject *model_self = args[0];
-    PyObject *kwargs = args[1];
-    PyObject *capsule = args[2];
-    PyObject *extra_mode_obj = args[3];
-
-    // Validate kwargs is a dict (fast check)
-    if (!PyDict_Check(kwargs)) {
-        PyErr_SetString(PyExc_TypeError, "kwargs must be a dict");
-        return NULL;
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *k = PyTuple_GET_ITEM(kwnames, i);
+        if (k != name && PyUnicode_Check(k) && PyUnicode_Check(name) &&
+            PyUnicode_Compare(k, name) == 0) {
+            return kwvalues[i];
+        }
     }
+    return NULL;
+}
 
-    // Get extra_mode as C int (0=ignore, 1=forbid, 2=allow)
-    int extra_mode = (int)PyLong_AsLong(extra_mode_obj);
-    if (extra_mode == -1 && PyErr_Occurred()) return NULL;
-
-    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
-    if (!ms) return NULL;
-
+static PyObject* init_model_core(PyObject *model_self, CompiledModelSpecs *ms, int extra_mode,
+                                 PyObject *kwargs,
+                                 PyObject *const *kwvalues, PyObject *kwnames) {
     PyObject *obj_dict = PyObject_GenericGetDict(model_self, NULL);
     if (!obj_dict) return NULL;
 
@@ -1696,19 +1697,29 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
 
     // OPTIMIZATION: Use counter instead of consumed set for extra field detection
     Py_ssize_t found_count = 0;
-    Py_ssize_t kwargs_size = PyDict_Size(kwargs);
+    Py_ssize_t kwargs_size = kwargs ? PyDict_Size(kwargs)
+                                    : (kwnames ? PyTuple_GET_SIZE(kwnames) : 0);
 
     for (Py_ssize_t i = 0; i < ms->n_fields; i++) {
         CompiledFieldSpec *fs = &ms->specs[i];
 
-        // --- Extract value from kwargs ---
+        // --- Extract value from kwargs (dict) or kwvalues/kwnames (vectorcall) ---
         PyObject *value = NULL;
 
-        if (fs->alias_obj != Py_None) {
-            value = PyDict_GetItem(kwargs, fs->alias_obj);
-        }
-        if (!value) {
-            value = _PyDict_GetItem_KnownHash(kwargs, fs->name_obj, fs->name_hash);
+        if (kwargs) {
+            if (fs->alias_obj != Py_None) {
+                value = PyDict_GetItem(kwargs, fs->alias_obj);
+            }
+            if (!value) {
+                value = _PyDict_GetItem_KnownHash(kwargs, fs->name_obj, fs->name_hash);
+            }
+        } else if (kwnames) {
+            if (fs->alias_obj != Py_None) {
+                value = dhi_kwnames_lookup(kwvalues, kwnames, fs->alias_obj);
+            }
+            if (!value) {
+                value = dhi_kwnames_lookup(kwvalues, kwnames, fs->name_obj);
+            }
         }
 
         if (!value) {
@@ -2203,7 +2214,16 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
     if (extra_mode != 0 && found_count < kwargs_size) {
         PyObject *key, *value;
         Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+        Py_ssize_t ki = 0;
+        for (;;) {
+            if (kwargs) {
+                if (!PyDict_Next(kwargs, &pos, &key, &value)) break;
+            } else {
+                if (ki >= kwargs_size) break;
+                key = PyTuple_GET_ITEM(kwnames, ki);
+                value = kwvalues[ki];
+                ki++;
+            }
             // Check if this key is a known field (by name or alias)
             int is_known = 0;
             for (Py_ssize_t i = 0; i < ms->n_fields && !is_known; i++) {
@@ -2269,6 +2289,258 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
 
     if (errors && PyList_GET_SIZE(errors) > 0) return errors;
     Py_XDECREF(errors);
+    Py_RETURN_NONE;
+}
+
+// =============================================================================
+// init_model_full: classic entry point (kwargs dict), kept for the Python
+// fast-__init__ fallback path. Uses METH_FASTCALL for faster argument passing.
+// =============================================================================
+static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args, Py_ssize_t nargs) {
+    // METH_FASTCALL: args passed as C array - no PyArg_ParseTuple overhead!
+    if (nargs != 4) {
+        PyErr_SetString(PyExc_TypeError, "init_model_full requires 4 arguments");
+        return NULL;
+    }
+
+    PyObject *model_self = args[0];
+    PyObject *kwargs = args[1];
+    PyObject *capsule = args[2];
+    PyObject *extra_mode_obj = args[3];
+
+    // Validate kwargs is a dict (fast check)
+    if (!PyDict_Check(kwargs)) {
+        PyErr_SetString(PyExc_TypeError, "kwargs must be a dict");
+        return NULL;
+    }
+
+    // Get extra_mode as C int (0=ignore, 1=forbid, 2=allow)
+    int extra_mode = (int)PyLong_AsLong(extra_mode_obj);
+    if (extra_mode == -1 && PyErr_Occurred()) return NULL;
+
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) return NULL;
+
+    return init_model_core(model_self, ms, extra_mode, kwargs, NULL, NULL);
+}
+
+// =============================================================================
+// Vectorcall construction fast path
+//
+// For ultra-fast model classes we install a tp_vectorcall on the class object
+// so `User(name=..., age=...)` dispatches straight into C:
+//   - no type_call / tp_new / tp_init slot dance
+//   - no Python __init__ frame
+//   - no **kwargs dict allocation (values read directly from the stack)
+// Requires the metatype to support vectorcall on instances (CPython >= 3.12
+// inherits Py_TPFLAGS_HAVE_VECTORCALL on mutable subclasses of type). On older
+// versions the slot is simply never consulted and the Python fast __init__
+// path is used instead. Note tp_vectorcall is never inherited by subclasses,
+// so each model class opts in explicitly via enable_fast_construct().
+// =============================================================================
+
+typedef struct {
+    PyObject *specs_capsule;   // strong ref (keeps CompiledModelSpecs alive)
+    CompiledModelSpecs *ms;
+    int extra_mode;
+    PyObject *raiser;          // strong ref; callable(list[(field, msg)]) that raises
+} FastConstructInfo;
+
+static void fast_construct_info_destructor(PyObject *capsule) {
+    FastConstructInfo *info = (FastConstructInfo*)PyCapsule_GetPointer(capsule, "dhi.fast_construct");
+    if (info) {
+        Py_XDECREF(info->specs_capsule);
+        Py_XDECREF(info->raiser);
+        free(info);
+    }
+}
+
+static PyObject *g_fastinfo_key = NULL;  // interned "__dhi_fast_construct__"
+
+// Fallback: route through the normal type_call path (metatype tp_call).
+static PyObject* dhi_vectorcall_fallback(PyObject *cls_obj, PyObject *const *args,
+                                         Py_ssize_t nargs, PyObject *kwnames) {
+    PyObject *args_tuple = PyTuple_New(nargs);
+    if (!args_tuple) return NULL;
+    for (Py_ssize_t i = 0; i < nargs; i++) {
+        Py_INCREF(args[i]);
+        PyTuple_SET_ITEM(args_tuple, i, args[i]);
+    }
+    PyObject *kw = NULL;
+    if (kwnames && PyTuple_GET_SIZE(kwnames) > 0) {
+        kw = PyDict_New();
+        if (!kw) { Py_DECREF(args_tuple); return NULL; }
+        Py_ssize_t nk = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < nk; i++) {
+            if (PyDict_SetItem(kw, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
+                Py_DECREF(args_tuple); Py_DECREF(kw); return NULL;
+            }
+        }
+    }
+    // tp_call of the metatype is type_call for classes; always non-NULL.
+    PyObject *result = Py_TYPE(cls_obj)->tp_call(cls_obj, args_tuple, kw);
+    Py_DECREF(args_tuple);
+    Py_XDECREF(kw);
+    return result;
+}
+
+static PyObject* dhi_model_vectorcall(PyObject *cls_obj, PyObject *const *args,
+                                      size_t nargsf, PyObject *kwnames) {
+    PyTypeObject *cls = (PyTypeObject*)cls_obj;
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+
+    // Look up the per-class fast-construct info in the type's own dict.
+    PyObject *info_capsule = g_fastinfo_key
+        ? PyDict_GetItemWithError(cls->tp_dict, g_fastinfo_key)
+        : NULL;
+    if (!info_capsule) {
+        if (PyErr_Occurred()) return NULL;
+        // Shouldn't normally happen; fall back to the regular call path.
+        return dhi_vectorcall_fallback(cls_obj, args, nargs, kwnames);
+    }
+    FastConstructInfo *info = (FastConstructInfo*)PyCapsule_GetPointer(info_capsule, "dhi.fast_construct");
+    if (!info) return NULL;
+
+    if (nargs > 0) {
+        PyErr_Format(PyExc_TypeError,
+                     "%.200s() takes no positional arguments", cls->tp_name);
+        return NULL;
+    }
+
+    PyObject *self = cls->tp_alloc(cls, 0);
+    if (!self) return NULL;
+
+    PyObject *result = init_model_core(self, info->ms, info->extra_mode,
+                                       NULL, args, kwnames);
+    if (!result) { Py_DECREF(self); return NULL; }
+    if (result == Py_None) {
+        Py_DECREF(result);
+        return self;
+    }
+
+    // result is a list of (field, msg) tuples: delegate raising to Python
+    PyObject *r = PyObject_CallFunctionObjArgs(info->raiser, result, NULL);
+    Py_DECREF(result);
+    Py_XDECREF(r);
+    Py_DECREF(self);
+    if (!PyErr_Occurred()) {
+        PyErr_SetString(PyExc_ValueError, "dhi: validation failed");
+    }
+    return NULL;
+}
+
+// enable_fast_construct(cls, specs_capsule, extra_mode, raiser) -> None
+static PyObject* py_enable_fast_construct(PyObject* self_unused, PyObject* args) {
+    PyObject *cls_obj, *capsule, *raiser;
+    int extra_mode;
+    if (!PyArg_ParseTuple(args, "OOiO", &cls_obj, &capsule, &extra_mode, &raiser)) return NULL;
+    if (!PyType_Check(cls_obj)) {
+        PyErr_SetString(PyExc_TypeError, "enable_fast_construct: first argument must be a class");
+        return NULL;
+    }
+    CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
+    if (!ms) return NULL;
+
+    if (!g_fastinfo_key) {
+        g_fastinfo_key = PyUnicode_InternFromString("__dhi_fast_construct__");
+        if (!g_fastinfo_key) return NULL;
+    }
+
+    FastConstructInfo *info = (FastConstructInfo*)malloc(sizeof(FastConstructInfo));
+    if (!info) return PyErr_NoMemory();
+    Py_INCREF(capsule);
+    Py_INCREF(raiser);
+    info->specs_capsule = capsule;
+    info->ms = ms;
+    info->extra_mode = extra_mode;
+    info->raiser = raiser;
+
+    PyObject *info_capsule = PyCapsule_New(info, "dhi.fast_construct", fast_construct_info_destructor);
+    if (!info_capsule) {
+        Py_DECREF(capsule); Py_DECREF(raiser); free(info);
+        return NULL;
+    }
+
+    // Store via setattr so type machinery (caches, versioning) stays consistent.
+    if (PyObject_SetAttr(cls_obj, g_fastinfo_key, info_capsule) < 0) {
+        Py_DECREF(info_capsule);
+        return NULL;
+    }
+    Py_DECREF(info_capsule);
+
+#if PY_VERSION_HEX >= 0x030C0000
+    ((PyTypeObject*)cls_obj)->tp_vectorcall = dhi_model_vectorcall;
+#endif
+    Py_RETURN_NONE;
+}
+
+// construct_validated(cls, data_dict) -> instance
+// C-speed model_validate fast path: allocates the instance and validates the
+// dict in one call using the class's fast-construct info (no object.__new__
+// dispatch, no Python-level error re-packing).
+static PyObject* py_construct_validated(PyObject* self_unused, PyObject *const *args, Py_ssize_t nargs) {
+    if (nargs != 2) {
+        PyErr_SetString(PyExc_TypeError, "construct_validated requires 2 arguments");
+        return NULL;
+    }
+    PyObject *cls_obj = args[0];
+    PyObject *data = args[1];
+    if (!PyType_Check(cls_obj) || !PyDict_Check(data)) {
+        PyErr_SetString(PyExc_TypeError, "construct_validated: expected (class, dict)");
+        return NULL;
+    }
+    PyTypeObject *cls = (PyTypeObject*)cls_obj;
+
+    PyObject *info_capsule = g_fastinfo_key
+        ? PyDict_GetItemWithError(cls->tp_dict, g_fastinfo_key)
+        : NULL;
+    if (!info_capsule) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError,
+                            "construct_validated: class has no fast-construct info");
+        }
+        return NULL;
+    }
+    FastConstructInfo *info = (FastConstructInfo*)PyCapsule_GetPointer(info_capsule, "dhi.fast_construct");
+    if (!info) return NULL;
+
+    PyObject *self = cls->tp_alloc(cls, 0);
+    if (!self) return NULL;
+
+    PyObject *result = init_model_core(self, info->ms, info->extra_mode, data, NULL, NULL);
+    if (!result) { Py_DECREF(self); return NULL; }
+    if (result == Py_None) {
+        Py_DECREF(result);
+        return self;
+    }
+
+    PyObject *r = PyObject_CallFunctionObjArgs(info->raiser, result, NULL);
+    Py_DECREF(result);
+    Py_XDECREF(r);
+    Py_DECREF(self);
+    if (!PyErr_Occurred()) {
+        PyErr_SetString(PyExc_ValueError, "dhi: validation failed");
+    }
+    return NULL;
+}
+
+// disable_fast_construct(cls) -> None
+static PyObject* py_disable_fast_construct(PyObject* self_unused, PyObject* args) {
+    PyObject *cls_obj;
+    if (!PyArg_ParseTuple(args, "O", &cls_obj)) return NULL;
+    if (!PyType_Check(cls_obj)) {
+        PyErr_SetString(PyExc_TypeError, "disable_fast_construct: argument must be a class");
+        return NULL;
+    }
+#if PY_VERSION_HEX >= 0x030C0000
+    ((PyTypeObject*)cls_obj)->tp_vectorcall = NULL;
+#endif
+    if (g_fastinfo_key &&
+        PyDict_GetItemWithError(((PyTypeObject*)cls_obj)->tp_dict, g_fastinfo_key)) {
+        if (PyObject_DelAttr(cls_obj, g_fastinfo_key) < 0) return NULL;
+    } else if (PyErr_Occurred()) {
+        return NULL;
+    }
     Py_RETURN_NONE;
 }
 
@@ -4056,6 +4328,12 @@ static PyMethodDef DhiNativeMethods[] = {
      "Ultra-fast init with pre-compiled specs: (self, kwargs, capsule) -> None or errors"},
     {"init_model_full", (PyCFunction)py_init_model_full, METH_FASTCALL,
      "Full native init: (self, kwargs, capsule, extra_mode) -> None or errors. Sets all pydantic attrs."},
+    {"enable_fast_construct", py_enable_fast_construct, METH_VARARGS,
+     "Install C vectorcall construction on a model class: (cls, specs_capsule, extra_mode, raiser) -> None"},
+    {"disable_fast_construct", py_disable_fast_construct, METH_VARARGS,
+     "Remove C vectorcall construction from a model class: (cls) -> None"},
+    {"construct_validated", (PyCFunction)py_construct_validated, METH_FASTCALL,
+     "Allocate + validate a model from a dict in one C call: (cls, data) -> instance"},
     {"dump_model_compiled", py_dump_model_compiled, METH_VARARGS,
      "Ultra-fast model_dump with pre-compiled specs: (self, capsule) -> dict"},
     {"dump_json_compiled", py_dump_json_compiled, METH_VARARGS,
