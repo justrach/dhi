@@ -6,8 +6,10 @@ function check(label: string, schema: any, data: any) {
   const jitRes = schema.safeParse(data);
   // fresh clone of schema graph isn't trivial; instead disable JIT and re-parse
   (schema as any)._jit = null;
+  (schema as any)._jitTop = null;
   const slowRes = schema.safeParse(data);
   (schema as any)._jit = undefined;
+  (schema as any)._jitTop = undefined;
   const ok = jitRes.success === slowRes.success &&
     (!jitRes.success || eq(jitRes.data, slowRes.data));
   if (!ok) { fail++; console.log(`MISMATCH ${label}:`, JSON.stringify(jitRes), 'vs', JSON.stringify(slowRes)); }
@@ -95,6 +97,61 @@ check('top-level tuple', z.tuple([z.string(), z.number()]), ['a', 1]);
 check('top-level record', z.record(z.string(), z.number()), { a: 1 });
 check('top-level disc union', du, { kind: 'b', y: 's' });
 check('top-level array non-array', z.array(z.number()), 'nope');
+
+// coercion (was broken: coerced subclasses matched parent JIT branches)
+check('coerce number obj', z.object({ n: z.coerce.number() }), { n: '42' });
+check('coerce number bad', z.object({ n: z.coerce.number() }), { n: 'abc' });
+check('coerce string obj', z.object({ s: z.coerce.string() }), { s: 42 });
+check('coerce boolean obj', z.object({ b: z.coerce.boolean() }), { b: 1 });
+check('coerce in array', z.object({ a: z.array(z.coerce.number()) }), { a: ['1', '2'] });
+check('top-level coerce array', z.array(z.coerce.number()), ['1', 2]);
+
+// transforms / refines / pipes
+check('transform field', z.object({ r: z.string().transform(x => x.length) }), { r: 'hello' });
+check('transform throws', z.object({ r: z.string().transform(() => { throw new Error('x'); }) }), { r: 'a' });
+check('refine field ok', z.object({ n: z.number().refine(v => v > 0) }), { n: 5 });
+check('refine field fail', z.object({ n: z.number().refine(v => v > 0) }), { n: -5 });
+check('refine top-level', z.object({ a: z.number() }).refine(v => v.a > 0), { a: 1 });
+check('refine top-level fail', z.object({ a: z.number() }).refine(v => v.a > 0), { a: -1 });
+check('superRefine field', z.object({ n: z.number().superRefine((v, ctx) => { if (v < 0) ctx.addIssue({ message: 'neg' }); }) }), { n: -1 });
+check('pipe field', z.object({ n: z.string().transform(Number).pipe(z.number().min(5)) }), { n: '10' });
+check('pipe field fail', z.object({ n: z.string().transform(Number).pipe(z.number().min(5)) }), { n: '1' });
+
+// sets and maps
+const setS = z.object({ ids: z.set(z.number()) });
+{
+  const r1 = setS.safeParse({ ids: new Set([1, 2]) }) as any;
+  (setS as any)._jit = null;
+  const r2 = setS.safeParse({ ids: new Set([1, 2]) }) as any;
+  (setS as any)._jit = undefined;
+  const ok = r1.success && r2.success && JSON.stringify([...r1.data.ids]) === JSON.stringify([...r2.data.ids]);
+  if (ok) console.log('ok set field parity'); else { fail++; console.log('MISMATCH set field'); }
+}
+check('set field bad elem', z.object({ ids: z.set(z.number()) }), { ids: new Set(['x']) });
+check('set min fail', z.object({ ids: z.set(z.number()).min(3) }), { ids: new Set([1]) });
+const mapS = z.object({ m: z.map(z.string(), z.number()) });
+{
+  const r1 = mapS.safeParse({ m: new Map([['a', 1]]) }) as any;
+  (mapS as any)._jit = null;
+  const r2 = mapS.safeParse({ m: new Map([['a', 1]]) }) as any;
+  (mapS as any)._jit = undefined;
+  const ok = r1.success && r2.success && JSON.stringify([...r1.data.m]) === JSON.stringify([...r2.data.m]);
+  if (ok) console.log('ok map field parity'); else { fail++; console.log('MISMATCH map field'); }
+}
+check('map bad value', z.object({ m: z.map(z.string(), z.number()) }), { m: new Map([['a', 'x']]) });
+
+// lazy (recursive schemas)
+const Node: any = z.object({ value: z.number(), children: z.array(z.lazy(() => Node)).optional() });
+check('lazy recursive ok', Node, { value: 1, children: [{ value: 2, children: [{ value: 3 }] }] });
+check('lazy recursive bad leaf', Node, { value: 1, children: [{ value: 'x' }] });
+check('lazy recursive empty', Node, { value: 1 });
+
+// intersection
+const IxA = z.object({ a: z.string() });
+const IxB = z.object({ b: z.number() });
+check('intersection top ok', z.intersection(IxA, IxB), { a: 'x', b: 1 });
+check('intersection top bad', z.intersection(IxA, IxB), { a: 'x', b: 'no' });
+check('intersection nested', z.object({ both: z.intersection(IxA, IxB) }), { both: { a: 'x', b: 1 } });
 
 // copy-on-transform: original array must not be mutated
 const sch = z.object({ tags: z.array(z.string().trim()) });

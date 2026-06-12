@@ -1240,14 +1240,60 @@ function jitCanOutputNull(schema: DhiType<any, any>): boolean {
     if (schema instanceof DhiNullable || schema instanceof DhiNull ||
         schema instanceof DhiAny || schema instanceof DhiUnknown ||
         schema instanceof DhiDefault || schema instanceof DhiOptional ||
-        schema instanceof DhiCatch) {
+        schema instanceof DhiCatch || schema instanceof DhiTransform) {
       return true;
     }
     if (schema instanceof DhiLiteral) return (schema as any).value === null;
     if (schema instanceof DhiUnion) {
       return ((schema as any).options as DhiType<any, any>[]).some(o => jitCanOutputNull(o));
     }
+    if (schema instanceof DhiRefine || schema instanceof DhiSuperRefine) {
+      return jitCanOutputNull((schema as any)._inner);
+    }
+    if (schema instanceof DhiPipe) return jitCanOutputNull((schema as any)._b);
+    if (schema instanceof DhiIntersection) {
+      return jitCanOutputNull((schema as any).left) || jitCanOutputNull((schema as any).right);
+    }
+    if (schema instanceof DhiLazy) {
+      // The getter may not be callable yet (TDZ during recursive schema
+      // definition) and may recurse; guard both.
+      if (_jitLazyVisiting.has(schema)) return false; // cycle: assume inner decides
+      _jitLazyVisiting.add(schema);
+      try {
+        return jitCanOutputNull((schema as any).getter());
+      } catch {
+        return true; // can't resolve yet: be conservative
+      } finally {
+        _jitLazyVisiting.delete(schema);
+      }
+    }
     return false;
+}
+const _jitLazyVisiting = new WeakSet<object>();
+
+// Generic top-level JIT fast path for wrapper/composite schemas (refine,
+// pipe, union, set, map, ...). Compiles a standalone validator on first use;
+// returns a success result, or undefined to fall through to the interpreted
+// path (errors, or schema not JIT-able). Skipped when the schema can output
+// null (null is the JIT failure sentinel).
+function jitTryFast(self: any, value: unknown): SafeParseResult<any> | undefined {
+  let jf = self._jitTop;
+  if (jf === undefined) {
+    jf = self._jitTop = jitCanOutputNull(self) ? null : jitCompileValueFn(self);
+  }
+  if (jf !== null) {
+    const r = jf(value);
+    if (r !== null) return { success: true, data: r };
+  }
+  return undefined;
+}
+
+// z.coerce.* schemas subclass the primitive schemas; fast paths keyed on
+// instanceof the parent class must exclude them (they need coercion first).
+function jitIsCoerced(s: any): boolean {
+  return s instanceof DhiCoercedString || s instanceof DhiCoercedNumber ||
+    s instanceof DhiCoercedBoolean || s instanceof DhiCoercedDate ||
+    s instanceof DhiCoercedBigInt;
 }
 
 // Compile a standalone validator for a single value: returns the
@@ -1287,9 +1333,26 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
       return `if(${vi}!==null){${innerCheck}}`;
     }
 
+    // Coercion (z.coerce.*): these subclass the primitive schemas, so they
+    // must be detected BEFORE the instanceof checks below. Emit the coercion
+    // first, then fall through to the normal primitive checks. (Previously
+    // they matched the parent branch and were validated WITHOUT coercion.)
+    let coerce = '';
+    if (schema instanceof DhiCoercedBigInt) {
+      return null; // BigInt() throws on bad input; interpreted path handles it
+    } else if (schema instanceof DhiCoercedString) {
+      coerce = `${vi}=String(${vi});`;
+    } else if (schema instanceof DhiCoercedNumber) {
+      coerce = `${vi}=Number(${vi});`;
+    } else if (schema instanceof DhiCoercedBoolean) {
+      coerce = `${vi}=Boolean(${vi});`;
+    } else if (schema instanceof DhiCoercedDate) {
+      coerce = `if(typeof ${vi}==="string"||typeof ${vi}==="number")${vi}=new Date(${vi});`;
+    }
+
     if (schema instanceof DhiString) {
       const checks = (schema as any).checks;
-      let code = `if(typeof ${vi}!=="string")return null;`;
+      let code = coerce + `if(typeof ${vi}!=="string")return null;`;
       for (const check of checks) {
         switch (check.type) {
           case 'min': code += `if(${vi}.length<${check.value})return null;`; break;
@@ -1352,7 +1415,7 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
 
     if (schema instanceof DhiNumber) {
       const checks = (schema as any).checks;
-      let code = `if(typeof ${vi}!=="number"||${vi}!==${vi})return null;`;
+      let code = coerce + `if(typeof ${vi}!=="number"||${vi}!==${vi})return null;`;
       for (const check of checks) {
         switch (check.type) {
           case 'min': code += `if(${vi}<${check.value})return null;`; break;
@@ -1376,7 +1439,7 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
     }
 
     if (schema instanceof DhiBoolean) {
-      return `if(typeof ${vi}!=="boolean")return null;`;
+      return coerce + `if(typeof ${vi}!=="boolean")return null;`;
     }
 
     if (schema instanceof DhiEnum) {
@@ -1409,7 +1472,7 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
 
     if (schema instanceof DhiDate) {
       const checks = (schema as any).checks;
-      let code = `if(!(${vi} instanceof Date)||${vi}.getTime()!==${vi}.getTime())return null;`;
+      let code = coerce + `if(!(${vi} instanceof Date)||${vi}.getTime()!==${vi}.getTime())return null;`;
       for (const check of checks) {
         switch (check.type) {
           case 'min': code += `if(${vi}.getTime()<${(check.value as Date).getTime()})return null;`; break;
@@ -1482,14 +1545,15 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
 
       const iv = `_i${names.length}_${idx}`;
       // Zero-copy fast loops for check-free primitive elements (matches the
-      // generic path: valid arrays are returned by reference, untouched)
-      if (elem instanceof DhiNumber && (elem as any).checks.length === 0) {
+      // generic path: valid arrays are returned by reference, untouched).
+      // Coerced subclasses must NOT take these loops (they transform values).
+      if (elem instanceof DhiNumber && (elem as any).checks.length === 0 && !jitIsCoerced(elem)) {
         return code + `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){if(typeof ${vi}[${iv}]!=="number")return null;}`;
       }
-      if (elem instanceof DhiString && (elem as any).checks.length === 0) {
+      if (elem instanceof DhiString && (elem as any).checks.length === 0 && !jitIsCoerced(elem)) {
         return code + `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){if(typeof ${vi}[${iv}]!=="string")return null;}`;
       }
-      if (elem instanceof DhiBoolean) {
+      if (elem instanceof DhiBoolean && !jitIsCoerced(elem)) {
         return code + `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){if(typeof ${vi}[${iv}]!=="boolean")return null;}`;
       }
 
@@ -1588,6 +1652,151 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
         out[k] = r;
       }
       return out;
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+  }
+
+  if (schema instanceof DhiTransform) {
+    // Inner check + transform call. Failure inside the transform maps to a
+    // unique sentinel (the output may legitimately be any value, incl. null).
+    const innerCheck = jitEmitFieldCheck(vi, (schema as any)._inner, vars, names, idx);
+    if (!innerCheck) return null;
+    const tf = (schema as any)._transform as (v: any) => any;
+    const FAIL = {};
+    const fname = `_tf${names.length}_${idx}`;
+    const sname = `_tS${names.length}_${idx}`;
+    names.push(fname, sname);
+    vars.push((v: any) => { try { return tf(v); } catch { return FAIL; } }, FAIL);
+    return `${innerCheck}${vi}=${fname}(${vi});if(${vi}===${sname})return null;`;
+  }
+
+  if (schema instanceof DhiRefine) {
+    const innerCheck = jitEmitFieldCheck(vi, (schema as any)._inner, vars, names, idx);
+    if (!innerCheck) return null;
+    const fname = `_rf${names.length}_${idx}`;
+    names.push(fname);
+    vars.push((schema as any)._check);
+    return `${innerCheck}if(!${fname}(${vi}))return null;`;
+  }
+
+  if (schema instanceof DhiSuperRefine) {
+    const innerCheck = jitEmitFieldCheck(vi, (schema as any)._inner, vars, names, idx);
+    if (!innerCheck) return null;
+    const refinement = (schema as any)._refinement;
+    const fname = `_sr${names.length}_${idx}`;
+    names.push(fname);
+    vars.push((v: any) => {
+      let ok = true;
+      refinement(v, { addIssue: () => { ok = false; } });
+      return ok;
+    });
+    return `${innerCheck}if(!${fname}(${vi}))return null;`;
+  }
+
+  if (schema instanceof DhiPipe) {
+    const ca = jitEmitFieldCheck(vi, (schema as any)._a, vars, names, idx);
+    if (!ca) return null;
+    const cb = jitEmitFieldCheck(vi, (schema as any)._b, vars, names, idx);
+    if (!cb) return null;
+    return ca + cb;
+  }
+
+  if (schema instanceof DhiSet) {
+    const valS = (schema as any).valueSchema;
+    const sizeChecks = [...(schema as any).checks];
+    if (jitCanOutputNull(valS)) return null;
+    const elemFn = jitCompileValueFn(valS);
+    if (!elemFn) return null;
+    const fname = `_st${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function setCheck(v: any) {
+      if (!(v instanceof Set)) return null;
+      for (const c of sizeChecks) {
+        if (c.type === 'min' && v.size < c.value) return null;
+        if (c.type === 'max' && v.size > c.value) return null;
+        if (c.type === 'size' && v.size !== c.value) return null;
+        if (c.type === 'nonempty' && v.size === 0) return null;
+      }
+      const out = new Set();
+      for (const item of v) {
+        const r = elemFn(item);
+        if (r === null) return null;
+        out.add(r);
+      }
+      return out;
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+  }
+
+  if (schema instanceof DhiMap) {
+    const keyS = (schema as any).keySchema;
+    const valS = (schema as any).valueSchema;
+    if (jitCanOutputNull(keyS) || jitCanOutputNull(valS)) return null;
+    const keyFn = jitCompileValueFn(keyS);
+    const valFn = jitCompileValueFn(valS);
+    if (!keyFn || !valFn) return null;
+    const fname = `_mp${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function mapCheck(v: any) {
+      if (!(v instanceof Map)) return null;
+      const out = new Map();
+      for (const [k, val] of v.entries()) {
+        const kr = keyFn(k);
+        if (kr === null) return null;
+        const vr = valFn(val);
+        if (vr === null) return null;
+        out.set(kr, vr);
+      }
+      return out;
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+  }
+
+  if (schema instanceof DhiLazy) {
+    // Defer resolving + compiling the inner schema until first parse: the
+    // getter is typically not callable at compile time (TDZ during recursive
+    // schema definition, e.g. const Node = z.object({kids: z.array(z.lazy(() => Node))})).
+    const getter = (schema as any).getter as () => DhiType<any, any>;
+    const FAIL = {};
+    let inner: ((v: any) => any) | null | undefined = undefined;
+    let interpreted: DhiType<any, any> | undefined;
+    const fname = `_lz${names.length}_${idx}`;
+    const sname = `_lS${names.length}_${idx}`;
+    names.push(fname, sname);
+    vars.push(function lazyCheck(v: any) {
+      if (inner === undefined) {
+        const resolved = getter();
+        inner = jitCanOutputNull(resolved) ? null : jitCompileValueFn(resolved);
+        if (inner === null) interpreted = resolved;
+      }
+      if (inner !== null) {
+        const r = inner(v);
+        return r === null ? FAIL : r; // compiled inner never outputs null
+      }
+      // Inner not JIT-able: interpreted fallback (handles legit null output)
+      const res = interpreted!._parse(v, EMPTY_PATH);
+      return res.success ? res.data : FAIL;
+    }, FAIL);
+    return `${vi}=${fname}(${vi});if(${vi}===${sname})return null;`;
+  }
+
+  if (schema instanceof DhiIntersection) {
+    const left = (schema as any).left;
+    const right = (schema as any).right;
+    if (jitCanOutputNull(left) || jitCanOutputNull(right)) return null;
+    const leftFn = jitCompileValueFn(left);
+    const rightFn = jitCompileValueFn(right);
+    if (!leftFn || !rightFn) return null;
+    const fname = `_ix${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function intersectionCheck(v: any) {
+      const l = leftFn(v);
+      if (l === null) return null;
+      const r = rightFn(v);
+      if (r === null) return null;
+      // Merge semantics identical to the interpreted path
+      if (typeof l === 'object' && typeof r === 'object') return { ...l, ...r };
+      return l;
     });
     return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
   }
@@ -1765,11 +1974,14 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     const keys = this._keys;
     const shape = this.shape;
     const issues: ZodIssue[] = [];
+    const recovered: Record<string, any> = {};
     for (let ki = 0; ki < keys.length; ki++) {
       const key = keys[ki];
       const fieldResult = shape[key]._parse(obj[key], [...path, key]);
       if (!fieldResult.success) {
         issues.push(...fieldResult.error.issues);
+      } else if (fieldResult.data !== undefined || key in obj) {
+        recovered[key] = fieldResult.data;
       }
     }
     if (this._unknownKeys === 'strict') {
@@ -1781,7 +1993,44 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
         }
       }
     }
+    if (issues.length === 0) {
+      // Safety net: the JIT rejected but field-by-field validation passes
+      // (semantic drift guard). Trust the interpreted result instead of
+      // emitting an error with zero issues.
+      if (this._unknownKeys === 'passthrough') {
+        const objKeys = Object.keys(obj);
+        for (let i = 0; i < objKeys.length; i++) {
+          if (!keys.includes(objKeys[i])) recovered[objKeys[i]] = obj[objKeys[i]];
+        }
+      }
+      return { success: true, data: recovered };
+    }
     return { success: false, error: new ZodError(issues) };
+  }
+
+  /**
+   * Fast-path overrides: dispatch straight to the compiled JIT validator,
+   * skipping the generic _parse pre-checks. parse() additionally avoids
+   * allocating the intermediate {success, data} result object entirely.
+   */
+  safeParse(value: unknown): SafeParseResult<any> {
+    if (this._jit === undefined) this._jit = this._compileJIT();
+    if (this._jit !== null) {
+      const r = this._jit(value);
+      if (r !== null) return { success: true, data: r };
+    }
+    return this._parse(value, EMPTY_PATH);
+  }
+
+  parse(value: unknown): any {
+    if (this._jit === undefined) this._jit = this._compileJIT();
+    if (this._jit !== null) {
+      const r = this._jit(value);
+      if (r !== null) return r;
+    }
+    const result = this._parse(value, EMPTY_PATH);
+    if (!result.success) throw result.error;
+    return result.data;
   }
 
   strict(message?: string): DhiObject<T> {
@@ -1963,7 +2212,7 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
 
     // Fast path: for primitive type schemas, validate inline without allocations
     const elem = this.element;
-    if (elem instanceof DhiNumber && (elem as any).checks.length === 0) {
+    if (elem instanceof DhiNumber && (elem as any).checks.length === 0 && !jitIsCoerced(elem)) {
       for (let i = 0; i < len; i++) {
         if (typeof value[i] !== 'number') {
           return { success: false, error: new ZodError([{ code: 'invalid_type', path: [...path, i], message: 'Expected number, received ' + typeof value[i] }]) };
@@ -1971,7 +2220,7 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
       }
       return { success: true, data: value as any };
     }
-    if (elem instanceof DhiString && (elem as any).checks.length === 0) {
+    if (elem instanceof DhiString && (elem as any).checks.length === 0 && !jitIsCoerced(elem)) {
       for (let i = 0; i < len; i++) {
         if (typeof value[i] !== 'string') {
           return { success: false, error: new ZodError([{ code: 'invalid_type', path: [...path, i], message: 'Expected string, received ' + typeof value[i] }]) };
@@ -1979,7 +2228,7 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
       }
       return { success: true, data: value as any };
     }
-    if (elem instanceof DhiBoolean) {
+    if (elem instanceof DhiBoolean && !jitIsCoerced(elem)) {
       for (let i = 0; i < len; i++) {
         if (typeof value[i] !== 'boolean') {
           return { success: false, error: new ZodError([{ code: 'invalid_type', path: [...path, i], message: 'Expected boolean, received ' + typeof value[i] }]) };
@@ -2158,6 +2407,8 @@ export class DhiMap<K extends DhiType<any, any>, V extends DhiType<any, any>> ex
   constructor(private keySchema: K, private valueSchema: V) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Map<K["_output"], V["_output"]>> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     if (!(value instanceof Map)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Map' }]) };
     }
@@ -2184,6 +2435,8 @@ export class DhiSet<T extends DhiType<any, any>> extends DhiType<Set<T["_output"
   constructor(private valueSchema: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Set<T["_output"]>> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     if (!(value instanceof Set)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Set' }]) };
     }
@@ -2225,6 +2478,8 @@ export class DhiUnion<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
   constructor(private options: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<UnionOutput<T>> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     const options = this.options;
     for (let i = 0; i < options.length; i++) {
       const option = options[i];
@@ -2288,6 +2543,8 @@ export class DhiIntersection<L extends DhiType<any, any>, R extends DhiType<any,
   constructor(private left: L, private right: R) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<L["_output"] & R["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     const leftResult = this.left._parse(value, path);
     if (!leftResult.success) return leftResult as any;
 
@@ -2311,6 +2568,8 @@ export class DhiLazy<T extends DhiType<any, any>> extends DhiType<T["_output"], 
   constructor(private getter: () => T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     return this.getter()._parse(value, path);
   }
 }
@@ -2478,6 +2737,8 @@ export class DhiRefine<T extends DhiType<any, any>> extends DhiType<T["_output"]
   constructor(private _inner: T, private _check: (value: T["_output"]) => boolean, private _message?: string, private _path?: (string | number)[]) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     const result = this._inner._parse(value, path);
     if (!result.success) return result;
     if (!this._check(result.data)) {
@@ -2491,6 +2752,8 @@ export class DhiSuperRefine<T extends DhiType<any, any>> extends DhiType<T["_out
   constructor(private _inner: T, private _refinement: (value: T["_output"], ctx: { addIssue: (issue: Partial<ZodIssue>) => void }) => void) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     const result = this._inner._parse(value, path);
     if (!result.success) return result;
 
@@ -2512,6 +2775,8 @@ export class DhiPipe<A extends DhiType<any, any>, B extends DhiType<any, any>> e
   constructor(private _a: A, private _b: B) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<B["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     const aResult = this._a._parse(value, path);
     if (!aResult.success) return aResult as any;
     return this._b._parse(aResult.data, path);
