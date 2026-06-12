@@ -1,0 +1,83 @@
+import { z } from '../schema';
+
+let fail = 0;
+function eq(a: any, b: any): boolean { return JSON.stringify(a) === JSON.stringify(b); }
+function check(label: string, schema: any, data: any) {
+  const jitRes = schema.safeParse(data);
+  // fresh clone of schema graph isn't trivial; instead disable JIT and re-parse
+  (schema as any)._jit = null;
+  const slowRes = schema.safeParse(data);
+  (schema as any)._jit = undefined;
+  const ok = jitRes.success === slowRes.success &&
+    (!jitRes.success || eq(jitRes.data, slowRes.data));
+  if (!ok) { fail++; console.log(`MISMATCH ${label}:`, JSON.stringify(jitRes), 'vs', JSON.stringify(slowRes)); }
+  else console.log(`ok ${label} (success=${jitRes.success})`);
+}
+
+// arrays of objects: valid + invalid + transform inside
+check('arr-obj valid', z.object({ items: z.array(z.object({ id: z.number() })) }), { items: [{ id: 1 }, { id: 2 }] });
+check('arr-obj invalid', z.object({ items: z.array(z.object({ id: z.number() })) }), { items: [{ id: 'x' }] });
+check('arr-obj strip extras', z.object({ items: z.array(z.object({ id: z.number() })) }), { items: [{ id: 1, junk: true }] });
+check('arr trim transform', z.object({ tags: z.array(z.string().trim()) }), { tags: ['  a  ', 'b'] });
+check('arr len min fail', z.object({ t: z.array(z.string()).min(3) }), { t: ['a'] });
+check('arr len max ok', z.object({ t: z.array(z.string()).max(3) }), { t: ['a'] });
+check('arr nonempty fail', z.object({ t: z.array(z.number()).nonempty() }), { t: [] });
+check('arr enum', z.object({ r: z.array(z.enum(['a','b'])) }), { r: ['a','b'] });
+check('arr enum bad', z.object({ r: z.array(z.enum(['a','b'])) }), { r: ['a','z'] });
+
+// defaults
+check('default applied', z.object({ n: z.string(), role: z.string().default('user') }), { n: 'x' });
+check('default not applied', z.object({ n: z.string(), role: z.string().default('user') }), { n: 'x', role: 'admin' });
+check('default factory', z.object({ l: z.array(z.number()).default(() => [1]) }), {});
+check('default inner fail', z.object({ role: z.string().default('user') }), { role: 5 });
+
+// dates
+check('date valid', z.object({ d: z.date() }), { d: new Date(1000) });
+check('date invalid', z.object({ d: z.date() }), { d: 'nope' });
+check('date NaN', z.object({ d: z.date() }), { d: new Date('garbage') });
+check('date min fail', z.object({ d: z.date().min(new Date(2000)) }), { d: new Date(1000) });
+
+// unions
+check('union str ok', z.object({ id: z.union([z.string(), z.number()]) }), { id: 'a' });
+check('union num ok', z.object({ id: z.union([z.string(), z.number()]) }), { id: 7 });
+check('union fail', z.object({ id: z.union([z.string(), z.number()]) }), { id: true });
+check('union w/ transform', z.object({ id: z.union([z.string().trim(), z.number()]) }), { id: ' x ' });
+
+// null / any / unknown / undefined
+check('null field', z.object({ x: z.null() }), { x: null });
+check('null fail', z.object({ x: z.null() }), { x: 1 });
+check('any field', z.object({ x: z.any() }), { x: { deep: [1] } });
+check('unknown field', z.object({ x: z.unknown() }), { x: undefined });
+
+// passthrough / strict
+check('passthrough keeps extras', z.object({ a: z.string() }).passthrough(), { a: 'x', b: 1, c: [2] });
+check('passthrough invalid', z.object({ a: z.string() }).passthrough(), { a: 5, b: 1 });
+check('strict ok', z.object({ a: z.string() }).strict(), { a: 'x' });
+check('strict extra fail', z.object({ a: z.string() }).strict(), { a: 'x', b: 1 });
+
+// strict error must include unrecognized_keys issue
+const strictS = z.object({ a: z.string() }).strict();
+const r = strictS.safeParse({ a: 'x', b: 1 });
+if (!r.success && r.error.issues.some((i: any) => i.code === 'unrecognized_keys')) console.log('ok strict issue code');
+else { fail++; console.log('MISMATCH strict issue code:', JSON.stringify(r)); }
+
+// optional + nullable still fine
+check('optional missing', z.object({ a: z.string().optional() }), {});
+check('nullable null', z.object({ a: z.string().nullable() }), { a: null });
+
+// copy-on-transform: original array must not be mutated
+const sch = z.object({ tags: z.array(z.string().trim()) });
+const input = { tags: [' a '] };
+const out = sch.safeParse(input) as any;
+if (input.tags[0] === ' a ' && out.data.tags[0] === 'a' && out.data.tags !== input.tags) console.log('ok copy-on-transform');
+else { fail++; console.log('MISMATCH copy-on-transform', JSON.stringify({ input, out: out.data })); }
+
+// no-transform: array identity preserved
+const sch2 = z.object({ nums: z.array(z.number().int()) });
+const input2 = { nums: [1, 2] };
+const out2 = sch2.safeParse(input2) as any;
+if (out2.data.nums === input2.nums) console.log('ok identity preserved');
+else { fail++; console.log('MISMATCH identity'); }
+
+console.log(fail === 0 ? '\nALL SEMANTICS MATCH' : `\n${fail} FAILURES`);
+process.exit(fail ? 1 : 0);

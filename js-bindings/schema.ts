@@ -1250,8 +1250,9 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
   }
 
   private _compileJIT(): ((value: any) => any) | null {
-    if (this._unknownKeys !== 'strip') return null;
+    if (this._catchall) return null;
 
+    const mode = this._unknownKeys;
     const keys = this._keys;
     const shape = this.shape;
     const closureVars: any[] = [];
@@ -1260,6 +1261,13 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
 
     bodyLines.push('return function(v){');
     bodyLines.push('if(typeof v!=="object"||v===null||Array.isArray(v))return null;');
+
+    if (mode === 'strict') {
+      // Reject unknown keys up front (error details produced by slow path)
+      closureNames.push('_known');
+      closureVars.push(new Set(keys));
+      bodyLines.push('var _ks=Object.keys(v);for(var _q=0;_q<_ks.length;_q++){if(!_known.has(_ks[_q]))return null;}');
+    }
 
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -1274,15 +1282,63 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     }
 
     // Build result object
-    bodyLines.push('return{');
-    for (let i = 0; i < keys.length; i++) {
-      bodyLines.push(`${JSON.stringify(keys[i])}:v${i},`);
+    if (mode === 'passthrough') {
+      // Copy unknown keys first, then overwrite with validated/transformed values
+      bodyLines.push('var _r={};var _ks=Object.keys(v);for(var _q=0;_q<_ks.length;_q++){_r[_ks[_q]]=v[_ks[_q]];}');
+      for (let i = 0; i < keys.length; i++) {
+        bodyLines.push(`_r[${JSON.stringify(keys[i])}]=v${i};`);
+      }
+      bodyLines.push('return _r;};');
+    } else {
+      bodyLines.push('return{');
+      for (let i = 0; i < keys.length; i++) {
+        bodyLines.push(`${JSON.stringify(keys[i])}:v${i},`);
+      }
+      bodyLines.push('};};');
     }
-    bodyLines.push('};};');
 
     try {
       const fn = new Function(...closureNames, bodyLines.join('\n'));
       return fn(...closureVars);
+    } catch {
+      return null;
+    }
+  }
+
+  // True if `schema` can legitimately produce null as output. Such schemas
+  // can't participate in JIT contexts that use null as the failure sentinel
+  // (union members, array element validators).
+  private _canOutputNull(schema: DhiType<any, any>): boolean {
+    if (schema instanceof DhiNullable || schema instanceof DhiNull ||
+        schema instanceof DhiAny || schema instanceof DhiUnknown ||
+        schema instanceof DhiDefault || schema instanceof DhiOptional ||
+        schema instanceof DhiCatch) {
+      return true;
+    }
+    if (schema instanceof DhiLiteral) return (schema as any).value === null;
+    if (schema instanceof DhiUnion) {
+      return ((schema as any).options as DhiType<any, any>[]).some(o => this._canOutputNull(o));
+    }
+    return false;
+  }
+
+  // Compile a standalone validator for a single value: returns the
+  // (possibly transformed) value, or null on failure. Used for JITting
+  // array elements and union members.
+  private _compileValueFn(schema: DhiType<any, any>): ((v: any) => any) | null {
+    if (schema instanceof DhiObject) {
+      if ((schema as any)._jit === undefined) {
+        (schema as any)._jit = (schema as any)._compileJIT();
+      }
+      return (schema as any)._jit;
+    }
+    const vars: any[] = [];
+    const names: string[] = [];
+    const check = this._emitFieldCheck('v', schema, vars, names, 0);
+    if (!check) return null;
+    try {
+      const fn = new Function(...names, `return function(v){${check}return v;};`);
+      return fn(...vars);
     } catch {
       return null;
     }
@@ -1409,36 +1465,124 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
 
     if (schema instanceof DhiObject) {
       // Recursively JIT nested objects
-      const fname = `_obj${idx}`;
-      names.push(fname);
+      const fname = `_obj${names.length}_${idx}`;
       // Ensure nested object has its JIT compiled
       if ((schema as any)._jit === undefined) {
         (schema as any)._jit = (schema as any)._compileJIT();
       }
       const nestedJit = (schema as any)._jit;
       if (nestedJit) {
+        names.push(fname);
         vars.push(nestedJit);
         return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
       }
       return null; // Can't JIT nested object
     }
 
-    if (schema instanceof DhiArray) {
-      const elem = (schema as any).element;
-      const elemChecks = (schema as any).checks;
-      // Only JIT simple arrays (no length checks, primitive elements)
-      if (elemChecks.length === 0) {
-        if (elem instanceof DhiNumber && (elem as any).checks.length === 0) {
-          return `if(!Array.isArray(${vi}))return null;for(var _i${idx}=0;_i${idx}<${vi}.length;_i${idx}++){if(typeof ${vi}[_i${idx}]!=="number")return null;}`;
-        }
-        if (elem instanceof DhiString && (elem as any).checks.length === 0) {
-          return `if(!Array.isArray(${vi}))return null;for(var _i${idx}=0;_i${idx}<${vi}.length;_i${idx}++){if(typeof ${vi}[_i${idx}]!=="string")return null;}`;
-        }
-        if (elem instanceof DhiBoolean) {
-          return `if(!Array.isArray(${vi}))return null;for(var _i${idx}=0;_i${idx}<${vi}.length;_i${idx}++){if(typeof ${vi}[_i${idx}]!=="boolean")return null;}`;
+    if (schema instanceof DhiDate) {
+      const checks = (schema as any).checks;
+      let code = `if(!(${vi} instanceof Date)||${vi}.getTime()!==${vi}.getTime())return null;`;
+      for (const check of checks) {
+        switch (check.type) {
+          case 'min': code += `if(${vi}.getTime()<${(check.value as Date).getTime()})return null;`; break;
+          case 'max': code += `if(${vi}.getTime()>${(check.value as Date).getTime()})return null;`; break;
+          default: return null;
         }
       }
-      return null; // Can't JIT complex arrays
+      return code;
+    }
+
+    if (schema instanceof DhiAny || schema instanceof DhiUnknown) {
+      return ';'; // no check needed
+    }
+
+    if (schema instanceof DhiNull) {
+      return `if(${vi}!==null)return null;`;
+    }
+
+    if (schema instanceof DhiUndefined) {
+      return `if(${vi}!==undefined)return null;`;
+    }
+
+    if (schema instanceof DhiDefault) {
+      const inner = (schema as any)._inner;
+      const dflt = (schema as any)._default;
+      const innerCheck = this._emitFieldCheck(vi, inner, vars, names, idx);
+      if (!innerCheck) return null;
+      const fname = `_df${names.length}_${idx}`;
+      names.push(fname);
+      vars.push(typeof dflt === 'function' ? dflt : () => dflt);
+      return `if(${vi}===undefined){${vi}=${fname}();}else{${innerCheck}}`;
+    }
+
+    if (schema instanceof DhiUnion) {
+      // JIT unions whose members can't output null (null = failure sentinel)
+      const options = (schema as any).options as DhiType<any, any>[];
+      const fns: Array<(v: any) => any> = [];
+      for (const opt of options) {
+        if (this._canOutputNull(opt)) return null;
+        const fn = this._compileValueFn(opt);
+        if (!fn) return null;
+        fns.push(fn);
+      }
+      const fname = `_un${names.length}_${idx}`;
+      names.push(fname);
+      vars.push(function unionCheck(v: any) {
+        for (let i = 0; i < fns.length; i++) {
+          const r = fns[i](v);
+          if (r !== null) return r;
+        }
+        return null;
+      });
+      return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+    }
+
+    if (schema instanceof DhiArray) {
+      const elem = (schema as any).element;
+      const lenChecks = (schema as any).checks;
+
+      let code = `if(!Array.isArray(${vi}))return null;`;
+      for (const check of lenChecks) {
+        switch (check.type) {
+          case 'min': code += `if(${vi}.length<${check.value})return null;`; break;
+          case 'max': code += `if(${vi}.length>${check.value})return null;`; break;
+          case 'length': code += `if(${vi}.length!==${check.value})return null;`; break;
+          case 'nonempty': code += `if(${vi}.length===0)return null;`; break;
+          default: return null;
+        }
+      }
+
+      const iv = `_i${names.length}_${idx}`;
+      // Zero-copy fast loops for check-free primitive elements (matches the
+      // generic path: valid arrays are returned by reference, untouched)
+      if (elem instanceof DhiNumber && (elem as any).checks.length === 0) {
+        return code + `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){if(typeof ${vi}[${iv}]!=="number")return null;}`;
+      }
+      if (elem instanceof DhiString && (elem as any).checks.length === 0) {
+        return code + `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){if(typeof ${vi}[${iv}]!=="string")return null;}`;
+      }
+      if (elem instanceof DhiBoolean) {
+        return code + `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){if(typeof ${vi}[${iv}]!=="boolean")return null;}`;
+      }
+
+      // General path: any JIT-able element (nested objects, enums, literals,
+      // checked primitives, unions, ...). Copy-on-transform keeps reference
+      // semantics identical to the interpreted path.
+      if (this._canOutputNull(elem)) return null;
+      const elemFn = this._compileValueFn(elem);
+      if (!elemFn) return null;
+      const fname = `_el${names.length}_${idx}`;
+      const ev = `_e${names.length}_${idx}`;
+      const cv = `_c${names.length}_${idx}`;
+      names.push(fname);
+      vars.push(elemFn);
+      return code +
+        `var ${cv}=false;` +
+        `for(var ${iv}=0;${iv}<${vi}.length;${iv}++){` +
+        `var ${ev}=${fname}(${vi}[${iv}]);` +
+        `if(${ev}===null)return null;` +
+        `if(${ev}!==${vi}[${iv}]){if(!${cv}){${vi}=${vi}.slice();${cv}=true;}${vi}[${iv}]=${ev};}` +
+        `}`;
     }
 
     return null; // Unknown schema type, can't JIT
@@ -1519,6 +1663,15 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
       const fieldResult = shape[key]._parse(obj[key], [...path, key]);
       if (!fieldResult.success) {
         issues.push(...fieldResult.error.issues);
+      }
+    }
+    if (this._unknownKeys === 'strict') {
+      // The strict JIT rejects unknown keys without details; report them here
+      const objKeys = Object.keys(obj);
+      for (let i = 0; i < objKeys.length; i++) {
+        if (!keys.includes(objKeys[i])) {
+          issues.push({ code: 'unrecognized_keys', path, message: `Unrecognized key(s) in object: '${objKeys[i]}'` });
+        }
       }
     }
     return { success: false, error: new ZodError(issues) };
