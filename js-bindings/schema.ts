@@ -1251,8 +1251,25 @@ function jitCanOutputNull(schema: DhiType<any, any>): boolean {
       return jitCanOutputNull((schema as any)._inner);
     }
     if (schema instanceof DhiPipe) return jitCanOutputNull((schema as any)._b);
+    if (schema instanceof DhiIntersection) {
+      return jitCanOutputNull((schema as any).left) || jitCanOutputNull((schema as any).right);
+    }
+    if (schema instanceof DhiLazy) {
+      // The getter may not be callable yet (TDZ during recursive schema
+      // definition) and may recurse; guard both.
+      if (_jitLazyVisiting.has(schema)) return false; // cycle: assume inner decides
+      _jitLazyVisiting.add(schema);
+      try {
+        return jitCanOutputNull((schema as any).getter());
+      } catch {
+        return true; // can't resolve yet: be conservative
+      } finally {
+        _jitLazyVisiting.delete(schema);
+      }
+    }
     return false;
 }
+const _jitLazyVisiting = new WeakSet<object>();
 
 // Generic top-level JIT fast path for wrapper/composite schemas (refine,
 // pipe, union, set, map, ...). Compiles a standalone validator on first use;
@@ -1731,6 +1748,55 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
         out.set(kr, vr);
       }
       return out;
+    });
+    return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
+  }
+
+  if (schema instanceof DhiLazy) {
+    // Defer resolving + compiling the inner schema until first parse: the
+    // getter is typically not callable at compile time (TDZ during recursive
+    // schema definition, e.g. const Node = z.object({kids: z.array(z.lazy(() => Node))})).
+    const getter = (schema as any).getter as () => DhiType<any, any>;
+    const FAIL = {};
+    let inner: ((v: any) => any) | null | undefined = undefined;
+    let interpreted: DhiType<any, any> | undefined;
+    const fname = `_lz${names.length}_${idx}`;
+    const sname = `_lS${names.length}_${idx}`;
+    names.push(fname, sname);
+    vars.push(function lazyCheck(v: any) {
+      if (inner === undefined) {
+        const resolved = getter();
+        inner = jitCanOutputNull(resolved) ? null : jitCompileValueFn(resolved);
+        if (inner === null) interpreted = resolved;
+      }
+      if (inner !== null) {
+        const r = inner(v);
+        return r === null ? FAIL : r; // compiled inner never outputs null
+      }
+      // Inner not JIT-able: interpreted fallback (handles legit null output)
+      const res = interpreted!._parse(v, EMPTY_PATH);
+      return res.success ? res.data : FAIL;
+    }, FAIL);
+    return `${vi}=${fname}(${vi});if(${vi}===${sname})return null;`;
+  }
+
+  if (schema instanceof DhiIntersection) {
+    const left = (schema as any).left;
+    const right = (schema as any).right;
+    if (jitCanOutputNull(left) || jitCanOutputNull(right)) return null;
+    const leftFn = jitCompileValueFn(left);
+    const rightFn = jitCompileValueFn(right);
+    if (!leftFn || !rightFn) return null;
+    const fname = `_ix${names.length}_${idx}`;
+    names.push(fname);
+    vars.push(function intersectionCheck(v: any) {
+      const l = leftFn(v);
+      if (l === null) return null;
+      const r = rightFn(v);
+      if (r === null) return null;
+      // Merge semantics identical to the interpreted path
+      if (typeof l === 'object' && typeof r === 'object') return { ...l, ...r };
+      return l;
     });
     return `${vi}=${fname}(${vi});if(${vi}===null)return null;`;
   }
@@ -2477,6 +2543,8 @@ export class DhiIntersection<L extends DhiType<any, any>, R extends DhiType<any,
   constructor(private left: L, private right: R) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<L["_output"] & R["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     const leftResult = this.left._parse(value, path);
     if (!leftResult.success) return leftResult as any;
 
@@ -2500,6 +2568,8 @@ export class DhiLazy<T extends DhiType<any, any>> extends DhiType<T["_output"], 
   constructor(private getter: () => T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    const fast = jitTryFast(this, value);
+    if (fast) return fast;
     return this.getter()._parse(value, path);
   }
 }

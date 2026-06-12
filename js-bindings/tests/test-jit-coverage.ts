@@ -140,6 +140,19 @@ const mapS = z.object({ m: z.map(z.string(), z.number()) });
 }
 check('map bad value', z.object({ m: z.map(z.string(), z.number()) }), { m: new Map([['a', 'x']]) });
 
+// lazy (recursive schemas)
+const Node: any = z.object({ value: z.number(), children: z.array(z.lazy(() => Node)).optional() });
+check('lazy recursive ok', Node, { value: 1, children: [{ value: 2, children: [{ value: 3 }] }] });
+check('lazy recursive bad leaf', Node, { value: 1, children: [{ value: 'x' }] });
+check('lazy recursive empty', Node, { value: 1 });
+
+// intersection
+const IxA = z.object({ a: z.string() });
+const IxB = z.object({ b: z.number() });
+check('intersection top ok', z.intersection(IxA, IxB), { a: 'x', b: 1 });
+check('intersection top bad', z.intersection(IxA, IxB), { a: 'x', b: 'no' });
+check('intersection nested', z.object({ both: z.intersection(IxA, IxB) }), { both: { a: 'x', b: 1 } });
+
 // copy-on-transform: original array must not be mutated
 const sch = z.object({ tags: z.array(z.string().trim()) });
 const input = { tags: [' a '] };
