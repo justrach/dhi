@@ -828,6 +828,41 @@ def _compile_model_fields(cls, hints: dict) -> None:
 _GENERIC_INIT = None
 
 
+def _raise_native_validation_errors(pairs):
+    """Raiser callable handed to the C vectorcall fast path.
+
+    The C side builds the (field, msg) pair list; raising stays in Python so
+    exception classes/messages are identical to the __init__ path.
+    """
+    raise ValidationErrors([ValidationError(f, m) for f, m in pairs])
+
+
+def _sync_fast_construct(cls) -> None:
+    """Enable/disable the C vectorcall construction fast path for a class.
+
+    When enabled, ``Cls(field=value, ...)`` dispatches straight into C with no
+    type_call/tp_init slot dance, no Python __init__ frame, and no **kwargs
+    dict allocation. Only safe when construction is exactly equivalent to the
+    specialized fast __init__ (ultra-fast native validation, no post-init, no
+    custom __init__/__new__ anywhere in the MRO).
+    """
+    if _dhi_native is None or not hasattr(_dhi_native, 'enable_fast_construct'):
+        return
+    eligible = (
+        cls.__dhi_use_ultra_fast__
+        and not cls.__dhi_needs_post_init__
+        and cls.__dhi_compiled_specs__ is not None
+        and getattr(cls.__init__, '_dhi_managed', False)
+        and cls.__new__ is object.__new__
+    )
+    if eligible:
+        _dhi_native.enable_fast_construct(
+            cls, cls.__dhi_compiled_specs__, cls.__dhi_extra_mode_int__,
+            _raise_native_validation_errors)
+    else:
+        _dhi_native.disable_fast_construct(cls)
+
+
 def _make_fast_init(_compiled, _extra_mode):
     """Specialized __init__ for ultra-fast classes that need no post-init.
 
@@ -923,6 +958,10 @@ class _ModelMeta(type):
                 # Pin the generic init so we don't inherit a parent's specialized
                 # __init__ (which captured the parent's specs, not ours).
                 cls.__init__ = _GENERIC_INIT
+
+        # Install (or remove) the C vectorcall construction fast path now that
+        # all flags and __init__ are final.
+        _sync_fast_construct(cls)
 
         return cls
 
@@ -1330,6 +1369,12 @@ class BaseModel(metaclass=_ModelMeta):
         Returns:
             Validated model instance.
         """
+        # FAST PATH: dict input on a fast-construct class -> single C call
+        # (alloc + validate + attr setup). Mirrors the vectorcall __init__ path.
+        if type(obj) is dict and not from_attributes and \
+                '__dhi_fast_construct__' in cls.__dict__:
+            return _dhi_native.construct_validated(cls, obj)
+
         # Handle model instances
         if isinstance(obj, cls):
             return obj
@@ -1904,6 +1949,9 @@ class BaseModel(metaclass=_ModelMeta):
         # Re-run __init_subclass__ logic to update custom validator flags
         has_custom = getattr(cls, '__dhi_has_custom_validators__', False)
         cls.__dhi_use_ultra_fast__ = cls.__dhi_full_native__ and not has_custom
+
+        # Keep the C vectorcall fast path in sync with the recompiled specs
+        _sync_fast_construct(cls)
 
         return True
 
