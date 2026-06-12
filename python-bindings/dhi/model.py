@@ -122,7 +122,6 @@ def _model_to_json_schema(
     definitions: Dict[str, Dict[str, Any]],
     ref_template: str,
     by_alias: bool,
-    root_model: type,
 ) -> Dict[str, Any]:
     schema: Dict[str, Any] = {
         "title": model_cls.__name__,
@@ -138,7 +137,6 @@ def _model_to_json_schema(
             definitions=definitions,
             ref_template=ref_template,
             by_alias=by_alias,
-            root_model=root_model,
         )
         _apply_schema_constraints(prop, field_data.get('constraints', []), field_info)
 
@@ -166,7 +164,6 @@ def _annotation_to_json_schema(
     definitions: Dict[str, Dict[str, Any]],
     ref_template: str,
     by_alias: bool,
-    root_model: type,
 ) -> Dict[str, Any]:
     base_type, constraints = _extract_constraints(annotation)
 
@@ -178,7 +175,6 @@ def _annotation_to_json_schema(
                 definitions=definitions,
                 ref_template=ref_template,
                 by_alias=by_alias,
-                root_model=root_model,
             )
         return {"$ref": _model_ref(base_type, ref_template)}
 
@@ -198,7 +194,6 @@ def _annotation_to_json_schema(
                     definitions=definitions,
                     ref_template=ref_template,
                     by_alias=by_alias,
-                    root_model=root_model,
                 )
                 for item_type in args
             ]
@@ -215,7 +210,6 @@ def _annotation_to_json_schema(
                 definitions=definitions,
                 ref_template=ref_template,
                 by_alias=by_alias,
-                root_model=root_model,
             )
         else:
             schema["items"] = {}
@@ -229,7 +223,6 @@ def _annotation_to_json_schema(
                 definitions=definitions,
                 ref_template=ref_template,
                 by_alias=by_alias,
-                root_model=root_model,
             )
         return schema
 
@@ -241,7 +234,6 @@ def _annotation_to_json_schema(
                     definitions=definitions,
                     ref_template=ref_template,
                     by_alias=by_alias,
-                    root_model=root_model,
                 )
                 for arg in args
             ]
@@ -1891,8 +1883,12 @@ class BaseModel(metaclass=_ModelMeta):
             definitions=definitions,
             ref_template=ref_template,
             by_alias=by_alias,
-            root_model=cls,
         )
+        if cls.__name__ in definitions:
+            # Recursive/self-referential model: match Pydantic by placing the
+            # root schema in $defs and returning a $ref to it.
+            definitions[cls.__name__] = schema
+            return {'$ref': _model_ref(cls, ref_template), '$defs': definitions}
         if definitions:
             schema['$defs'] = definitions
         return schema

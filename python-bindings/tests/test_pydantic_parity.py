@@ -403,6 +403,7 @@ class TestBaseModel:
     def test_model_json_schema_supports_fixed_tuple_schemas(self):
         class M(BaseModel):
             value: tuple[int, str]
+            homogeneous: tuple[int, ...]
 
         schema = M.model_json_schema()
 
@@ -414,6 +415,10 @@ class TestBaseModel:
             ],
             "minItems": 2,
             "maxItems": 2,
+        }
+        assert schema["properties"]["homogeneous"] == {
+            "type": "array",
+            "items": {"type": "integer"},
         }
 
     def test_model_json_schema_marks_set_like_schemas_unique(self):
@@ -442,10 +447,26 @@ class TestBaseModel:
         schema = Node.model_json_schema()
         json.dumps(schema)
 
-        assert schema["properties"]["child"] == {"$ref": "#/$defs/Node"}
-        assert schema["$defs"]["Node"]["properties"]["child"] == {
-            "$ref": "#/$defs/Node"
-        }
+        # Pydantic parity: recursive models return a root $ref into $defs.
+        assert schema["$ref"] == "#/$defs/Node"
+        node_def = schema["$defs"]["Node"]
+        assert node_def["title"] == "Node"
+        assert node_def["properties"]["value"] == {"type": "integer"}
+        assert node_def["properties"]["child"] == {"$ref": "#/$defs/Node"}
+
+    def test_model_json_schema_optional_self_reference(self):
+        from typing import Optional
+
+        class Tree(BaseModel):
+            value: int
+            child: Optional["Tree"] = None
+
+        schema = Tree.model_json_schema()
+        json.dumps(schema)
+
+        assert schema["$ref"] == "#/$defs/Tree"
+        child = schema["$defs"]["Tree"]["properties"]["child"]
+        assert {"$ref": "#/$defs/Tree"} in child["anyOf"]
 
     def test_model_repr(self):
         class M(BaseModel):
