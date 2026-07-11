@@ -8,7 +8,6 @@ const std = @import("std");
 ///
 /// AVX-512 Support: Uses std.simd.suggestVectorLength() to dynamically
 /// select optimal SIMD width (32 for AVX2, 64 for AVX-512).
-
 /// Optimal SIMD block size - auto-detected at compile time.
 /// Uses 64 bytes on AVX-512 capable CPUs, 32 bytes otherwise.
 const optimal_block_size = std.simd.suggestVectorLength(u8) orelse 32;
@@ -16,7 +15,7 @@ const optimal_block_size = std.simd.suggestVectorLength(u8) orelse 32;
 /// Character frequency table for selecting rarest bytes in a needle.
 /// Lower values = rarer characters = fewer false positives in SIMD scan.
 const CHAR_FREQUENCY: [256]u8 = blk: {
-    var freq: [256]u8 = [_]u8{0} ** 256;
+    var freq: [256]u8 = @splat(0);
     // Space and common letters get high frequency
     freq[' '] = 255;
     freq['e'] = 250;

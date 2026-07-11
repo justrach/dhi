@@ -48,7 +48,6 @@ pub const ValidationError = struct {
         self: ValidationError,
         writer: anytype,
     ) !void {
-
         if (self.path.len > 0) {
             for (self.path, 0..) |segment, i| {
                 try writer.writeAll(segment);
@@ -71,7 +70,7 @@ pub const ValidationErrors = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) ValidationErrors {
-        return .{ 
+        return .{
             .errors = std.ArrayList(ValidationError).empty,
             .allocator = allocator,
         };
@@ -229,7 +228,7 @@ pub const Email = struct {
         }
         if (at_count != 1) return false;
         if (at_pos == 0 or at_pos == s.len - 1) return false;
-        
+
         // Check for at least one dot in domain
         const domain = s[at_pos + 1 ..];
         const has_dot = std.mem.indexOf(u8, domain, ".") != null;
@@ -316,20 +315,20 @@ pub fn validateStruct(comptime T: type, val: T, errors: *ValidationErrors) !void
     const info = @typeInfo(T);
     if (info != .@"struct") @compileError("validateStruct expects a struct");
 
-    inline for (info.@"struct".fields) |f| {
-        const field_val = @field(val, f.name);
+    inline for (info.@"struct".field_names) |field_name| {
+        const field_val = @field(val, field_name);
 
         // Convention: fields ending with "_ne" must be non-empty strings
-        if (std.mem.endsWith(u8, f.name, "_ne")) {
+        if (std.mem.endsWith(u8, field_name, "_ne")) {
             if (@TypeOf(field_val) == []const u8 and field_val.len == 0) {
-                try errors.add(f.name, "Field cannot be empty");
+                try errors.add(field_name, "Field cannot be empty");
             }
         }
 
         // Convention: fields named "email" or ending with "_email" must be valid emails
-        if (std.mem.eql(u8, f.name, "email") or std.mem.endsWith(u8, f.name, "_email")) {
+        if (std.mem.eql(u8, field_name, "email") or std.mem.endsWith(u8, field_name, "_email")) {
             if (@TypeOf(field_val) == []const u8) {
-                _ = Email.validate(field_val, errors, f.name) catch {};
+                _ = Email.validate(field_val, errors, field_name) catch {};
             }
         }
 
