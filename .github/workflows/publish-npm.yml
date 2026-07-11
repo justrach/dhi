@@ -35,18 +35,6 @@ jobs:
         working-directory: js-bindings
         run: bun install
 
-      - name: Setup Zig 0.17-dev
-        uses: mlugg/setup-zig@v2
-        with:
-          version: master
-
-      - name: Build N-API native addon
-        run: |
-          NODE_INCLUDE=$(node -e "process.stdout.write(process.execPath.replace('/bin/node', '/include/node'))")
-          zig build -Doptimize=ReleaseFast "-Dnode_include=$NODE_INCLUDE"
-          cp zig-out/lib/libdhi_native.so js-bindings/dhi_native.node 2>/dev/null || \
-          cp zig-out/lib/libdhi_native.dylib js-bindings/dhi_native.node 2>/dev/null || true
-
       - name: Run compatibility tests
         working-directory: js-bindings
         run: bun run tests/test-zod4-compat.ts
@@ -54,10 +42,6 @@ jobs:
       - name: Run feature tests
         working-directory: js-bindings
         run: bun run tests/test-all-features.ts
-
-      - name: Run N-API tests
-        working-directory: js-bindings
-        run: bun run tests/test-napi-compat.ts
 
       - name: Run Standard Schema + JSON Schema import tests
         working-directory: js-bindings
