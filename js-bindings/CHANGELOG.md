@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1] - 2026-07-11
+
+### Fixed
+- Added Zig 0.17-dev compatibility for compile-time struct reflection.
+- Replaced deprecated array repetition syntax with `@splat`.
+- Updated CI and package metadata to require and test Zig 0.17-dev.
+
 ## [0.3.0] - 2025-01-04
 
 ### 🎉 Major Release - Drop-in Zod Replacement!
