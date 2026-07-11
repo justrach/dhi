@@ -125,7 +125,8 @@ jobs:
           # extremely slow); the wheels are still built and shipped.
           CIBW_TEST_SKIP: "*-manylinux_aarch64 *-musllinux_aarch64"
           CIBW_BUILD_VERBOSITY: 1
-          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.0
+          # Zig 0.17 currently emits macOS 14.0 dylibs; keep wheel metadata aligned.
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=14.0
         with:
           package-dir: ./python-bindings
           output-dir: wheelhouse
@@ -160,7 +161,7 @@ jobs:
     name: Publish to PyPI
     needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Download all artifacts
