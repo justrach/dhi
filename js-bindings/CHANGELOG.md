@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2] - 2026-07-11
+
+### Fixed
+- Unblocked npm publishing by removing the unsupported N-API build from the release workflow.
+- Aligned macOS wheel metadata with Zig 0.17's macOS 14.0 deployment target.
+- Enabled manual PyPI publishing from the wheel workflow.
+
 ## [1.5.1] - 2026-07-11
 
 ### Fixed
