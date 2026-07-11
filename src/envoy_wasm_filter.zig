@@ -122,7 +122,7 @@ const RequestState = struct {
 var config_storage: [MAX_CONFIG_BYTES]u8 = undefined;
 var route_rules: [MAX_ROUTES]RouteRule = undefined;
 var field_rules: [MAX_RULES]FieldRule = undefined;
-var request_states: [MAX_STREAMS]RequestState = [_]RequestState{.{}} ** MAX_STREAMS;
+var request_states: [MAX_STREAMS]RequestState = @splat(.{});
 var host_alloc_storage: [MAX_HOST_ALLOC_BYTES]u8 align(8) = undefined;
 var host_alloc_offset: usize = 0;
 var config: FilterConfig = .{ .routes = &.{} };

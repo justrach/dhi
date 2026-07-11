@@ -236,35 +236,29 @@ pub const ValidationError = error{
 ///
 pub fn Model(comptime name: []const u8, comptime spec: anytype) type {
     const SpecType = @TypeOf(spec);
-    const spec_fields = @typeInfo(SpecType).@"struct".fields;
+    const spec_field_names = @typeInfo(SpecType).@"struct".field_names;
 
     return struct {
         /// The model name (for error messages and schemas)
         pub const Name = name;
 
         /// Number of fields in this model
-        pub const field_count = spec_fields.len;
+        pub const field_count = spec_field_names.len;
 
         /// Validate input data against the schema. Returns the validated data or an error.
         /// Equivalent to Pydantic's `model_validate()`.
         pub fn parse(input: anytype) ValidationError!@TypeOf(input) {
-            inline for (spec_fields) |sf| {
-                const desc: FieldDesc = @field(spec, sf.name);
-                const val = @field(input, sf.name);
-                try validateField(desc, val, sf.name);
+            inline for (spec_field_names) |field_name| {
+                const desc: FieldDesc = @field(spec, field_name);
+                const val = @field(input, field_name);
+                try validateField(desc, val, field_name);
             }
             return input;
         }
 
         /// Get field names as a comptime slice. Equivalent to `model_fields`.
         pub fn fieldNames() []const []const u8 {
-            comptime {
-                var names: [spec_fields.len][]const u8 = undefined;
-                for (spec_fields, 0..) |sf, i| {
-                    names[i] = sf.name;
-                }
-                return &names;
-            }
+            return spec_field_names;
         }
 
         /// Get the field descriptor for a named field.

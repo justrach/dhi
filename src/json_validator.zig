@@ -28,13 +28,13 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
             defer errors.deinit();
 
             // Track which string fields were allocated so we can free on error
-            var string_allocated: [struct_info.fields.len]bool = .{false} ** struct_info.fields.len;
+            var string_allocated: [struct_info.field_names.len]bool = @splat(false);
 
             errdefer {
-                inline for (struct_info.fields, 0..) |field, i| {
-                    if (comptime isStringSliceType(field.type)) {
+                inline for (struct_info.field_names, struct_info.field_types, 0..) |field_name, field_type, i| {
+                    if (comptime isStringSliceType(field_type)) {
                         if (string_allocated[i]) {
-                            allocator.free(@field(result, field.name));
+                            allocator.free(@field(result, field_name));
                         }
                     }
                 }
@@ -42,43 +42,44 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
 
             // Process fields manually to avoid comptime control flow issues
             comptime var field_index = 0;
-            inline while (field_index < struct_info.fields.len) : (field_index += 1) {
-                const field = struct_info.fields[field_index];
-                const json_value = value.object.get(field.name);
+            inline while (field_index < struct_info.field_names.len) : (field_index += 1) {
+                const field_name = struct_info.field_names[field_index];
+                const field_type = struct_info.field_types[field_index];
+                const json_value = value.object.get(field_name);
 
                 // Handle missing fields
                 if (json_value == null) {
-                    if (@typeInfo(field.type) == .@"optional") {
-                        @field(result, field.name) = null;
+                    if (@typeInfo(field_type) == .optional) {
+                        @field(result, field_name) = null;
                     } else {
-                        try errors.add(field.name, "Required field missing");
+                        try errors.add(field_name, "Required field missing");
                     }
                 } else {
                     // Handle present fields
                     const json_val = json_value.?;
-                    const field_result = fromJsonValueTyped(field.type, json_val, allocator);
+                    const field_result = fromJsonValueTyped(field_type, json_val, allocator);
                     if (field_result) |field_value| {
-                        @field(result, field.name) = field_value;
-                        if (comptime isStringSliceType(field.type)) {
+                        @field(result, field_name) = field_value;
+                        if (comptime isStringSliceType(field_type)) {
                             string_allocated[field_index] = true;
                         }
                     } else |err| {
                         const msg = try std.fmt.allocPrint(allocator, "Invalid value: {}", .{err});
                         defer allocator.free(msg);
-                        try errors.add(field.name, msg);
+                        try errors.add(field_name, msg);
                         // Set default values based on type
-                        @field(result, field.name) = switch (@typeInfo(field.type)) {
-                            .@"bool" => false,
-                            .@"int" => 0,
-                            .@"float" => 0.0,
-                            .@"pointer" => |ptr_info| blk: {
+                        @field(result, field_name) = switch (@typeInfo(field_type)) {
+                            .bool => false,
+                            .int => 0,
+                            .float => 0.0,
+                            .pointer => |ptr_info| blk: {
                                 if (ptr_info.size == .slice and ptr_info.child == u8) {
                                     break :blk "";
                                 } else {
                                     return error.UnsupportedType;
                                 }
                             },
-                            .@"optional" => null,
+                            .optional => null,
                             else => return error.UnsupportedType,
                         };
                     }
@@ -107,8 +108,8 @@ fn fromJsonValue(comptime T: type, value: std.json.Value, allocator: std.mem.All
 /// Check if a type is []const u8 (an allocated string slice)
 fn isStringSliceType(comptime T: type) bool {
     const info = @typeInfo(T);
-    if (info == .@"pointer") {
-        const ptr = info.@"pointer";
+    if (info == .pointer) {
+        const ptr = info.pointer;
         return ptr.size == .slice and ptr.child == u8;
     }
     return false;
@@ -119,10 +120,10 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
     const type_info = @typeInfo(T);
 
     return switch (type_info) {
-        .@"bool" => if (value == .bool) value.bool else error.TypeMismatch,
-        .@"int" => if (value == .integer) std.math.cast(T, value.integer) orelse error.IntegerOverflow else error.TypeMismatch,
-        .@"float" => if (value == .float) @as(T, @floatCast(value.float)) else if (value == .integer) @as(T, @floatFromInt(value.integer)) else error.TypeMismatch,
-        .@"pointer" => |ptr_info| {
+        .bool => if (value == .bool) value.bool else error.TypeMismatch,
+        .int => if (value == .integer) std.math.cast(T, value.integer) orelse error.IntegerOverflow else error.TypeMismatch,
+        .float => if (value == .float) @as(T, @floatCast(value.float)) else if (value == .integer) @as(T, @floatFromInt(value.integer)) else error.TypeMismatch,
+        .pointer => |ptr_info| {
             if (ptr_info.size == .slice and ptr_info.child == u8) {
                 if (value == .string) {
                     return try allocator.dupe(u8, value.string);
@@ -131,7 +132,7 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
             }
             return error.UnsupportedType;
         },
-        .@"optional" => |opt_info| {
+        .optional => |opt_info| {
             if (value == .null) return null;
             return try fromJsonValueTyped(opt_info.child, value, allocator);
         },
@@ -224,7 +225,7 @@ test "parseAndValidate - missing required field" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name": "Bob"}
     ;
 
@@ -238,7 +239,7 @@ test "parseAndValidate - type mismatch" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name": "Carol", "age": "not a number"}
     ;
 
@@ -253,7 +254,7 @@ test "parseAndValidate - with validation conventions" {
         age: u8,
     };
 
-    const json = 
+    const json =
         \\{"name_ne": "", "email": "invalid", "age": 27}
     ;
 
