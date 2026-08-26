@@ -119,6 +119,7 @@ pub fn build(b: *std.Build) void {
     const model_mod = b.addModule("model", .{
         .root_source_file = b.path("src/model.zig"),
     });
+    model_mod.addImport("validators_comprehensive", validators_comprehensive_mod);
 
     // Export module for use as a dependency (no target/optimize — inherited from consumer)
     const dhi_module = b.addModule("dhi", .{
@@ -242,8 +243,33 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    model_tests.root_module.addImport("validators_comprehensive", validators_comprehensive_mod);
 
     const run_model_tests = b.addRunArtifact(model_tests);
+
+    const validators_comprehensive_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/validators_comprehensive.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_validators_comprehensive_tests = b.addRunArtifact(validators_comprehensive_tests);
+
+    // Verify consumers can import both exported modules without assigning the
+    // validators source file to two independent modules.
+    const module_integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/module_integration_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    module_integration_tests.root_module.addImport("model", model_mod);
+    module_integration_tests.root_module.addImport("validators_comprehensive", validators_comprehensive_mod);
+
+    const run_module_integration_tests = b.addRunArtifact(module_integration_tests);
 
     // Tests for SIMD JSON parser module
     const simd_json_tests = b.addTest(.{
@@ -262,6 +288,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_combinators_tests.step);
     test_step.dependOn(&run_json_validator_tests.step);
     test_step.dependOn(&run_model_tests.step);
+    test_step.dependOn(&run_validators_comprehensive_tests.step);
+    test_step.dependOn(&run_module_integration_tests.step);
     test_step.dependOn(&run_simd_json_tests.step);
 
     // Additional modules for comprehensive benchmarks

@@ -20,7 +20,7 @@
 ///   });
 ///
 const std = @import("std");
-const validators = @import("validators_comprehensive.zig");
+const validators = @import("validators_comprehensive");
 
 // ============================================================================
 // FIELD CONSTRAINT OPTIONS (mirrors Pydantic's Field() parameters)
