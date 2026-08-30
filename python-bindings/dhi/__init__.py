@@ -17,7 +17,7 @@ Example:
     user = User(name="Alice", age=25, email="alice@example.com")
 """
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 __author__ = "Rach Pradhan"
 
 # --- Core validators (original API) ---
