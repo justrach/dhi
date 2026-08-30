@@ -37,6 +37,45 @@ function zodCheck(check: string, params: Record<string, any>, message?: string):
   return { _zod: { def, check: () => {}, onattach: [] } };
 }
 
+/**
+ * Codec direction. `z.encode()` / `.encode()` run the same schema tree
+ * backwards: only the nodes that actually have a direction (codecs,
+ * transforms, pipes, preprocess, stringbool) read this flag, every other node
+ * is direction-agnostic. Compiled JIT validators always run forwards, so they
+ * are bypassed while it is set — encoding is a cold path.
+ */
+let _encodeMode = false;
+
+function runBackward<T>(fn: () => T): T {
+  const prev = _encodeMode;
+  _encodeMode = true;
+  try {
+    return fn();
+  } finally {
+    _encodeMode = prev;
+  }
+}
+
+/** A `_parse`/`_parseAsync` result that may still be pending */
+type MaybeAsync<T> = T | Promise<T>;
+
+function isThenable(v: unknown): v is Promise<any> {
+  return v !== null && (typeof v === 'object' || typeof v === 'function') && typeof (v as any).then === 'function';
+}
+
+/** Zod: a sync `.parse()` that meets an async refinement/transform throws instead of leaking a Promise */
+function assertNotThenable<T>(v: T): T {
+  if (isThenable(v)) throw new ZodAsyncError();
+  return v;
+}
+
+const AsyncFunctionCtor = (async () => {}).constructor;
+
+/** True for `async` user callbacks — those subtrees skip the (synchronous) JIT */
+function isAsyncFn(fn: unknown): boolean {
+  return typeof fn === 'function' && (fn as any).constructor === AsyncFunctionCtor;
+}
+
 // Zod: plain objects only (no arrays, Dates, Maps, class instances) — port of util.isPlainObject
 function isPlainObject(o: unknown): o is Record<string, unknown> {
   if (typeof o !== 'object' || o === null || Array.isArray(o)) return false;
@@ -123,6 +162,16 @@ const FORMAT_REGEXES: Record<string, RegExp> = {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Port of Zod's `util.slugify` (`z.slugify()` / `z.string().slugify()`) */
+function slugifyString(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 function macRegex(delimiter?: string): RegExp {
@@ -404,6 +453,20 @@ const EMPTY_PATH: (string | number)[] = [];
 // JSON Schema generation mode for the call in progress (see DhiType.toJsonSchema)
 let _jsonSchemaIo: 'input' | 'output' = 'output';
 
+// Set only while `z.toJSONSchema()` is running: emit Zod's exact document shape
+// (`additionalProperties`, registry metadata, per-node `override`) instead of
+// dhi's own leaner `schema.toJsonSchema()` output.
+let _jsonSchemaZodMode = false;
+let _jsonSchemaMetadata: DhiRegistry<any> | undefined;
+let _jsonSchemaOverride: ((ctx: { zodSchema: any; jsonSchema: Record<string, any>; path: (string | number)[] }) => void) | undefined;
+let _jsonSchemaUnrepresentable: 'throw' | 'any' = 'any';
+
+/** Kinds dhi has no JSON Schema representation for (`unrepresentable: 'throw'`) */
+const UNREPRESENTABLE_KINDS: Record<string, string> = {
+  bigint: 'BigInt', symbol: 'Symbols', undefined: 'Undefined', void: 'Void', nan: 'NaN',
+  map: 'Map', set: 'Set', function: 'Function types', promise: 'Promises',
+};
+
 // ============================================================================
 // Type System - Full Zod 4 Compatible Types
 // ============================================================================
@@ -466,28 +529,35 @@ export type ObjectInput<T extends Record<string, DhiType<any, any>>> = Flatten<I
 // Error Types - Zod 4 Compatible
 // ============================================================================
 
+/**
+ * Zod 4 issue codes. dhi emits these natively; the Zod 3 spellings
+ * (`invalid_string`, `invalid_literal`, ...) are still accepted as input from
+ * user code (`ctx.addIssue({ code: 'invalid_format' })`) and normalised to the
+ * Zod 4 equivalent when the issue reaches a `ZodError`.
+ */
 export type ZodIssueCode =
+  // Zod 4 codes
   | "invalid_type"
-  | "invalid_literal"
-  | "custom"
+  | "too_big"
+  | "too_small"
+  | "invalid_format"
+  | "not_multiple_of"
+  | "unrecognized_keys"
   | "invalid_union"
+  | "invalid_key"
+  | "invalid_element"
+  | "invalid_value"
+  | "custom"
+  // Zod 3 spellings, accepted on input and normalised
+  | "invalid_literal"
   | "invalid_union_discriminator"
   | "invalid_enum_value"
-  | "unrecognized_keys"
   | "invalid_arguments"
   | "invalid_return_type"
   | "invalid_date"
   | "invalid_string"
-  | "too_small"
-  | "too_big"
   | "invalid_intersection_types"
-  | "not_multiple_of"
-  | "not_finite"
-  // Zod 4 codes
-  | "invalid_format"
-  | "invalid_value"
-  | "invalid_key"
-  | "invalid_element";
+  | "not_finite";
 
 export interface ZodIssue {
   code: ZodIssueCode;
@@ -496,58 +566,259 @@ export interface ZodIssue {
   expected?: string;
   received?: string;
   fatal?: boolean;
+  continue?: boolean;
+  [key: string]: any;
+}
+
+/**
+ * Zod 3-style issue codes → the Zod 4 code dhi reports. dhi emits Zod 4 codes
+ * natively, so this only normalises codes handed in by user code
+ * (`ctx.addIssue({ code: 'invalid_string' })`).
+ */
+function normalizeIssueCode(code: string | undefined): ZodIssueCode {
+  if (code === undefined) return 'custom';
+  return (ZOD4_ISSUE_CODES[code] ?? code) as ZodIssueCode;
+}
+
+const ZOD4_ISSUE_CODES: Record<string, string> = {
+  invalid_string: 'invalid_format',
+  invalid_enum_value: 'invalid_value',
+  invalid_literal: 'invalid_value',
+  invalid_union_discriminator: 'invalid_union',
+  invalid_date: 'invalid_type',
+  invalid_arguments: 'custom',
+  invalid_return_type: 'custom',
+  invalid_intersection_types: 'custom',
+  not_finite: 'invalid_type',
+};
+
+/** Port of Zod's `util.jsonStringifyReplacer` (bigint-safe `JSON.stringify`) */
+function jsonStringifyReplacer(_: string, value: unknown): unknown {
+  return typeof value === 'bigint' ? value.toString() : value;
+}
+
+/** Port of Zod's `util.toDotPath` — `["a","b"]` → `a.b`, `["arr",0]` → `arr[0]` */
+export function toDotPath(path: ReadonlyArray<string | number | symbol | { key: string | number | symbol }>): string {
+  const segs: string[] = [];
+  for (const raw of path) {
+    const seg: any = typeof raw === 'object' && raw !== null ? (raw as any).key : raw;
+    if (typeof seg === 'number') segs.push(`[${seg}]`);
+    else if (typeof seg === 'symbol') segs.push(`[${JSON.stringify(String(seg))}]`);
+    else if (/[^\w$]/.test(seg)) segs.push(`[${JSON.stringify(seg)}]`);
+    else {
+      if (segs.length) segs.push('.');
+      segs.push(seg);
+    }
+  }
+  return segs.join('');
+}
+
+type IssueMapper = (issue: ZodIssue) => string;
+const defaultIssueMapper: IssueMapper = issue => issue.message;
+
+/** Zod 4 `z.flattenError()` */
+export function flattenError(error: { issues: ZodIssue[] }, mapper: IssueMapper = defaultIssueMapper): { formErrors: string[]; fieldErrors: Record<string, string[]> } {
+  const fieldErrors: Record<string, string[]> = {};
+  const formErrors: string[] = [];
+  for (const sub of error.issues) {
+    if (sub.path.length > 0) {
+      const key = sub.path[0] as any;
+      (fieldErrors[key] ||= []).push(mapper(sub));
+    } else {
+      formErrors.push(mapper(sub));
+    }
+  }
+  return { formErrors, fieldErrors };
+}
+
+/** Zod 4 `z.formatError()` (the `_errors` tree) */
+export function formatError(error: { issues: ZodIssue[] }, mapper: IssueMapper = defaultIssueMapper): Record<string, any> {
+  const fieldErrors: Record<string, any> = { _errors: [] };
+  const processError = (err: { issues: ZodIssue[] }) => {
+    for (const issue of err.issues) {
+      if (issue.code === 'invalid_union' && issue.errors?.length) {
+        for (const issues of issue.errors) processError({ issues });
+      } else if (issue.code === 'invalid_key' || issue.code === 'invalid_element') {
+        processError({ issues: issue.issues ?? [] });
+      } else if (issue.path.length === 0) {
+        fieldErrors._errors.push(mapper(issue));
+      } else {
+        let curr: any = fieldErrors;
+        let i = 0;
+        while (i < issue.path.length) {
+          const el = issue.path[i] as any;
+          const terminal = i === issue.path.length - 1;
+          curr[el] = curr[el] || { _errors: [] };
+          if (terminal) curr[el]._errors.push(mapper(issue));
+          curr = curr[el];
+          i++;
+        }
+      }
+    }
+  };
+  processError(error);
+  return fieldErrors;
+}
+
+/** Zod 4 `z.treeifyError()` (the `errors` / `properties` / `items` tree) */
+export function treeifyError(error: { issues: ZodIssue[] }, mapper: IssueMapper = defaultIssueMapper): Record<string, any> {
+  const result: any = { errors: [] };
+  const processError = (err: { issues: ZodIssue[] }, path: (string | number)[] = []) => {
+    for (const issue of err.issues) {
+      if (issue.code === 'invalid_union' && issue.errors?.length) {
+        for (const issues of issue.errors) processError({ issues }, issue.path);
+      } else if (issue.code === 'invalid_key' || issue.code === 'invalid_element') {
+        processError({ issues: issue.issues ?? [] }, issue.path);
+      } else {
+        const fullpath = [...path, ...issue.path];
+        if (fullpath.length === 0) {
+          result.errors.push(mapper(issue));
+          continue;
+        }
+        let curr: any = result;
+        let i = 0;
+        while (i < fullpath.length) {
+          const el = fullpath[i] as any;
+          const terminal = i === fullpath.length - 1;
+          if (typeof el === 'string') {
+            curr.properties ??= {};
+            curr.properties[el] ??= { errors: [] };
+            curr = curr.properties[el];
+          } else {
+            curr.items ??= [];
+            curr.items[el] ??= { errors: [] };
+            curr = curr.items[el];
+          }
+          if (terminal) curr.errors.push(mapper(issue));
+          i++;
+        }
+      }
+    }
+  };
+  processError(error);
+  return result;
+}
+
+/** Zod 4 `z.prettifyError()` — the `✖ message / → at path` display format */
+export function prettifyError(error: { issues: ZodIssue[] }): string {
+  const lines: string[] = [];
+  const issues = [...error.issues].sort((a, b) => (a.path ?? []).length - (b.path ?? []).length);
+  for (const issue of issues) {
+    lines.push(`✖ ${issue.message}`);
+    if (issue.path?.length) lines.push(`  → at ${toDotPath(issue.path)}`);
+  }
+  return lines.join('\n');
 }
 
 export class ZodError {
   issues: ZodIssue[];
-  readonly name = "ZodError";
+  name = "ZodError";
 
   constructor(issues: ZodIssue[]) {
     this.issues = issues;
   }
 
+  /** @deprecated Zod 3 alias for `.issues` */
   get errors() { return this.issues; }
 
   get message() {
-    return JSON.stringify(this.issues, null, 2);
+    return JSON.stringify(this.issues, jsonStringifyReplacer, 2);
   }
 
-  format(): Record<string, any> {
-    const fmt: Record<string, any> = { _errors: [] };
-    for (const issue of this.issues) {
-      if (issue.path.length === 0) {
-        fmt._errors.push(issue.message);
-      } else {
-        let curr = fmt;
-        for (const seg of issue.path) {
-          if (!curr[seg]) curr[seg] = { _errors: [] };
-          curr = curr[seg];
-        }
-        curr._errors.push(issue.message);
-      }
-    }
-    return fmt;
+  get isEmpty(): boolean { return this.issues.length === 0; }
+
+  /**
+   * Lazily materialised stack. `ZodError` deliberately does not call the
+   * `Error` constructor (capturing a stack on every failed union branch costs
+   * ~12x), but `instanceof Error` still holds and `.stack` works on demand.
+   */
+  get stack(): string | undefined {
+    const stack = new Error(this.message).stack;
+    Object.defineProperty(this, 'stack', { value: stack, configurable: true, writable: true });
+    return stack;
+  }
+  set stack(value: string | undefined) {
+    Object.defineProperty(this, 'stack', { value, configurable: true, writable: true });
   }
 
-  flatten() {
-    const fieldErrors: Record<string, string[]> = {};
-    const formErrors: string[] = [];
-    for (const issue of this.issues) {
-      if (issue.path.length === 0) {
-        formErrors.push(issue.message);
-      } else {
-        const key = issue.path.join(".");
-        if (!fieldErrors[key]) fieldErrors[key] = [];
-        fieldErrors[key].push(issue.message);
-      }
-    }
-    return { formErrors, fieldErrors };
+  addIssue(issue: ZodIssue): void { this.issues.push(issue); }
+  addIssues(issues: ZodIssue[]): void { this.issues.push(...issues); }
+
+  format(mapper?: IssueMapper): Record<string, any> { return formatError(this, mapper); }
+  flatten(mapper?: IssueMapper) { return flattenError(this, mapper); }
+
+  toString(): string { return `ZodError: ${this.message}`; }
+}
+
+// `instanceof Error` without paying for `Error`'s stack capture on construction.
+Object.setPrototypeOf(ZodError.prototype, Error.prototype);
+
+/** Thrown when a schema containing a one-way `.transform()` is used with `z.encode()` */
+export class ZodEncodeError extends Error {
+  constructor(name: string) {
+    super(`Encountered unidirectional transform during encode: ${name}`);
+    this.name = 'ZodEncodeError';
+  }
+}
+
+/** Thrown when a synchronous `.parse()` hits an async refinement or transform */
+export class ZodAsyncError extends Error {
+  constructor() {
+    super('Encountered Promise during synchronous parse. Use .parseAsync() instead.');
+    this.name = 'ZodAsyncError';
   }
 }
 
 export type SafeParseResult<T> =
   | { success: true; data: T; error?: never }
   | { success: false; data?: never; error: ZodError };
+
+/**
+ * Zod 4 refinement / transform context — the `ctx` argument of
+ * `.superRefine()`, `.transform()`, `.check()` callbacks and codec transforms.
+ */
+export interface DhiRefinementCtx {
+  value: any;
+  issues: ZodIssue[];
+  addIssue(issue: string | Partial<ZodIssue>): void;
+}
+
+/** Zod 4 `.refine()` parameters */
+export type RefineParams =
+  | string
+  | {
+      message?: string;
+      error?: string | ((issue: any) => string);
+      path?: (string | number)[];
+      abort?: boolean;
+      when?: (payload: { value: any; issues: ZodIssue[] }) => boolean;
+      params?: Record<string, any>;
+    };
+
+/** Sentinel returned from a transform after `ctx.addIssue()` (Zod's `z.NEVER`) */
+export const NEVER: never = Object.freeze({ status: 'aborted' }) as never;
+
+function makeRefinementCtx(value: any, path: (string | number)[], issues: ZodIssue[]): DhiRefinementCtx {
+  return {
+    value,
+    issues,
+    addIssue(issue: string | Partial<ZodIssue>) {
+      if (typeof issue === 'string') {
+        issues.push({ code: 'custom', message: issue, path });
+        return;
+      }
+      const out: any = {
+        message: 'Invalid input',
+        ...issue,
+        code: normalizeIssueCode(issue.code),
+        path: issue.path && issue.path.length ? [...path, ...issue.path] : path,
+      };
+      // `continue` is a control flag, not part of the reported issue
+      delete out.continue;
+      issues.push(out as ZodIssue);
+    },
+  };
+}
 
 // ============================================================================
 // Base Schema Type
@@ -662,12 +933,82 @@ export abstract class DhiType<Output = any, Input = Output> {
     return this._parse(value, EMPTY_PATH);
   }
 
+  /**
+   * Async counterpart of `_parse`. The default is the synchronous parse; nodes
+   * that can run user callbacks (refine / superRefine / transform / check /
+   * custom / codec) and the containers that hold them override it so a
+   * returned Promise is awaited instead of being treated as a value.
+   * @internal
+   */
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<Output>> {
+    return this._parse(value, path);
+  }
+
   async parseAsync(value: unknown): Promise<Output> {
-    return this.parse(value);
+    const result = await this._parseAsync(value, EMPTY_PATH);
+    if (!result.success) throw result.error;
+    return result.data;
   }
 
   async safeParseAsync(value: unknown): Promise<SafeParseResult<Output>> {
+    return await this._parseAsync(value, EMPTY_PATH);
+  }
+
+  /** Zod 4 alias for `safeParseAsync` */
+  spa(value: unknown): Promise<SafeParseResult<Output>> {
+    return this.safeParseAsync(value);
+  }
+
+  // --- Codecs (Zod 4): `decode` is the forward direction, `encode` the reverse ---
+
+  /** Zod 4: run the schema forwards (identical to `parse` for non-codec schemas) */
+  decode(value: unknown): Output {
+    return this.parse(value);
+  }
+
+  /** Zod 4: run the schema forwards without throwing */
+  safeDecode(value: unknown): SafeParseResult<Output> {
     return this.safeParse(value);
+  }
+
+  decodeAsync(value: unknown): Promise<Output> {
+    return this.parseAsync(value);
+  }
+
+  safeDecodeAsync(value: unknown): Promise<SafeParseResult<Output>> {
+    return this.safeParseAsync(value);
+  }
+
+  /** Zod 4: run the schema backwards — output type in, input type out */
+  encode(value: unknown): Input {
+    const result = runBackward(() => this._parse(value, EMPTY_PATH));
+    if (!result.success) throw result.error;
+    return result.data as unknown as Input;
+  }
+
+  /** Zod 4: run the schema backwards without throwing */
+  safeEncode(value: unknown): SafeParseResult<Input> {
+    return runBackward(() => this._parse(value, EMPTY_PATH)) as unknown as SafeParseResult<Input>;
+  }
+
+  async encodeAsync(value: unknown): Promise<Input> {
+    const result = await this._safeEncodeAsync(value);
+    if (!result.success) throw result.error;
+    return result.data as unknown as Input;
+  }
+
+  safeEncodeAsync(value: unknown): Promise<SafeParseResult<Input>> {
+    return this._safeEncodeAsync(value) as unknown as Promise<SafeParseResult<Input>>;
+  }
+
+  private async _safeEncodeAsync(value: unknown): Promise<SafeParseResult<Output>> {
+    const prev = _encodeMode;
+    _encodeMode = true;
+    try {
+      return await this._parseAsync(value, EMPTY_PATH);
+    } finally {
+      _encodeMode = prev;
+    }
   }
 
   optional(): DhiOptional<this> {
@@ -690,17 +1031,17 @@ export abstract class DhiType<Output = any, Input = Output> {
     return new DhiCatch(this, catchValue);
   }
 
-  transform<U>(fn: (value: Output) => U): DhiTransform<this, U> {
-    return new DhiTransform(this, fn);
+  transform<U>(fn: (value: Output, ctx: DhiRefinementCtx) => U): DhiTransform<this, Awaited<U>> {
+    return new DhiTransform(this, fn as any) as any;
   }
 
-  refine(check: (value: Output) => boolean, message?: string | { message?: string; path?: (string | number)[] }): DhiRefine<this> {
-    const msg = typeof message === 'string' ? message : message?.message;
-    const path = typeof message === 'object' ? message?.path : undefined;
-    return new DhiRefine(this, check, msg, path);
+  refine(check: (value: Output) => unknown, params?: RefineParams): DhiRefine<this> {
+    const msg = typeof params === 'string' ? params : msgOf(params);
+    const opts = typeof params === 'object' && params !== null ? params : undefined;
+    return new DhiRefine(this, check, msg, opts?.path, opts?.when);
   }
 
-  superRefine(refinement: (value: Output, ctx: { addIssue: (issue: Partial<ZodIssue>) => void }) => void): DhiSuperRefine<this> {
+  superRefine(refinement: (value: Output, ctx: DhiRefinementCtx) => unknown): DhiSuperRefine<this> {
     return new DhiSuperRefine(this, refinement);
   }
 
@@ -735,10 +1076,16 @@ export abstract class DhiType<Output = any, Input = Output> {
     return clone;
   }
 
-  meta(metadata: Record<string, any>): this {
+  meta(): Record<string, any> | undefined;
+  meta(metadata: Record<string, any>): this;
+  meta(metadata?: Record<string, any>): any {
+    // Zod 4: `.meta()` with no argument reads the global registry entry
+    if (metadata === undefined) return globalRegistry.get(this) ?? this._metadata;
     const clone = Object.create(Object.getPrototypeOf(this));
     Object.assign(clone, this);
     clone._metadata = { ...this._metadata, ...metadata };
+    // Zod 4 keeps `.meta()` data in the global registry
+    globalRegistry.add(clone, clone._metadata);
     return clone;
   }
 
@@ -783,9 +1130,12 @@ export abstract class DhiType<Output = any, Input = Output> {
     return new DhiTransform(this, fn) as any;
   }
 
-  // Zod 4: prefault - default that gets processed by subsequent transforms
-  prefault(defaultValue: Input | (() => Input)): DhiDefault<this> {
-    return new DhiDefault(this, defaultValue as any);
+  /**
+   * Zod 4: prefault — unlike `.default()`, the fallback value is *parsed* by
+   * this schema, so checks and transforms still run on it.
+   */
+  prefault(defaultValue: Input | (() => Input)): DhiPrefault<this> {
+    return new DhiPrefault(this, defaultValue as any);
   }
 
   // Zod 4: clone
@@ -793,6 +1143,26 @@ export abstract class DhiType<Output = any, Input = Output> {
     const clone = Object.create(Object.getPrototypeOf(this));
     Object.assign(clone, this);
     return clone;
+  }
+
+  /** Zod 4: the schema's kind, e.g. `"string"` / `"object"` / `"union"` */
+  get type(): ZodTypeKind {
+    return this._zod.def.type;
+  }
+
+  /** Zod 4: `schema.apply(fn)` — call `fn` with this schema and return its result */
+  apply<T>(fn: (schema: this) => T): T {
+    return fn(this);
+  }
+
+  /** Zod 4: `schema.with(...checks)` — attach checks, same as `.check(...)` */
+  with(...checks: Array<DhiCheckInput<Output>>): DhiCheck<this> {
+    return new DhiCheck(this, checks);
+  }
+
+  /** Zod 4: `schema.toJSONSchema()` — same output as `z.toJSONSchema(schema)` */
+  toJSONSchema(params?: ToJSONSchemaParams): Record<string, any> {
+    return toJSONSchema(this, params);
   }
 
   /**
@@ -831,6 +1201,21 @@ export abstract class DhiType<Output = any, Input = Output> {
     const schema: Record<string, any> = this._toJsonSchemaCore();
     if (this._description) {
       schema.description = this._description;
+    }
+    // Zod 4: registry metadata (`.meta()`, or the registry passed to
+    // `z.toJSONSchema({ metadata })`) is merged into the node
+    const meta = _jsonSchemaMetadata ? _jsonSchemaMetadata.get(this) : this._metadata;
+    if (meta) {
+      for (const key of Object.keys(meta)) {
+        if ((meta as any)[key] !== undefined) schema[key] = (meta as any)[key];
+      }
+    }
+    if (_jsonSchemaZodMode) {
+      if (_jsonSchemaUnrepresentable === 'throw') {
+        const kind = UNREPRESENTABLE_KINDS[this._zod.def.type];
+        if (kind) throw new Error(`${kind} cannot be represented in JSON Schema`);
+      }
+      if (_jsonSchemaOverride) _jsonSchemaOverride({ zodSchema: this, jsonSchema: schema, path: [] });
     }
     return schema;
   }
@@ -894,91 +1279,91 @@ export class DhiString extends DhiType<string, string> {
           break;
         case 'email':
           if (!fastValidateEmail(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid email address' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid email address' }]) };
           break;
         case 'url': {
           const normalized = validateUrl(current, check.value);
           if (normalized === null)
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid URL' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid URL' }]) };
           current = normalized;
           break;
         }
         case 'uuid':
           if (!fastValidateUuid(current, check.value))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid UUID' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid UUID' }]) };
           break;
         case 'guid':
           if (!fastValidateGuid(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid GUID' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid GUID' }]) };
           break;
         case 'cuid':
           if (!CUID_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid cuid' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid cuid' }]) };
           break;
         case 'cuid2':
           if (!CUID2_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid cuid2' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid cuid2' }]) };
           break;
         case 'ulid':
           if (!ULID_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid ULID' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid ULID' }]) };
           break;
         case 'emoji':
           if (!EMOJI_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid emoji' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid emoji' }]) };
           break;
         case 'ipv4':
           if (!fastValidateIpv4(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv4 address' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid IPv4 address' }]) };
           break;
         case 'ipv6':
           if (!fastValidateIpv6(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv6 address' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid IPv6 address' }]) };
           break;
         case 'ip':
           if (!fastValidateIpv4(current) && !fastValidateIpv6(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IP address' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid IP address' }]) };
           break;
         case 'base64':
           if (!fastValidateBase64(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid base64-encoded string' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid base64-encoded string' }]) };
           break;
         case 'base64url':
           if (!fastValidateBase64Url(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid base64url-encoded string' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid base64url-encoded string' }]) };
           break;
         case 'datetime':
           if (!check.value.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid ISO datetime' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid ISO datetime' }]) };
           break;
         case 'date':
           if (!fastValidateDate(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid ISO date' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid ISO date' }]) };
           break;
         case 'time':
           if (!check.value.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid ISO time' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid ISO time' }]) };
           break;
         case 'duration':
           if (!ISO_DURATION_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid ISO duration' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid ISO duration' }]) };
           break;
         case 'regex':
           check.value.lastIndex = 0;
           if (!check.value.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid string: must match pattern ' + check.value.source }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid string: must match pattern ' + check.value.source }]) };
           break;
         case 'includes':
           if (!current.includes(check.value, check.position))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || `Invalid string: must include "${check.value}"` }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || `Invalid string: must include "${check.value}"` }]) };
           break;
         case 'startsWith':
           if (!current.startsWith(check.value))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || `Invalid string: must start with "${check.value}"` }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || `Invalid string: must start with "${check.value}"` }]) };
           break;
         case 'endsWith':
           if (!current.endsWith(check.value))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || `Invalid string: must end with "${check.value}"` }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || `Invalid string: must end with "${check.value}"` }]) };
           break;
         case 'trim':
           current = current.trim();
@@ -996,61 +1381,61 @@ export class DhiString extends DhiType<string, string> {
         // Zod 4: lowercase()/uppercase() VALIDATE case (use toLowerCase()/toUpperCase() to transform)
         case 'lowercase':
           if (!LOWERCASE_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid lowercase string' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid lowercase string' }]) };
           break;
         case 'uppercase':
           if (!UPPERCASE_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid uppercase string' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid uppercase string' }]) };
           break;
         case 'normalize':
           current = current.normalize(check.value || 'NFC');
           break;
         case 'slugify':
-          current = current.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          current = slugifyString(current);
           break;
         case 'jwt':
           if (!isValidJWT(current, check.value))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid JWT' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid JWT' }]) };
           break;
         case 'nanoid':
           if (!NANOID_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid nanoid' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid nanoid' }]) };
           break;
         case 'cidrv4':
           if (!CIDRV4_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv4 range' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid IPv4 range' }]) };
           break;
         case 'cidrv6':
           if (!fastValidateCidrv6(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid IPv6 range' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid IPv6 range' }]) };
           break;
         case 'e164':
           if (!E164_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid E.164 number' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid E.164 number' }]) };
           break;
         case 'mac':
           if (!check.value.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid MAC address' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid MAC address' }]) };
           break;
         case 'xid':
           if (!XID_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid XID' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid XID' }]) };
           break;
         case 'ksuid':
           if (!KSUID_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid KSUID' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid KSUID' }]) };
           break;
         case 'hostname':
           if (!HOSTNAME_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid hostname' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid hostname' }]) };
           break;
         case 'hex':
           if (!HEX_RE.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid hexadecimal string' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid hexadecimal string' }]) };
           break;
         case 'hash':
           if (!check.value.test(current))
-            return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: check.message || 'Invalid hash' }]) };
+            return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: check.message || 'Invalid hash' }]) };
           break;
       }
     }
@@ -1162,7 +1547,7 @@ export class DhiString extends DhiType<string, string> {
         case 'toLowerCase': out.push(zodCheck('overwrite', { tx: (v: string) => v.toLowerCase() })); break;
         case 'toUpperCase': out.push(zodCheck('overwrite', { tx: (v: string) => v.toUpperCase() })); break;
         case 'normalize': out.push(zodCheck('overwrite', { tx: (v: string) => v.normalize(c.value || 'NFC') })); break;
-        case 'slugify': out.push(zodCheck('overwrite', { tx: (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') })); break;
+        case 'slugify': out.push(zodCheck('overwrite', { tx: slugifyString })); break;
         default: out.push(zodCheck('string_format', { format: ZOD_FORMAT_NAMES[c.type] ?? c.type }, c.message)); break;
       }
     }
@@ -1176,6 +1561,11 @@ export class DhiString extends DhiType<string, string> {
       if (f !== undefined) return f;
     }
     return undefined;
+  }
+
+  /** Zod 4: the string's format check (`"email"`, `"uuid"`, ...) or `null` */
+  get format(): string | null {
+    return this._zodFormat() ?? null;
   }
 
   protected _toJsonSchemaCore(): Record<string, any> {
@@ -1302,6 +1692,43 @@ export class DhiNumber extends DhiType<number, number> {
   minimum(value: number, message?: ZodMessage): this { return this.gte(value, message); }
   maximum(value: number, message?: ZodMessage): this { return this.lte(value, message); }
 
+  /** Zod 4: the effective lower bound, or `null` */
+  get minValue(): number | null {
+    let out: number | null = null;
+    for (const c of this.checks) {
+      if (c.type === 'min' || c.type === 'gte' || c.type === 'gt') out = out === null ? c.value : Math.max(out, c.value);
+      else if (c.type === 'positive' || c.type === 'nonnegative') out = out === null ? 0 : Math.max(out, 0);
+      else if (c.type === 'int' || c.type === 'safe') out = out === null ? Number.MIN_SAFE_INTEGER : out;
+    }
+    return out;
+  }
+
+  /** Zod 4: the effective upper bound, or `null` */
+  get maxValue(): number | null {
+    let out: number | null = null;
+    for (const c of this.checks) {
+      if (c.type === 'max' || c.type === 'lte' || c.type === 'lt') out = out === null ? c.value : Math.min(out, c.value);
+      else if (c.type === 'negative' || c.type === 'nonpositive') out = out === null ? 0 : Math.min(out, 0);
+      else if (c.type === 'int' || c.type === 'safe') out = out === null ? Number.MAX_SAFE_INTEGER : out;
+    }
+    return out;
+  }
+
+  /** Zod 4: true when `.int()` / `.safe()` was applied */
+  get isInt(): boolean {
+    return this.checks.some(c => c.type === 'int' || c.type === 'safe');
+  }
+
+  /** Zod 4: always true — Zod 4 numbers reject NaN and ±Infinity by construction */
+  get isFinite(): boolean {
+    return true;
+  }
+
+  /** Zod 4: `"safeint"` when `.int()` was applied, otherwise `null` */
+  get format(): string | null {
+    return this.isInt ? 'safeint' : null;
+  }
+
   /** @internal Zod 4 `_zod.def` view of the accumulated checks */
   _zodChecks(): any[] {
     const out: any[] = [];
@@ -1400,6 +1827,28 @@ export class DhiBigInt extends DhiType<bigint, bigint> {
   nonnegative(message?: string): this { return this._withCheck({ type: 'nonnegative', message }); }
   nonpositive(message?: string): this { return this._withCheck({ type: 'nonpositive', message }); }
   multipleOf(value: bigint, message?: string): this { return this._withCheck({ type: 'multipleOf', value, message }); }
+
+  /** Zod 4: the effective lower bound, or `null` */
+  get minValue(): bigint | null {
+    let out: bigint | null = null;
+    for (const c of this.checks) {
+      if (c.type === 'min' || c.type === 'gte' || c.type === 'gt') out = out === null || c.value > out ? c.value : out;
+      else if (c.type === 'positive' || c.type === 'nonnegative') out = out === null || 0n > out ? 0n : out;
+    }
+    return out;
+  }
+
+  /** Zod 4: the effective upper bound, or `null` */
+  get maxValue(): bigint | null {
+    let out: bigint | null = null;
+    for (const c of this.checks) {
+      if (c.type === 'max' || c.type === 'lte' || c.type === 'lt') out = out === null || c.value < out ? c.value : out;
+      else if (c.type === 'negative' || c.type === 'nonpositive') out = out === null || 0n < out ? 0n : out;
+    }
+    return out;
+  }
+
+  get format(): string | null { return null; }
 }
 
 export class DhiBoolean extends DhiType<boolean, boolean> {
@@ -1422,7 +1871,7 @@ export class DhiDate extends DhiType<Date, Date> {
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Date> {
     if (!(value instanceof Date) || isNaN(value.getTime())) {
-      return { success: false, error: new ZodError([{ code: 'invalid_date', path, message: 'Invalid date' }]) };
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Invalid date', expected: 'date', received: value instanceof Date ? 'Invalid Date' : typeof value }]) };
     }
 
     for (const check of this.checks) {
@@ -1443,6 +1892,20 @@ export class DhiDate extends DhiType<Date, Date> {
 
   min(date: Date, message?: string): this { return this._withCheck({ type: 'min', value: date, message }); }
   max(date: Date, message?: string): this { return this._withCheck({ type: 'max', value: date, message }); }
+
+  /** Zod 4: the earliest accepted date, or `null` */
+  get minDate(): Date | null {
+    let out: Date | null = null;
+    for (const c of this.checks) if (c.type === 'min' && (out === null || c.value > out)) out = c.value;
+    return out;
+  }
+
+  /** Zod 4: the latest accepted date, or `null` */
+  get maxDate(): Date | null {
+    let out: Date | null = null;
+    for (const c of this.checks) if (c.type === 'max' && (out === null || c.value < out)) out = c.value;
+    return out;
+  }
 
   protected _toJsonSchemaCore(): Record<string, any> {
     return { type: 'string', format: 'date-time' };
@@ -1546,12 +2009,15 @@ export class DhiLiteral<T extends string | number | boolean | bigint | null | un
 
   get value(): T { return this._values[0]; }
 
+  /** Zod 4: every accepted literal value */
+  get values(): Set<T> { return new Set(this._values); }
+
   _parse(input: unknown, path: (string | number)[]): SafeParseResult<T> {
     if (!this._values.includes(input as T)) {
       const expected = this._values.length === 1
         ? JSON.stringify(this._values[0])
         : this._values.map(v => JSON.stringify(v)).join(' | ');
-      return { success: false, error: new ZodError([{ code: 'invalid_literal', path, message: `Expected ${expected}, received ${JSON.stringify(input)}` }]) };
+      return { success: false, error: new ZodError([{ code: 'invalid_value', path, message: `Expected ${expected}, received ${JSON.stringify(input)}` }]) };
     }
     return { success: true, data: input as T };
   }
@@ -1583,7 +2049,7 @@ export class DhiEnum<T extends readonly [string, ...string[]]> extends DhiType<T
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T[number]> {
     if (typeof value !== 'string' || !this._set.has(value)) {
-      return { success: false, error: new ZodError([{ code: 'invalid_enum_value', path, message: `Invalid enum value. Expected ${this.options.map(v => `'${v}'`).join(' | ')}, received '${value}'` }]) };
+      return { success: false, error: new ZodError([{ code: 'invalid_value', path, message: `Invalid enum value. Expected ${this.options.map(v => `'${v}'`).join(' | ')}, received '${value}'` }]) };
     }
     return { success: true, data: value as T[number] };
   }
@@ -1614,7 +2080,7 @@ export class DhiNativeEnum<T extends Record<string, string | number>> extends Dh
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T[keyof T]> {
     if (!this._values.has(value as any)) {
-      return { success: false, error: new ZodError([{ code: 'invalid_enum_value', path, message: 'Invalid enum value' }]) };
+      return { success: false, error: new ZodError([{ code: 'invalid_value', path, message: 'Invalid enum value' }]) };
     }
     return { success: true, data: value as T[keyof T] };
   }
@@ -1831,7 +2297,7 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
           case 'toLowerCase': code += `${vi}=${vi}.toLowerCase();`; break;
           case 'toUpperCase': code += `${vi}=${vi}.toUpperCase();`; break;
           case 'normalize': code += `${vi}=${vi}.normalize(${JSON.stringify(check.value || 'NFC')});`; break;
-          case 'slugify': code += `${vi}=${vi}.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");`; break;
+          case 'slugify': code += `${vi}=${bind('_slug', slugifyString)}(${vi});`; break;
           case 'regex': {
             const fname = bind('_rx', check.value);
             code += `${fname}.lastIndex=0;if(!${fname}.test(${vi}))return null;`;
@@ -2105,7 +2571,9 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
     // unique sentinel (the output may legitimately be any value, incl. null).
     const innerCheck = jitEmitFieldCheck(vi, (schema as any)._inner, vars, names, idx);
     if (!innerCheck) return null;
-    const tf = (schema as any)._transform as (v: any) => any;
+    const tf = (schema as any)._transform as (v: any, ctx?: any) => any;
+    // Async transforms and transforms that use `ctx` need the interpreted path
+    if (isAsyncFn(tf) || tf.length >= 2) return null;
     const FAIL = {};
     const fname = `_tf${names.length}_${idx}`;
     const sname = `_tS${names.length}_${idx}`;
@@ -2115,6 +2583,9 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
   }
 
   if (schema instanceof DhiRefine) {
+    // `.refine(..., { when })` is conditional and async predicates need the
+    // interpreted path; neither is JITted
+    if ((schema as any)._when || isAsyncFn((schema as any)._check)) return null;
     const innerCheck = jitEmitFieldCheck(vi, (schema as any)._inner, vars, names, idx);
     if (!innerCheck) return null;
     const fname = `_rf${names.length}_${idx}`;
@@ -2127,11 +2598,12 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
     const innerCheck = jitEmitFieldCheck(vi, (schema as any)._inner, vars, names, idx);
     if (!innerCheck) return null;
     const refinement = (schema as any)._refinement;
+    if (isAsyncFn(refinement)) return null;
     const fname = `_sr${names.length}_${idx}`;
     names.push(fname);
     vars.push((v: any) => {
       let ok = true;
-      refinement(v, { addIssue: () => { ok = false; } });
+      refinement(v, { value: v, issues: [], addIssue: () => { ok = false; } });
       return ok;
     });
     return `${innerCheck}if(!${fname}(${vi}))return null;`;
@@ -2250,6 +2722,8 @@ function jitEmitFieldCheck(vi: string, schema: DhiType<any, any>, vars: any[], n
     const discriminator = (schema as any).discriminator as string;
     const jitMap = new Map<any, (v: any) => any>();
     for (const [lit, option] of optionsMap) {
+      // An option may be a nested union rather than an object; those aren't JITted here
+      if (!(option instanceof DhiObject)) return null;
       if ((option as any)._jit === undefined) {
         (option as any)._jit = (option as any)._compileJIT();
       }
@@ -2380,8 +2854,8 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
       this._jit = this._compileJIT();
     }
 
-    // Use JIT fast path if available
-    if (this._jit) {
+    // Use JIT fast path if available (never while encoding: it runs forwards)
+    if (this._jit && !_encodeMode) {
       const jitResult = this._jit(value);
       if (jitResult !== null) {
         return { success: true, data: jitResult };
@@ -2494,6 +2968,47 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     return { success: false, error: new ZodError(issues) };
   }
 
+  /** Interpreted async walk — mirrors the reporting path of `_parse` above */
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<any>> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected object, received ' + (Array.isArray(value) ? 'array' : typeof value) }]) };
+    }
+    const obj = value as Record<string, unknown>;
+    const keys = this._keys;
+    const shape = this.shape;
+    const issues: ZodIssue[] = [];
+    const result: Record<string, any> = {};
+    for (let ki = 0; ki < keys.length; ki++) {
+      const key = keys[ki];
+      const fieldResult = await shape[key]._parseAsync(obj[key], [...path, key]);
+      if (!fieldResult.success) {
+        if (!(key in obj) && this._absentOk()[ki]) continue;
+        issues.push(...fieldResult.error.issues);
+      } else if (fieldResult.data !== undefined || key in obj) {
+        result[key] = fieldResult.data;
+      }
+    }
+    if (this._unknownKeys === 'strict') {
+      for (const key of Object.keys(obj)) {
+        if (!keys.includes(key)) issues.push({ code: 'unrecognized_keys', path, message: `Unrecognized key(s) in object: '${key}'` });
+      }
+    } else if (this._unknownKeys === 'passthrough') {
+      const catchall = this._catchall;
+      for (const key of Object.keys(obj)) {
+        if (keys.includes(key)) continue;
+        if (catchall) {
+          const r = await catchall._parseAsync(obj[key], [...path, key]);
+          if (!r.success) issues.push(...r.error.issues);
+          else result[key] = r.data;
+        } else {
+          result[key] = obj[key];
+        }
+      }
+    }
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result };
+  }
+
   /**
    * Fast-path overrides: dispatch straight to the compiled JIT validator,
    * skipping the generic _parse pre-checks. parse() additionally avoids
@@ -2501,7 +3016,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
    */
   safeParse(value: unknown): SafeParseResult<ObjectOutput<T>> {
     if (this._jit === undefined) this._jit = this._compileJIT();
-    if (this._jit !== null) {
+    if (this._jit !== null && !_encodeMode) {
       const r = this._jit(value);
       if (r !== null) return { success: true, data: r };
     }
@@ -2510,7 +3025,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
 
   parse(value: unknown): ObjectOutput<T> {
     if (this._jit === undefined) this._jit = this._compileJIT();
-    if (this._jit !== null) {
+    if (this._jit !== null && !_encodeMode) {
       const r = this._jit(value);
       if (r !== null) return r;
     }
@@ -2548,8 +3063,25 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     return clone;
   }
 
+  /** @internal a new object with a different shape but this one's unknown-key policy (Zod keeps it) */
+  private _derive(shape: Record<string, DhiType<any, any>>): any {
+    const derived = new DhiObject(shape) as any;
+    derived._unknownKeys = this._unknownKeys;
+    derived._catchall = this._catchall;
+    return derived;
+  }
+
   extend<U extends Record<string, DhiType<any, any>>>(shape: U): DhiObject<T & U> {
-    return new DhiObject({ ...this.shape, ...shape }) as any;
+    return this._derive({ ...this.shape, ...shape });
+  }
+
+  /**
+   * Zod 4 `.safeExtend()` — like `.extend()`, but rejects a non-plain-object
+   * argument instead of silently merging it.
+   */
+  safeExtend<U extends Record<string, DhiType<any, any>>>(shape: U): DhiObject<T & U> {
+    if (!isPlainObject(shape)) throw new Error('Invalid input to safeExtend: expected a plain object');
+    return this.extend(shape);
   }
 
   merge<U extends DhiObject<any>>(other: U): DhiObject<T & U["shape"]> {
@@ -2561,7 +3093,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     for (const key of Object.keys(keys)) {
       if (key in this.shape) picked[key] = this.shape[key];
     }
-    return new DhiObject(picked);
+    return this._derive(picked);
   }
 
   omit<K extends keyof T>(keys: { [P in K]: true }): DhiObject<Omit<T, K>> {
@@ -2569,7 +3101,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     for (const key of this._keys) {
       if (!(key in keys)) omitted[key] = this.shape[key];
     }
-    return new DhiObject(omitted);
+    return this._derive(omitted);
   }
 
   partial(): DhiObject<{ [K in keyof T]: DhiOptional<T[K]> }> {
@@ -2577,7 +3109,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
     for (const key of this._keys) {
       partialShape[key] = this.shape[key].optional();
     }
-    return new DhiObject(partialShape);
+    return this._derive(partialShape);
   }
 
   deepPartial(): DhiObject<any> {
@@ -2590,7 +3122,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
         partialShape[key] = field.optional();
       }
     }
-    return new DhiObject(partialShape);
+    return this._derive(partialShape);
   }
 
   required(): DhiObject<{ [K in keyof T]: T[K] extends DhiOptional<infer U> ? U : T[K] }> {
@@ -2599,7 +3131,7 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
       const field = this.shape[key];
       requiredShape[key] = field instanceof DhiOptional ? (field as any)._inner : field;
     }
-    return new DhiObject(requiredShape);
+    return this._derive(requiredShape);
   }
 
   keyof(): DhiEnum<[string, ...string[]]> {
@@ -2651,10 +3183,15 @@ export class DhiObject<T extends Record<string, DhiType<any, any>>> extends DhiT
       schema.required = required;
     }
 
-    if (this._unknownKeys === 'strict') {
-      schema.additionalProperties = false;
-    } else if (this._catchall) {
+    if (this._catchall) {
       schema.additionalProperties = this._catchall.toJsonSchema();
+    } else if (this._unknownKeys === 'strict') {
+      schema.additionalProperties = false;
+    } else if (_jsonSchemaZodMode) {
+      // Zod: `{}` for loose objects in both directions; `false` for a stripping
+      // object only when describing parsed output
+      if (this._unknownKeys === 'passthrough') schema.additionalProperties = {};
+      else if (_jsonSchemaIo === 'output') schema.additionalProperties = false;
     }
 
     return schema;
@@ -2669,13 +3206,13 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
   private checks: Array<{ type: string; value?: number; message?: string }> = [];
   private _jit: ((value: any) => any) | null | undefined = undefined;
 
-  constructor(private element: T) { super(); }
+  constructor(readonly element: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"][]> {
     // Top-level JIT fast path (compiled on first use); failures fall through
     // to the interpreted path below for proper error reporting.
     if (this._jit === undefined) this._jit = jitCompileValueFn(this);
-    if (this._jit) {
+    if (this._jit && !_encodeMode) {
       const r = this._jit(value);
       if (r !== null) return { success: true, data: r };
     }
@@ -2758,6 +3295,42 @@ export class DhiArray<T extends DhiType<any, any>> extends DhiType<T["_output"][
     return { success: true, data: (result || value) as any };
   }
 
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<T["_output"][]>> {
+    if (!Array.isArray(value)) return this._parse(value, path);
+    const lengthIssue = this._lengthIssue(value.length, path);
+    if (lengthIssue) return lengthIssue;
+    const issues: ZodIssue[] = [];
+    let result: any[] | null = null;
+    for (let i = 0; i < value.length; i++) {
+      const r = await this.element._parseAsync(value[i], [...path, i]);
+      if (!r.success) issues.push(...r.error.issues);
+      else if (r.data !== value[i]) {
+        if (!result) result = (value as any[]).slice();
+        result[i] = r.data;
+      }
+    }
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: (result || value) as any };
+  }
+
+  /** @internal shared min/max/length/nonempty reporting */
+  private _lengthIssue(len: number, path: (string | number)[]): SafeParseResult<any> | undefined {
+    for (const check of this.checks) {
+      if (check.type === 'min' && len < check.value!)
+        return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Array must contain at least ${check.value} element(s)` }]) };
+      if (check.type === 'max' && len > check.value!)
+        return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Array must contain at most ${check.value} element(s)` }]) };
+      if (check.type === 'length' && len !== check.value!)
+        return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Array must contain exactly ${check.value} element(s)` }]) };
+      if (check.type === 'nonempty' && len === 0)
+        return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Array must contain at least 1 element(s)' }]) };
+    }
+    return undefined;
+  }
+
+  /** Zod 4: the element schema */
+  unwrap(): T { return this.element; }
+
   min(length: number, message?: string): this { return this._withCheck({ type: 'min', value: length, message }); }
   max(length: number, message?: string): this { return this._withCheck({ type: 'max', value: length, message }); }
   length(length: number, message?: string): this { return this._withCheck({ type: 'length', value: length, message }); }
@@ -2813,7 +3386,7 @@ export class DhiTuple<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<TupleOutput<T>> {
     if (this._jit === undefined) this._jit = jitCompileValueFn(this);
-    if (this._jit) {
+    if (this._jit && !_encodeMode) {
       const r = this._jit(value);
       if (r !== null) return { success: true, data: r };
     }
@@ -2854,6 +3427,32 @@ export class DhiTuple<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
     if (issues.length > 0) return { success: false, error: new ZodError(issues) };
     return { success: true, data: result as TupleOutput<T> };
   }
+
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<TupleOutput<T>>> {
+    if (!Array.isArray(value)) return this._parse(value, path);
+    const n = this.items.length;
+    if (!this._rest && value.length > n) return this._parse(value, path);
+    const optStart = this._optStart();
+    if (value.length < optStart) return this._parse(value, path);
+
+    const result: any[] = [];
+    const issues: ZodIssue[] = [];
+    const present = Math.min(n, value.length);
+    for (let i = 0; i < present; i++) {
+      const r = await this.items[i]._parseAsync(value[i], [...path, i]);
+      if (!r.success) issues.push(...r.error.issues);
+      else result.push(r.data);
+    }
+    if (this._rest) {
+      for (let i = n; i < value.length; i++) {
+        const r = await this._rest._parseAsync(value[i], [...path, i]);
+        if (!r.success) issues.push(...r.error.issues);
+        else result.push(r.data);
+      }
+    }
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result as TupleOutput<T> };
+  }
 }
 
 // ============================================================================
@@ -2865,11 +3464,15 @@ export class DhiRecord<K extends DhiType<string, string>, V extends DhiType<any,
   /** @internal `z.partialRecord()`: enum/literal keys may be missing */
   _partial = false;
 
-  constructor(private keySchema: K, private valueSchema: V) { super(); }
+  constructor(readonly keyType: K, readonly valueType: V) { super(); }
+
+  /** @internal legacy aliases kept for the JIT / `_zod.def` builders */
+  private get keySchema(): K { return this.keyType; }
+  private get valueSchema(): V { return this.valueType; }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Record<K["_output"], V["_output"]>> {
     if (this._jit === undefined) this._jit = jitCompileValueFn(this);
-    if (this._jit) {
+    if (this._jit && !_encodeMode) {
       const r = this._jit(value);
       if (r !== null) return { success: true, data: r };
     }
@@ -2920,6 +3523,39 @@ export class DhiRecord<K extends DhiType<string, string>, V extends DhiType<any,
     if (issues.length > 0) return { success: false, error: new ZodError(issues) };
     return { success: true, data: result };
   }
+
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<Record<K["_output"], V["_output"]>>> {
+    if (!isPlainObject(value)) return this._parse(value, path);
+    const input = value as Record<string, unknown>;
+    const result: Record<string, any> = {};
+    const issues: ZodIssue[] = [];
+
+    const exhaustive = this._partial ? undefined : zodValues(this.keyType);
+    if (exhaustive) {
+      for (const key of exhaustive) {
+        if (typeof key !== 'string') continue;
+        const valResult = await this.valueType._parseAsync(input[key], [...path, key]);
+        if (!valResult.success) issues.push(...valResult.error.issues);
+        else result[key] = valResult.data;
+      }
+      const unrecognized: string[] = [];
+      for (const key in input) if (!exhaustive.has(key)) unrecognized.push(key);
+      if (unrecognized.length > 0) {
+        issues.push({ code: 'unrecognized_keys', path, message: `Unrecognized key(s) in object: ${unrecognized.map(k => `"${k}"`).join(', ')}` });
+      }
+    } else {
+      for (const key of Object.keys(input)) {
+        const keyResult = await this.keyType._parseAsync(key, [...path, key]);
+        if (!keyResult.success) { issues.push(...keyResult.error.issues); continue; }
+        const valResult = await this.valueType._parseAsync(input[key], [...path, key]);
+        if (!valResult.success) issues.push(...valResult.error.issues);
+        else result[keyResult.data] = valResult.data;
+      }
+    }
+
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result };
+  }
 }
 
 // ============================================================================
@@ -2927,21 +3563,40 @@ export class DhiRecord<K extends DhiType<string, string>, V extends DhiType<any,
 // ============================================================================
 
 export class DhiMap<K extends DhiType<any, any>, V extends DhiType<any, any>> extends DhiType<Map<K["_output"], V["_output"]>, Map<K["_input"], V["_input"]>> {
-  constructor(private keySchema: K, private valueSchema: V) { super(); }
+  private checks: Array<{ type: string; value?: number; message?: string }> = [];
+
+  constructor(readonly keyType: K, readonly valueType: V) { super(); }
+
+  /** @internal legacy aliases kept for the JIT / `_zod.def` builders */
+  private get keySchema(): K { return this.keyType; }
+  private get valueSchema(): V { return this.valueType; }
+
+  private _sizeIssue(size: number, path: (string | number)[]): SafeParseResult<any> | undefined {
+    for (const check of this.checks) {
+      if (check.type === 'min' && size < check.value!) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Map must have at least ${check.value} entries` }]) };
+      if (check.type === 'max' && size > check.value!) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Map must have at most ${check.value} entries` }]) };
+      if (check.type === 'size' && size !== check.value!) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Map must have exactly ${check.value} entries` }]) };
+      if (check.type === 'nonempty' && size === 0) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Map must not be empty' }]) };
+    }
+    return undefined;
+  }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Map<K["_output"], V["_output"]>> {
-    const fast = jitTryFast(this, value);
+    // The compiled validator doesn't know about size checks
+    const fast = _encodeMode || this.checks.length > 0 ? undefined : jitTryFast(this, value);
     if (fast) return fast;
     if (!(value instanceof Map)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Map' }]) };
     }
+    const sizeIssue = this._sizeIssue(value.size, path);
+    if (sizeIssue) return sizeIssue;
 
     const result = new Map<K["_output"], V["_output"]>();
     const issues: ZodIssue[] = [];
 
     for (const [k, v] of value.entries()) {
-      const keyR = this.keySchema._parse(k, [...path, 'key']);
-      const valR = this.valueSchema._parse(v, [...path, 'value']);
+      const keyR = this.keyType._parse(k, [...path, 'key']);
+      const valR = this.valueType._parse(v, [...path, 'value']);
       if (!keyR.success) issues.push(...keyR.error.issues);
       if (!valR.success) issues.push(...valR.error.issues);
       if (keyR.success && valR.success) result.set(keyR.data, valR.data);
@@ -2950,15 +3605,66 @@ export class DhiMap<K extends DhiType<any, any>, V extends DhiType<any, any>> ex
     if (issues.length > 0) return { success: false, error: new ZodError(issues) };
     return { success: true, data: result };
   }
+
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<Map<K["_output"], V["_output"]>>> {
+    if (!(value instanceof Map)) return this._parse(value, path);
+    const sizeIssue = this._sizeIssue(value.size, path);
+    if (sizeIssue) return sizeIssue;
+    const result = new Map<K["_output"], V["_output"]>();
+    const issues: ZodIssue[] = [];
+    for (const [k, v] of value.entries()) {
+      const keyR = await this.keyType._parseAsync(k, [...path, 'key']);
+      const valR = await this.valueType._parseAsync(v, [...path, 'value']);
+      if (!keyR.success) issues.push(...keyR.error.issues);
+      if (!valR.success) issues.push(...valR.error.issues);
+      if (keyR.success && valR.success) result.set(keyR.data, valR.data);
+    }
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result };
+  }
+
+  // Zod 4: size checks on maps
+  min(size: number, message?: string): this { return this._withCheck({ type: 'min', value: size, message }); }
+  max(size: number, message?: string): this { return this._withCheck({ type: 'max', value: size, message }); }
+  size(size: number, message?: string): this { return this._withCheck({ type: 'size', value: size, message }); }
+  nonempty(message?: string): this { return this._withCheck({ type: 'nonempty', message }); }
 }
 
 export class DhiSet<T extends DhiType<any, any>> extends DhiType<Set<T["_output"]>, Set<T["_input"]>> {
   private checks: Array<{ type: string; value?: number; message?: string }> = [];
 
-  constructor(private valueSchema: T) { super(); }
+  constructor(readonly valueType: T) { super(); }
+
+  /** @internal legacy alias kept for the JIT / `_zod.def` builders */
+  private get valueSchema(): T { return this.valueType; }
+
+  private _sizeIssue(size: number, path: (string | number)[]): SafeParseResult<any> | undefined {
+    for (const check of this.checks) {
+      if (check.type === 'min' && size < check.value!) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Set must have at least ${check.value} elements` }]) };
+      if (check.type === 'max' && size > check.value!) return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `Set must have at most ${check.value} elements` }]) };
+      if (check.type === 'size' && size !== check.value!) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || `Set must have exactly ${check.value} elements` }]) };
+      if (check.type === 'nonempty' && size === 0) return { success: false, error: new ZodError([{ code: 'too_small', path, message: check.message || 'Set must not be empty' }]) };
+    }
+    return undefined;
+  }
+
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<Set<T["_output"]>>> {
+    if (!(value instanceof Set)) return this._parse(value, path);
+    const sizeIssue = this._sizeIssue(value.size, path);
+    if (sizeIssue) return sizeIssue;
+    const result = new Set<T["_output"]>();
+    const issues: ZodIssue[] = [];
+    for (const item of value) {
+      const r = await this.valueType._parseAsync(item, path);
+      if (!r.success) issues.push(...r.error.issues);
+      else result.add(r.data);
+    }
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: result };
+  }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Set<T["_output"]>> {
-    const fast = jitTryFast(this, value);
+    const fast = _encodeMode ? undefined : jitTryFast(this, value);
     if (fast) return fast;
     if (!(value instanceof Set)) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected Set' }]) };
@@ -2998,12 +3704,15 @@ type UnionOutput<T extends DhiType<any, any>[]> = T[number]["_output"];
 type UnionInput<T extends DhiType<any, any>[]> = T[number]["_input"];
 
 export class DhiUnion<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> extends DhiType<UnionOutput<T>, UnionInput<T>> {
-  constructor(private options: T) { super(); }
+  constructor(readonly options: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<UnionOutput<T>> {
-    const fast = jitTryFast(this, value);
+    const fast = _encodeMode ? undefined : jitTryFast(this, value);
     if (fast) return fast;
     const options = this.options;
+    // Zod 4 reports the members' own issues under `errors`; they are only
+    // collected on the failure path, so a matching member still costs nothing.
+    let errors: ZodIssue[][] | null = null;
     for (let i = 0; i < options.length; i++) {
       const option = options[i];
       // Cheap probe first: a definite-miss is skipped without building a
@@ -3013,8 +3722,19 @@ export class DhiUnion<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> ext
       if (option._fastValid(value) === false) continue;
       const result = option._parse(value, path);
       if (result.success) return result;
+      (errors ??= []).push(result.error.issues);
     }
-    return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input' }]) };
+    return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input', errors: errors ?? [] }]) };
+  }
+
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<UnionOutput<T>>> {
+    const errors: ZodIssue[][] = [];
+    for (const option of this.options) {
+      const result = await option._parseAsync(value, path);
+      if (result.success) return result;
+      errors.push(result.error.issues);
+    }
+    return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input', errors }]) };
   }
 
   protected _toJsonSchemaCore(): Record<string, any> {
@@ -3029,20 +3749,28 @@ export class DhiDiscriminatedUnion<
   private _optionsMap: Map<any, DhiObject<any>>;
   private _jit: ((value: any) => any) | null | undefined = undefined;
 
-  constructor(private discriminator: Discriminator, private options: Options) {
+  constructor(readonly discriminator: Discriminator, readonly options: Options) {
     super();
     this._optionsMap = new Map();
-    for (const option of options) {
-      const schema = option.shape[discriminator];
-      if (schema instanceof DhiLiteral) {
-        this._optionsMap.set((schema as any).value, option);
+    for (let i = 0; i < options.length; i++) {
+      const option = options[i];
+      // Zod 4: every option must expose a known set of values for the
+      // discriminator key (literal / enum / null / undefined, optionally
+      // wrapped, or a nested union of such objects).
+      const shape = (option as any)?.shape as Record<string, DhiType<any, any>> | undefined;
+      const values = shape && shape[this.discriminator]
+        ? zodValues(shape[this.discriminator])
+        : zodPropValues(option as any)?.[this.discriminator];
+      if (!values || values.size === 0) {
+        throw new Error(`Invalid discriminated union option at index "${i}"`);
       }
+      for (const v of values) this._optionsMap.set(v, option);
     }
   }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Options[number]["_output"]> {
     if (this._jit === undefined) this._jit = jitCompileValueFn(this);
-    if (this._jit) {
+    if (this._jit && !_encodeMode) {
       const r = this._jit(value);
       if (r !== null) return { success: true, data: r };
     }
@@ -3055,18 +3783,36 @@ export class DhiDiscriminatedUnion<
     const option = this._optionsMap.get(discriminatorValue);
 
     if (!option) {
-      return { success: false, error: new ZodError([{ code: 'invalid_union_discriminator', path: [...path, this.discriminator], message: `Invalid discriminator value` }]) };
+      return { success: false, error: new ZodError([{ code: 'invalid_union', path: [...path, this.discriminator], message: `Invalid discriminator value`, errors: [] }]) };
     }
 
     return option._parse(value, path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<Options[number]["_output"]>> {
+    if (typeof value !== 'object' || value === null) return this._parse(value, path);
+    const option = this._optionsMap.get((value as any)[this.discriminator]);
+    if (!option) return this._parse(value, path);
+    return option._parseAsync(value, path);
   }
 }
 
 export class DhiIntersection<L extends DhiType<any, any>, R extends DhiType<any, any>> extends DhiType<L["_output"] & R["_output"], L["_input"] & R["_input"]> {
   constructor(private left: L, private right: R) { super(); }
 
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<L["_output"] & R["_output"]>> {
+    const leftResult = await this.left._parseAsync(value, path);
+    if (!leftResult.success) return leftResult as any;
+    const rightResult = await this.right._parseAsync(value, path);
+    if (!rightResult.success) return rightResult as any;
+    if (typeof leftResult.data === 'object' && typeof rightResult.data === 'object') {
+      return { success: true, data: { ...leftResult.data, ...rightResult.data } };
+    }
+    return { success: true, data: leftResult.data };
+  }
+
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<L["_output"] & R["_output"]> {
-    const fast = jitTryFast(this, value);
+    const fast = _encodeMode ? undefined : jitTryFast(this, value);
     if (fast) return fast;
     const leftResult = this.left._parse(value, path);
     if (!leftResult.success) return leftResult as any;
@@ -3091,10 +3837,16 @@ export class DhiLazy<T extends DhiType<any, any>> extends DhiType<T["_output"], 
   constructor(private getter: () => T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
-    const fast = jitTryFast(this, value);
+    const fast = _encodeMode ? undefined : jitTryFast(this, value);
     if (fast) return fast;
     return this.getter()._parse(value, path);
   }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    return this.getter()._parseAsync(value, path);
+  }
+
+  unwrap(): T { return this.getter(); }
 }
 
 // ============================================================================
@@ -3112,6 +3864,13 @@ export class DhiPromise<T extends DhiType<any, any>> extends DhiType<Promise<T["
     const validated = value.then(v => this.schema.parse(v));
     return { success: true, data: validated };
   }
+
+  async _parseAsync(value: unknown, path: (string | number)[]): Promise<SafeParseResult<any>> {
+    if (!(value instanceof Promise)) return this._parse(value, path) as any;
+    return this.schema._parseAsync(await value, path) as any;
+  }
+
+  unwrap(): T { return this.schema; }
 }
 
 // ============================================================================
@@ -3148,6 +3907,20 @@ export class DhiFunction<
     };
   }
 
+  /** Zod 4: like `implement()`, but validates through `parseAsync` */
+  implementAsync(fn: (...args: any[]) => any): (...args: any[]) => Promise<any> {
+    return async (...args: any[]) => {
+      if (this._args) await this._args.parseAsync(args);
+      const result = await fn(...args);
+      if (this._returns) return await this._returns.parseAsync(result);
+      return result;
+    };
+  }
+
+  /** Zod 4: `z.function({ input, output })` accessors */
+  get input(): Args | undefined { return this._args; }
+  get output(): Returns | undefined { return this._returns; }
+
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<any> {
     if (typeof value !== 'function') {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected function' }]) };
@@ -3183,6 +3956,11 @@ export class DhiOptional<T extends DhiType<any, any>> extends DhiType<T["_output
     return this._inner._parse(value, path);
   }
 
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"] | undefined>> {
+    if (value === undefined) return { success: true, data: undefined };
+    return this._inner._parseAsync(value, path);
+  }
+
   unwrap(): T { return this._inner; }
   isOptional() { return true; }
 
@@ -3197,6 +3975,11 @@ export class DhiNullable<T extends DhiType<any, any>> extends DhiType<T["_output
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"] | null> {
     if (value === null) return { success: true, data: null };
     return this._inner._parse(value, path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"] | null>> {
+    if (value === null) return { success: true, data: null };
+    return this._inner._parseAsync(value, path);
   }
 
   unwrap(): T { return this._inner; }
@@ -3219,7 +4002,16 @@ export class DhiDefault<T extends DhiType<any, any>> extends DhiType<T["_output"
     return this._inner._parse(value, path);
   }
 
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    if (value === undefined) {
+      const def = typeof this._default === 'function' ? (this._default as Function)() : this._default;
+      return { success: true, data: def };
+    }
+    return this._inner._parseAsync(value, path);
+  }
+
   removeDefault(): T { return this._inner; }
+  unwrap(): T { return this._inner; }
 
   protected _toJsonSchemaCore(): Record<string, any> {
     const schema = this._inner.toJsonSchema();
@@ -3229,68 +4021,240 @@ export class DhiDefault<T extends DhiType<any, any>> extends DhiType<T["_output"
   }
 }
 
+/**
+ * Zod 4 `.prefault()`: like `.default()`, but the fallback value is run
+ * through the inner schema (so its checks and transforms apply).
+ */
+export class DhiPrefault<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"] | undefined> {
+  constructor(private _inner: T, private _default: T["_input"] | (() => T["_input"])) { super(); }
+
+  private _value(): unknown {
+    return typeof this._default === 'function' ? (this._default as Function)() : this._default;
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    return this._inner._parse(value === undefined ? this._value() : value, path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    return this._inner._parseAsync(value === undefined ? this._value() : value, path);
+  }
+
+  unwrap(): T { return this._inner; }
+  removeDefault(): T { return this._inner; }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return this._inner.toJsonSchema();
+  }
+}
+
 export class DhiCatch<T extends DhiType<any, any>> extends DhiType<T["_output"], unknown> {
-  constructor(private _inner: T, private _catch: T["_output"] | (() => T["_output"])) { super(); }
+  constructor(private _inner: T, private _catch: T["_output"] | ((ctx: { value: unknown; issues: ZodIssue[]; error: ZodError; input: unknown }) => T["_output"])) { super(); }
+
+  private _fallback(value: unknown, error: ZodError): T["_output"] {
+    return typeof this._catch === 'function'
+      ? (this._catch as Function)({ value, issues: error.issues, error, input: value })
+      : this._catch;
+  }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
     const result = this._inner._parse(value, path);
     if (result.success) return result;
-    const catchVal = typeof this._catch === 'function' ? (this._catch as Function)() : this._catch;
-    return { success: true, data: catchVal };
+    return { success: true, data: this._fallback(value, result.error) };
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    const inner = this._inner._parseAsync(value, path);
+    if (!isThenable(inner)) return inner.success ? inner : { success: true, data: this._fallback(value, inner.error) };
+    return inner.then(r => (r.success ? r : { success: true as const, data: this._fallback(value, r.error) }));
   }
 
   removeCatch(): T { return this._inner; }
 }
 
 export class DhiTransform<T extends DhiType<any, any>, U> extends DhiType<U, T["_input"]> {
-  constructor(private _inner: T, private _transform: (value: T["_output"]) => U) { super(); }
+  /** A transform that declares no `ctx` parameter skips the issue-collection setup */
+  private _usesCtx: boolean;
 
-  _parse(value: unknown, path: (string | number)[]): SafeParseResult<U> {
-    const result = this._inner._parse(value, path);
-    if (!result.success) return result as any;
+  constructor(private _inner: T, private _transform: (value: T["_output"], ctx: DhiRefinementCtx) => U) {
+    super();
+    this._usesCtx = _transform.length >= 2;
+  }
+
+  /** Run the user transform, collecting `ctx.addIssue()` calls (Zod 4 semantics) */
+  private _apply(data: any, path: (string | number)[]): SafeParseResult<U> | Promise<SafeParseResult<U>> {
+    const fail = (e: any): SafeParseResult<U> =>
+      ({ success: false, error: new ZodError([{ code: 'custom', path, message: e?.message || 'Transform failed' }]) });
+    if (!this._usesCtx) {
+      let out: any;
+      try {
+        out = (this._transform as (v: any) => U)(data);
+      } catch (e: any) {
+        return fail(e);
+      }
+      if (isThenable(out)) return out.then((v: any) => ({ success: true as const, data: v }), fail);
+      return { success: true, data: out };
+    }
+    const issues: ZodIssue[] = [];
+    let out: any;
     try {
-      return { success: true, data: this._transform(result.data) };
+      out = this._transform(data, makeRefinementCtx(data, path, issues));
     } catch (e: any) {
       return { success: false, error: new ZodError([{ code: 'custom', path, message: e?.message || 'Transform failed' }]) };
     }
+    if (isThenable(out)) {
+      return out.then(
+        (v: any): SafeParseResult<U> => (issues.length > 0 ? { success: false, error: new ZodError(issues) } : { success: true, data: v }),
+        fail,
+      );
+    }
+    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
+    return { success: true, data: out };
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<U> {
+    // Zod: a `.transform()` is one-way, so it cannot run in the encode direction
+    if (_encodeMode) throw new ZodEncodeError('ZodTransform');
+    const result = this._inner._parse(value, path);
+    if (!result.success) return result as any;
+    if (this._usesCtx) return assertNotThenable(this._apply(result.data, path)) as SafeParseResult<U>;
+    let out: U;
+    try {
+      out = (this._transform as (v: any) => U)(result.data);
+    } catch (e: any) {
+      return { success: false, error: new ZodError([{ code: 'custom', path, message: e?.message || 'Transform failed' }]) };
+    }
+    if (isThenable(out)) throw new ZodAsyncError();
+    return { success: true, data: out };
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<U>> {
+    if (_encodeMode) throw new ZodEncodeError('ZodTransform');
+    const inner = this._inner._parseAsync(value, path);
+    if (!isThenable(inner)) return inner.success ? this._apply(inner.data, path) : (inner as any);
+    return inner.then(r => (r.success ? this._apply(r.data, path) : (r as any)));
   }
 }
 
 export class DhiRefine<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"]> {
-  constructor(private _inner: T, private _check: (value: T["_output"]) => boolean, private _message?: string, private _path?: (string | number)[]) { super(); }
+  constructor(
+    private _inner: T,
+    private _check: (value: T["_output"]) => unknown,
+    private _message?: string,
+    private _path?: (string | number)[],
+    private _when?: (payload: { value: any; issues: ZodIssue[] }) => boolean,
+  ) { super(); }
+
+  private _fail(path: (string | number)[]): SafeParseResult<T["_output"]> {
+    return { success: false, error: new ZodError([{ code: 'custom', path: this._path ? [...path, ...this._path] : path, message: this._message || 'Invalid input' }]) };
+  }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
-    const fast = jitTryFast(this, value);
+    const fast = this._when ? undefined : jitTryFast(this, value);
     if (fast) return fast;
     const result = this._inner._parse(value, path);
     if (!result.success) return result;
-    if (!this._check(result.data)) {
-      return { success: false, error: new ZodError([{ code: 'custom', path: this._path ? [...path, ...this._path] : path, message: this._message || 'Invalid value' }]) };
+    if (this._when && !this._when({ value: result.data, issues: [] })) return result;
+    const ok = this._check(result.data);
+    if (ok) {
+      if (isThenable(ok)) throw new ZodAsyncError();
+      return result;
     }
-    return result;
+    return this._fail(path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    const inner = this._inner._parseAsync(value, path);
+    const run = (result: SafeParseResult<T["_output"]>): MaybeAsync<SafeParseResult<T["_output"]>> => {
+      if (!result.success) return result;
+      if (this._when && !this._when({ value: result.data, issues: [] })) return result;
+      const ok = this._check(result.data);
+      if (isThenable(ok)) return ok.then(v => (v ? result : this._fail(path)));
+      return ok ? result : this._fail(path);
+    };
+    return isThenable(inner) ? inner.then(run) : run(inner);
   }
 }
 
 export class DhiSuperRefine<T extends DhiType<any, any>> extends DhiType<T["_output"], T["_input"]> {
-  constructor(private _inner: T, private _refinement: (value: T["_output"], ctx: { addIssue: (issue: Partial<ZodIssue>) => void }) => void) { super(); }
+  constructor(private _inner: T, private _refinement: (value: T["_output"], ctx: DhiRefinementCtx) => unknown) { super(); }
+
+  private _run(result: SafeParseResult<T["_output"]>, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    if (!result.success) return result;
+    const issues: ZodIssue[] = [];
+    const done = this._refinement(result.data, makeRefinementCtx(result.data, path, issues));
+    const settle = () => (issues.length > 0 ? { success: false as const, error: new ZodError(issues) } : result);
+    return isThenable(done) ? done.then(settle) : settle();
+  }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
-    const fast = jitTryFast(this, value);
+    const fast = _encodeMode ? undefined : jitTryFast(this, value);
     if (fast) return fast;
-    const result = this._inner._parse(value, path);
-    if (!result.success) return result;
+    return assertNotThenable(this._run(this._inner._parse(value, path), path)) as SafeParseResult<T["_output"]>;
+  }
 
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    const inner = this._inner._parseAsync(value, path);
+    return isThenable(inner) ? inner.then(r => this._run(r, path)) : this._run(inner, path);
+  }
+}
+
+/**
+ * Zod 4 `z.codec(input, output, { decode, encode })` — a bidirectional pipe.
+ * `parse` / `decode` run input → decode → output; `encode` runs the reverse.
+ */
+export class DhiCodec<A extends DhiType<any, any>, B extends DhiType<any, any>> extends DhiType<B["_output"], A["_input"]> {
+  constructor(
+    private _in: A,
+    private _out: B,
+    private _decodeFn: (value: A["_output"], ctx: DhiRefinementCtx) => B["_input"],
+    private _encodeFn: (value: B["_output"], ctx: DhiRefinementCtx) => A["_input"],
+  ) { super(); }
+
+  /** Zod 4: the input-side schema */
+  get in(): A { return this._in; }
+  /** Zod 4: the output-side schema */
+  get out(): B { return this._out; }
+
+  private _step(fn: (value: any, ctx: DhiRefinementCtx) => any, data: any, path: (string | number)[]): SafeParseResult<any> | Promise<SafeParseResult<any>> {
     const issues: ZodIssue[] = [];
-    const ctx = {
-      addIssue: (issue: Partial<ZodIssue>) => {
-        issues.push({ code: issue.code || 'custom', path: issue.path || path, message: issue.message || 'Invalid' });
-      }
+    let out: any;
+    try {
+      out = fn(data, makeRefinementCtx(data, path, issues));
+    } catch (e: any) {
+      return { success: false, error: new ZodError([{ code: 'custom', path, message: e?.message || 'Codec transform failed' }]) };
+    }
+    const settle = (v: any): SafeParseResult<any> =>
+      issues.length > 0 ? { success: false, error: new ZodError(issues) } : { success: true, data: v };
+    return isThenable(out) ? out.then(settle) : settle(out);
+  }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<B["_output"]> {
+    const backward = _encodeMode;
+    const first = backward ? this.out : this.in;
+    const second = backward ? this.in : this.out;
+    const fn = backward ? this._encodeFn : this._decodeFn;
+    const firstResult = first._parse(value, path);
+    if (!firstResult.success) return firstResult as any;
+    const step = assertNotThenable(this._step(fn, firstResult.data, path)) as SafeParseResult<any>;
+    if (!step.success) return step as any;
+    return second._parse(step.data, path) as any;
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<B["_output"]>> {
+    const backward = _encodeMode;
+    const first = backward ? this.out : this.in;
+    const second = backward ? this.in : this.out;
+    const fn = backward ? this._encodeFn : this._decodeFn;
+    const afterStep = (step: SafeParseResult<any>): MaybeAsync<SafeParseResult<any>> =>
+      step.success ? second._parseAsync(step.data, path) : step;
+    const afterFirst = (r: SafeParseResult<any>): MaybeAsync<SafeParseResult<any>> => {
+      if (!r.success) return r;
+      const step = this._step(fn, r.data, path);
+      return isThenable(step) ? step.then(afterStep) : afterStep(step);
     };
-
-    this._refinement(result.data, ctx);
-
-    if (issues.length > 0) return { success: false, error: new ZodError(issues) };
-    return result;
+    const firstResult = first._parseAsync(value, path);
+    return (isThenable(firstResult) ? firstResult.then(afterFirst) : afterFirst(firstResult)) as any;
   }
 }
 
@@ -3333,7 +4297,28 @@ export class DhiCheck<T extends DhiType<any, any>> extends DhiType<T["_output"],
 
   constructor(private _inner: T, private _checks: DhiCheckInput[]) {
     super();
+    // Zod's `z.describe()` / `z.meta()` checks attach metadata instead of validating
+    for (const c of _checks) {
+      const def = (c as DhiCheckObject)?._zod?.def as any;
+      if (!def) continue;
+      if (def.check === 'describe') this._description = def.description;
+      else if (def.check === 'meta') {
+        this._metadata = { ...this._metadata, ...def.metadata };
+        globalRegistry.add(this, this._metadata);
+      }
+    }
     this._fns = _checks.map(toPayloadCheck);
+  }
+
+  private _settle(payload: ZodParsePayload, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    if (payload.issues.length === 0) return { success: true, data: payload.value };
+    const issues: ZodIssue[] = payload.issues.map((iss: any) => ({
+      ...iss,
+      code: normalizeIssueCode(iss.code),
+      path: iss.path ? [...path, ...iss.path] : path,
+      message: iss.message ?? 'Invalid input',
+    }));
+    return { success: false, error: new ZodError(issues) };
   }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
@@ -3342,17 +4327,24 @@ export class DhiCheck<T extends DhiType<any, any>> extends DhiType<T["_output"],
     const payload: ZodParsePayload = { value: result.data, issues: [] };
     const fns = this._fns;
     for (let i = 0; i < fns.length; i++) {
-      fns[i](payload);
+      assertNotThenable(fns[i](payload));
       if (payload.aborted) break;
     }
-    if (payload.issues.length === 0) return { success: true, data: payload.value };
-    const issues: ZodIssue[] = payload.issues.map((iss: any) => ({
-      ...iss,
-      code: (iss.code ?? 'custom') as ZodIssueCode,
-      path: iss.path ? [...path, ...iss.path] : path,
-      message: iss.message ?? 'Invalid input',
-    }));
-    return { success: false, error: new ZodError(issues) };
+    return this._settle(payload, path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    const run = async (result: SafeParseResult<T["_output"]>): Promise<SafeParseResult<T["_output"]>> => {
+      if (!result.success) return result;
+      const payload: ZodParsePayload = { value: result.data, issues: [] };
+      for (const fn of this._fns) {
+        await fn(payload);
+        if (payload.aborted) break;
+      }
+      return this._settle(payload, path);
+    };
+    const inner = this._inner._parseAsync(value, path);
+    return isThenable(inner) ? inner.then(run) : run(inner);
   }
 
   /** @internal Zod 4 `$ZodCheck` descriptors for `_zod.def.checks` */
@@ -3365,25 +4357,47 @@ export class DhiPipe<A extends DhiType<any, any>, B extends DhiType<any, any>> e
   constructor(private _a: A, private _b: B) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<B["_output"]> {
+    if (_encodeMode) {
+      // Encoding runs the pipe backwards: out first, then in (Zod semantics)
+      const outResult = this._b._parse(value, path);
+      if (!outResult.success) return outResult as any;
+      return this._a._parse(outResult.data, path) as any;
+    }
     const fast = jitTryFast(this, value);
     if (fast) return fast;
     const aResult = this._a._parse(value, path);
     if (!aResult.success) return aResult as any;
     return this._b._parse(aResult.data, path);
   }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<B["_output"]>> {
+    const first = _encodeMode ? this._b : this._a;
+    const second = _encodeMode ? this._a : this._b;
+    const after = (r: SafeParseResult<any>): MaybeAsync<SafeParseResult<any>> => (r.success ? second._parseAsync(r.data, path) : r);
+    const firstResult = first._parseAsync(value, path);
+    return (isThenable(firstResult) ? firstResult.then(after) : after(firstResult)) as any;
+  }
 }
 
 export class DhiReadonly<T extends DhiType<any, any>> extends DhiType<Readonly<T["_output"]>, T["_input"]> {
   constructor(private _inner: T) { super(); }
 
-  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Readonly<T["_output"]>> {
-    const result = this._inner._parse(value, path);
+  private _freeze(result: SafeParseResult<any>): SafeParseResult<Readonly<T["_output"]>> {
     if (!result.success) return result;
-    if (typeof result.data === 'object' && result.data !== null) {
-      return { success: true, data: Object.freeze(result.data) };
-    }
-    return result as SafeParseResult<Readonly<T["_output"]>>;
+    if (typeof result.data === 'object' && result.data !== null) return { success: true, data: Object.freeze(result.data) };
+    return result;
   }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<Readonly<T["_output"]>> {
+    return this._freeze(this._inner._parse(value, path));
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<Readonly<T["_output"]>>> {
+    const inner = this._inner._parseAsync(value, path);
+    return isThenable(inner) ? inner.then(r => this._freeze(r)) : this._freeze(inner);
+  }
+
+  unwrap(): T { return this._inner; }
 }
 
 // ============================================================================
@@ -3394,8 +4408,17 @@ export class DhiPreprocess<T extends DhiType<any, any>> extends DhiType<T["_outp
   constructor(private _preprocess: (value: unknown) => unknown, private _schema: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
+    // Zod models preprocess as `pipe(transform, schema)`, so it is one-way
+    if (_encodeMode) throw new ZodEncodeError('ZodTransform');
     const processed = this._preprocess(value);
     return this._schema._parse(processed, path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    if (_encodeMode) throw new ZodEncodeError('ZodTransform');
+    const processed = this._preprocess(value);
+    if (isThenable(processed)) return processed.then(v => this._schema._parseAsync(v, path));
+    return this._schema._parseAsync(processed, path);
   }
 }
 
@@ -3422,11 +4445,10 @@ export class DhiFile extends DhiType<File, File> {
             return { success: false, error: new ZodError([{ code: 'too_big', path, message: check.message || `File must be at most ${check.value} bytes` }]) };
           break;
         case 'mime':
+          // Zod compares `file.type` exactly (a charset parameter is part of it)
           const mimes = Array.isArray(check.value) ? check.value : [check.value];
-          // Handle MIME types with parameters (e.g., "text/plain;charset=utf-8")
-          const baseType = value.type.split(';')[0].trim();
-          if (!mimes.some((m: string) => baseType === m || value.type === m))
-            return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: check.message || `Invalid MIME type. Expected ${mimes.join(', ')}` }]) };
+          if (!mimes.includes(value.type))
+            return { success: false, error: new ZodError([{ code: 'invalid_value', values: mimes, path, message: check.message || `Invalid file type: expected one of ${mimes.join(', ')}` }]) };
           break;
       }
     }
@@ -3479,7 +4501,7 @@ export class DhiTemplateLiteral<T extends string = string> extends DhiType<T, T>
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected string' }]) };
     }
     if (!this._regex.test(value)) {
-      return { success: false, error: new ZodError([{ code: 'invalid_string', path, message: 'Invalid template literal format' }]) };
+      return { success: false, error: new ZodError([{ code: 'invalid_format', path, message: 'Invalid template literal format' }]) };
     }
     return { success: true, data: value as T };
   }
@@ -3550,6 +4572,14 @@ export class DhiStringBool extends DhiType<boolean, string> {
   }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<boolean> {
+    if (_encodeMode) {
+      // Backward direction: boolean -> the canonical truthy/falsy string
+      if (typeof value !== 'boolean') {
+        return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected boolean, received ' + typeof value, expected: 'boolean', received: typeof value }]) };
+      }
+      const set = value ? this._trueValues : this._falseValues;
+      return { success: true, data: (set.values().next().value ?? String(value)) as any };
+    }
     if (typeof value !== 'string') {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected string, received ' + typeof value }]) };
     }
@@ -3574,8 +4604,18 @@ export class DhiCustom<T> extends DhiType<T, unknown> {
   }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T> {
-    if (this._checkFn(value)) return { success: true, data: value };
-    return { success: false, error: new ZodError([{ code: 'custom', path, message: this._params?.message || 'Invalid value' }]) };
+    const ok = this._checkFn(value);
+    if (isThenable(ok)) throw new ZodAsyncError();
+    if (ok) return { success: true, data: value };
+    return { success: false, error: new ZodError([{ code: 'custom', path, message: this._params?.message || 'Invalid input' }]) };
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T>> {
+    const ok = this._checkFn(value);
+    const done = (v: unknown): SafeParseResult<T> => (v
+      ? { success: true, data: value as T }
+      : { success: false, error: new ZodError([{ code: 'custom', path, message: this._params?.message || 'Invalid input' }]) });
+    return isThenable(ok) ? ok.then(done) : done(ok);
   }
 }
 
@@ -3593,6 +4633,14 @@ export class DhiSuccess<T extends DhiType<any, any>> extends DhiType<boolean, T[
     if (!result.success) return result as any;
     return { success: true, data: true };
   }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<boolean>> {
+    const inner = this._inner._parseAsync(value, path);
+    const done = (r: SafeParseResult<any>): SafeParseResult<boolean> => (r.success ? { success: true, data: true } : (r as any));
+    return isThenable(inner) ? inner.then(done) : done(inner);
+  }
+
+  unwrap(): T { return this._inner; }
 }
 
 /** Zod 4 `.nonoptional()`: like the inner schema but `undefined` is rejected */
@@ -3600,7 +4648,15 @@ export class DhiNonOptional<T extends DhiType<any, any>> extends DhiType<Exclude
   constructor(private _inner: T) { super(); }
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<Exclude<T["_output"], undefined>> {
-    const result = this._inner._parse(value, path);
+    return this._check(this._inner._parse(value, path), path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<Exclude<T["_output"], undefined>>> {
+    const inner = this._inner._parseAsync(value, path);
+    return isThenable(inner) ? inner.then(r => this._check(r, path)) : this._check(inner, path);
+  }
+
+  private _check(result: SafeParseResult<any>, path: (string | number)[]): SafeParseResult<Exclude<T["_output"], undefined>> {
     if (!result.success) return result as any;
     if (result.data === undefined) {
       return { success: false, error: new ZodError([{ code: 'invalid_type', path, message: 'Expected nonoptional, received undefined', expected: 'nonoptional', received: 'undefined' }]) };
@@ -3627,6 +4683,10 @@ export class DhiExactOptional<T extends DhiType<any, any>> extends DhiType<T["_o
 
   _parse(value: unknown, path: (string | number)[]): SafeParseResult<T["_output"]> {
     return this._inner._parse(value, path);
+  }
+
+  _parseAsync(value: unknown, path: (string | number)[]): MaybeAsync<SafeParseResult<T["_output"]>> {
+    return this._inner._parseAsync(value, path);
   }
 
   unwrap(): T { return this._inner; }
@@ -3963,6 +5023,112 @@ function enumFactory(values: any): any {
   return Array.isArray(values) ? new DhiEnum(values as any) : new DhiNativeEnum(values);
 }
 
+// ============================================================================
+// Zod 4 JSON Schema entry point (`z.toJSONSchema` / `schema.toJSONSchema()`)
+// ============================================================================
+
+export interface ToJSONSchemaParams {
+  /** Dialect to advertise via `$schema` (default `draft-2020-12`) */
+  target?: 'draft-2020-12' | 'draft-7' | 'draft-07' | 'draft-4' | 'draft-04' | 'openapi-3.0';
+  /** Registry consulted for per-schema metadata instead of `.meta()` */
+  metadata?: DhiRegistry<any>;
+  /** `'throw'` rejects types dhi cannot express (default `'any'`, which emits `{}`) */
+  unrepresentable?: 'throw' | 'any';
+  /** Accepted for Zod compatibility (dhi always inlines) */
+  cycles?: 'ref' | 'throw';
+  /** Accepted for Zod compatibility (dhi always inlines) */
+  reused?: 'inline' | 'ref';
+  io?: 'input' | 'output';
+  /** Called for every generated node; mutate `ctx.jsonSchema` to post-process */
+  override?: (ctx: { zodSchema: DhiType<any, any>; jsonSchema: Record<string, any>; path: (string | number)[] }) => void;
+}
+
+const JSON_SCHEMA_DIALECTS: Record<string, string> = {
+  'draft-2020-12': 'https://json-schema.org/draft/2020-12/schema',
+  'draft-7': 'http://json-schema.org/draft-07/schema#',
+  'draft-07': 'http://json-schema.org/draft-07/schema#',
+  'draft-4': 'http://json-schema.org/draft-04/schema#',
+  'draft-04': 'http://json-schema.org/draft-04/schema#',
+};
+
+/**
+ * Zod 4 `z.toJSONSchema(schema, params)`. Emits the same shape Zod does —
+ * `$schema`, `additionalProperties` for objects, registry metadata — on top of
+ * dhi's own `schema.toJsonSchema()` output.
+ */
+export function toJSONSchema<T extends DhiType<any, any>>(schema: T, params?: ToJSONSchemaParams): Record<string, any> {
+  const prev = { mode: _jsonSchemaZodMode, meta: _jsonSchemaMetadata, over: _jsonSchemaOverride, unrep: _jsonSchemaUnrepresentable };
+  _jsonSchemaZodMode = true;
+  _jsonSchemaMetadata = params?.metadata;
+  _jsonSchemaOverride = params?.override;
+  _jsonSchemaUnrepresentable = params?.unrepresentable ?? 'any';
+  let json: Record<string, any>;
+  try {
+    json = schema.toJsonSchema({ io: params?.io });
+  } finally {
+    _jsonSchemaZodMode = prev.mode;
+    _jsonSchemaMetadata = prev.meta;
+    _jsonSchemaOverride = prev.over;
+    _jsonSchemaUnrepresentable = prev.unrep;
+  }
+  const target = params?.target ?? 'draft-2020-12';
+  const dialect = JSON_SCHEMA_DIALECTS[target];
+  return dialect ? { $schema: dialect, ...json } : json;
+}
+
+// ============================================================================
+// Global configuration (Zod 4 `z.config()` / `z.getErrorMap()`)
+// ============================================================================
+
+export interface DhiConfig {
+  customError?: ((issue: any) => string | undefined) | undefined;
+  localeError?: ((issue: any) => string | undefined) | undefined;
+  jitless?: boolean;
+  [key: string]: any;
+}
+
+const globalConfig: DhiConfig = {};
+
+/** Zod 4 `z.config()` — read (no argument) or merge into the global config */
+export function config(newConfig?: DhiConfig): DhiConfig {
+  if (newConfig) Object.assign(globalConfig, newConfig);
+  return globalConfig;
+}
+
+/** Minimal Zod 4 `z.locales` surface — dhi ships a single (English) message set */
+const locales = {
+  en: () => ({ localeError: (_issue: any): string | undefined => undefined }),
+};
+
+// ============================================================================
+// z.xor — union that requires exactly one member to match
+// ============================================================================
+
+export class DhiXor<T extends [DhiType<any, any>, ...DhiType<any, any>[]]> extends DhiType<T[number]["_output"], T[number]["_input"]> {
+  constructor(readonly options: T) { super(); }
+
+  _parse(value: unknown, path: (string | number)[]): SafeParseResult<T[number]["_output"]> {
+    let matched: SafeParseResult<any> | undefined;
+    for (const option of this.options) {
+      const r = option._parse(value, path);
+      if (!r.success) continue;
+      if (matched) return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input: expected exactly one matching option', errors: [] }]) };
+      matched = r;
+    }
+    if (matched) return matched;
+    return { success: false, error: new ZodError([{ code: 'invalid_union', path, message: 'Invalid input', errors: [] }]) };
+  }
+
+  protected _toJsonSchemaCore(): Record<string, any> {
+    return { oneOf: this.options.map(o => o.toJsonSchema()) };
+  }
+}
+
+// A schema-shaped `z.transform(fn)` for use inside `z.pipe(...)`
+function standaloneTransform(fn: (value: any, ctx: DhiRefinementCtx) => any): DhiType<any, any> {
+  return new DhiTransform(new DhiAny(), fn) as any;
+}
+
 export const z = {
   // Primitives
   string: () => new DhiString(),
@@ -3988,7 +5154,9 @@ export const z = {
   // Composites
   object: <T extends Record<string, DhiType<any, any>>>(shape: T) => new DhiObject(shape),
   array: <T extends DhiType<any, any>>(schema: T) => new DhiArray(schema),
-  tuple: <T extends [DhiType<any, any>, ...DhiType<any, any>[]]>(items: T) => new DhiTuple(items),
+  // Zod 4: z.tuple(items) or z.tuple(items, rest)
+  tuple: <T extends [DhiType<any, any>, ...DhiType<any, any>[]]>(items: T, rest?: DhiType<any, any>) =>
+    rest ? new DhiTuple(items).rest(rest) : new DhiTuple(items),
   record: <K extends DhiType<string, string>, V extends DhiType<any, any>>(keyOrValue: K | V, value?: V) => {
     if (value) return new DhiRecord(keyOrValue as K, value);
     return new DhiRecord(new DhiString() as any, keyOrValue as V);
@@ -4192,44 +5360,212 @@ export const z = {
   registry: <M extends Record<string, any> = GlobalMeta>() => new DhiRegistry<M>(),
   globalRegistry,
 
-  // Zod 4: prettifyError - format error for display
-  prettifyError: (error: ZodError): string => {
-    const lines: string[] = [];
-    for (const issue of error.issues) {
-      const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
-      lines.push(`• ${path}: ${issue.message}`);
-    }
-    return lines.join('\n');
-  },
+  // Zod 4 error helpers
+  prettifyError,
+  treeifyError,
+  flattenError,
+  formatError,
 
   // Type utilities (these are type-level only, no runtime impact)
   infer: undefined as any,
   input: undefined as any,
   output: undefined as any,
 
-  // Error class
+  // Error classes
   ZodError,
+  /** Zod 4 exposes both names; dhi's `ZodError` already extends `Error` */
+  ZodRealError: ZodError,
+  ZodEncodeError,
+  ZodAsyncError,
 
-  // Zod 4: Top-level JSON Schema generation (alias for schema.toJsonSchema())
-  // Usage: z.toJSONSchema(schema) or z.toJSONSchema(schema, { target: 'draft-07' })
-  toJSONSchema: <T extends DhiType<any, any>>(
-    schema: T,
-    params?: {
-      target?: 'draft-2020-12' | 'draft-07' | 'draft-04' | 'openapi-3.0';
-      // Additional params for future compatibility
-      unrepresentable?: 'throw' | 'any';
-      io?: 'input' | 'output';
-    }
-  ): Record<string, any> => {
-    // draft-2020-12 style output; `io` selects input vs output semantics like Zod.
-    // `target` / `unrepresentable` are accepted for API compatibility.
-    return schema.toJsonSchema({ io: params?.io });
-  },
+  // Zod 4: Top-level JSON Schema generation
+  // Usage: z.toJSONSchema(schema) or z.toJSONSchema(schema, { target: 'draft-7' })
+  toJSONSchema,
 
   // Issue #55: JSON Schema import — hydrate a dhi schema from a JSON Schema doc
   // (the inverse of toJSONSchema, for define-once cross-language schema sharing).
   fromJsonSchema,
+  /** Zod 4 spelling of `fromJsonSchema` */
+  fromJSONSchema: fromJsonSchema,
+
+  // --------------------------------------------------------------------------
+  // Zod 4: top-level functional forms (`z.parse(schema, value)`, ...)
+  // --------------------------------------------------------------------------
+  parse: <T extends DhiType<any, any>>(schema: T, value: unknown): T['_output'] => schema.parse(value),
+  safeParse: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.safeParse(value),
+  parseAsync: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.parseAsync(value),
+  safeParseAsync: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.safeParseAsync(value),
+
+  // --------------------------------------------------------------------------
+  // Zod 4: codecs (bidirectional schemas) and the encode/decode helpers
+  // --------------------------------------------------------------------------
+  codec: <A extends DhiType<any, any>, B extends DhiType<any, any>>(
+    input: A,
+    output: B,
+    params: {
+      decode: (value: A['_output'], ctx: DhiRefinementCtx) => B['_input'];
+      encode: (value: B['_output'], ctx: DhiRefinementCtx) => A['_input'];
+    },
+  ) => new DhiCodec(input, output, params.decode, params.encode),
+  decode: <T extends DhiType<any, any>>(schema: T, value: unknown): T['_output'] => schema.decode(value),
+  safeDecode: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.safeDecode(value),
+  decodeAsync: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.decodeAsync(value),
+  safeDecodeAsync: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.safeDecodeAsync(value),
+  encode: <T extends DhiType<any, any>>(schema: T, value: unknown): T['_input'] => schema.encode(value),
+  safeEncode: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.safeEncode(value),
+  encodeAsync: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.encodeAsync(value),
+  safeEncodeAsync: <T extends DhiType<any, any>>(schema: T, value: unknown) => schema.safeEncodeAsync(value),
+
+  // --------------------------------------------------------------------------
+  // Zod 4: top-level wrapper constructors
+  // --------------------------------------------------------------------------
+  transform: <I = any, O = any>(fn: (value: I, ctx: DhiRefinementCtx) => O) => standaloneTransform(fn as any),
+  catch: <T extends DhiType<any, any>>(schema: T, catchValue: any) => new DhiCatch(schema, catchValue),
+  default: <T extends DhiType<any, any>>(schema: T, defaultValue: any) => new DhiDefault(schema, defaultValue),
+  _default: <T extends DhiType<any, any>>(schema: T, defaultValue: any) => new DhiDefault(schema, defaultValue),
+  prefault: <T extends DhiType<any, any>>(schema: T, defaultValue: any) => new DhiPrefault(schema, defaultValue),
+  nullish: <T extends DhiType<any, any>>(schema: T) => new DhiOptional(new DhiNullable(schema)),
+  nonoptional: <T extends DhiType<any, any>>(schema: T) => new DhiNonOptional(schema),
+  readonly: <T extends DhiType<any, any>>(schema: T) => new DhiReadonly(schema),
+  exactOptional: <T extends DhiType<any, any>>(schema: T) => new DhiExactOptional(schema),
+  keyof: <T extends Record<string, DhiType<any, any>>>(schema: DhiObject<T>) => schema.keyof(),
+  clone: <T extends DhiType<any, any>>(schema: T): T => schema.clone(),
+  /** Zod 4: union that requires exactly one member to match */
+  xor: <T extends [DhiType<any, any>, ...DhiType<any, any>[]]>(options: T) => new DhiXor(options),
+  /** Zod 4 alias for `z.function(...)` */
+  _function: (params?: { input?: DhiTuple<any> | DhiType<any, any>[]; output?: DhiType<any, any> }) => z.function(params),
+
+  /** Zod 4: a string schema validated by a named custom format */
+  stringFormat: (format: string, fnOrRegex: RegExp | ((value: string) => unknown), params?: ZodMessage) => {
+    const msg = msgOf(params);
+    const check = typeof fnOrRegex === 'function'
+      ? makeCheck({ check: 'string_format', format }, payload => {
+          if (typeof payload.value !== 'string' || !fnOrRegex(payload.value)) {
+            pushIssue(payload, { code: 'invalid_format', format, message: msg ?? `Invalid ${format}` });
+          }
+        })
+      : stringFormatCheck(format, fnOrRegex, params);
+    return new DhiString().check(check);
+  },
+  /** Zod 4: standalone `slugify` check (`z.string().check(z.slugify())`) */
+  slugify: () => overwriteCheck(slugifyString),
+  /** Zod 4: `.check(z.describe('...'))` */
+  describe: (description: string) => makeCheck({ check: 'describe', description }, () => {}),
+  /** Zod 4: `.check(z.meta({...}))` */
+  meta: (metadata: Record<string, any>) => makeCheck({ check: 'meta', metadata }, () => {}),
+
+  // --------------------------------------------------------------------------
+  // Zod 4: constants, config and core namespaces
+  // --------------------------------------------------------------------------
+  /** Sentinel to return from a transform after `ctx.addIssue()` */
+  NEVER,
+  TimePrecision: { Any: null, Minute: -1, Second: 0, Millisecond: 3, Microsecond: 6 },
+  ZodIssueCode: {
+    invalid_type: 'invalid_type', too_big: 'too_big', too_small: 'too_small',
+    invalid_format: 'invalid_format', not_multiple_of: 'not_multiple_of',
+    unrecognized_keys: 'unrecognized_keys', invalid_union: 'invalid_union',
+    invalid_key: 'invalid_key', invalid_element: 'invalid_element',
+    invalid_value: 'invalid_value', custom: 'custom',
+  },
+  $brand: Symbol.for('dhi_brand'),
+  $input: Symbol.for('DhiInput'),
+  $output: Symbol.for('DhiOutput'),
+  regexes: {
+    cuid: CUID_RE, cuid2: CUID2_RE, ulid: ULID_RE, xid: XID_RE, ksuid: KSUID_RE, nanoid: NANOID_RE,
+    duration: ISO_DURATION_RE, emoji: EMOJI_RE, cidrv4: CIDRV4_RE, base64url: BASE64URL_RE,
+    e164: E164_RE, hostname: HOSTNAME_RE, domain: DOMAIN_RE, hex: HEX_RE,
+    lowercase: LOWERCASE_RE, uppercase: UPPERCASE_RE,
+  },
+  util: {
+    jsonStringifyReplacer,
+    toDotPath,
+    slugify: slugifyString,
+    isPlainObject,
+    floatSafeRemainder: (value: number, step: number) => isMultipleOf(value, step),
+    joinValues: (values: readonly unknown[], separator = '|') => values.map(v => (typeof v === 'string' ? `"${v}"` : String(v))).join(separator),
+    getEnumValues: (entries: Record<string, string | number>) => Object.values(entries),
+  },
+  config,
+  locales,
+  getErrorMap: () => config().customError,
+  setErrorMap: (map: (issue: any) => string | undefined) => { config({ customError: map }); },
+  globalConfig,
+
+  // Runtime `Zod*` class aliases so `instanceof` checks and named imports work
+  ZodType: DhiType,
+  ZodString: DhiString,
+  ZodNumber: DhiNumber,
+  ZodBigInt: DhiBigInt,
+  ZodBoolean: DhiBoolean,
+  ZodDate: DhiDate,
+  ZodSymbol: DhiSymbol,
+  ZodUndefined: DhiUndefined,
+  ZodNull: DhiNull,
+  ZodVoid: DhiVoid,
+  ZodNever: DhiNever,
+  ZodAny: DhiAny,
+  ZodUnknown: DhiUnknown,
+  ZodNaN: DhiNaN,
+  ZodLiteral: DhiLiteral,
+  ZodEnum: DhiEnum,
+  ZodNativeEnum: DhiNativeEnum,
+  ZodObject: DhiObject,
+  ZodArray: DhiArray,
+  ZodTuple: DhiTuple,
+  ZodRecord: DhiRecord,
+  ZodMap: DhiMap,
+  ZodSet: DhiSet,
+  ZodUnion: DhiUnion,
+  ZodDiscriminatedUnion: DhiDiscriminatedUnion,
+  ZodXor: DhiXor,
+  ZodIntersection: DhiIntersection,
+  ZodLazy: DhiLazy,
+  ZodPromise: DhiPromise,
+  ZodFunction: DhiFunction,
+  ZodOptional: DhiOptional,
+  ZodExactOptional: DhiExactOptional,
+  ZodNonOptional: DhiNonOptional,
+  ZodNullable: DhiNullable,
+  ZodDefault: DhiDefault,
+  ZodPrefault: DhiPrefault,
+  ZodCatch: DhiCatch,
+  ZodTransform: DhiTransform,
+  ZodPipe: DhiPipe,
+  ZodCodec: DhiCodec,
+  ZodReadonly: DhiReadonly,
+  ZodSuccess: DhiSuccess,
+  ZodFile: DhiFile,
+  ZodTemplateLiteral: DhiTemplateLiteral,
+  ZodCustom: DhiCustom,
+  ZodRegistry: DhiRegistry,
 } as const;
+
+// Zod 4 keeps a `z.core` namespace with the shared primitives; expose the
+// subset ecosystem code actually reaches for, plus `z.z` (Zod's self-alias).
+(z as any).core = {
+  util: z.util,
+  regexes: z.regexes,
+  locales,
+  config,
+  globalConfig,
+  globalRegistry,
+  registry: z.registry,
+  toJSONSchema,
+  NEVER,
+  $brand: z.$brand,
+  $ZodError: ZodError,
+  $ZodEncodeError: ZodEncodeError,
+  $ZodAsyncError: ZodAsyncError,
+  parse: z.parse,
+  safeParse: z.safeParse,
+  parseAsync: z.parseAsync,
+  safeParseAsync: z.safeParseAsync,
+  encode: z.encode,
+  decode: z.decode,
+  safeEncode: z.safeEncode,
+  safeDecode: z.safeDecode,
+};
+(z as any).z = z;
 
 // Type-level utilities
 export namespace z {
@@ -4361,19 +5697,6 @@ export interface ZodCompatInternals<Output = unknown, Input = unknown> {
 
 const ZOD_COMPAT_VERSION = Object.freeze({ major: 4, minor: 3, patch: 0 }) as { readonly major: 4; readonly minor: any; readonly patch: number };
 let zodCompatIdCounter = 0;
-
-// dhi (Zod 3-style) issue codes → Zod 4 issue codes
-const ZOD4_ISSUE_CODES: Record<string, string> = {
-  invalid_string: 'invalid_format',
-  invalid_enum_value: 'invalid_value',
-  invalid_literal: 'invalid_value',
-  invalid_union_discriminator: 'invalid_union',
-  invalid_date: 'invalid_type',
-  invalid_arguments: 'custom',
-  invalid_return_type: 'custom',
-  invalid_intersection_types: 'custom',
-  not_finite: 'invalid_type',
-};
 
 // Zod 4 class name per def.type
 const ZOD_CLASS_BY_KIND: Record<string, string> = {
