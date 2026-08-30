@@ -82,13 +82,14 @@ try:
             extra_link_args=link_args,
         )
         ext_modules = [native_ext]
-        print("✅ Building with native Zig extension")
+        # ASCII only: Windows build consoles use cp1252 and cannot print emoji
+        print("[dhi] Building with native Zig extension")
     else:
-        print("⚠️  Zig library not found - installing pure Python version")
+        print("[dhi] WARNING: Zig library not found - installing pure Python version")
         print(f"   Searched in: {[str(loc) for loc in lib_locations]}")
 
 except Exception as e:
-    print(f"⚠️  Error setting up native extension: {e}")
+    print(f"[dhi] WARNING: Error setting up native extension: {e}")
     print("   Installing pure Python version")
 
 setup(
