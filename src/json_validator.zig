@@ -7,12 +7,17 @@ const validator = @import("validator");
 /// Example:
 ///   const user = try parseAndValidate(User, json_string, allocator);
 pub fn parseAndValidate(comptime T: type, json_str: []const u8, allocator: std.mem.Allocator) !T {
-    // Parse JSON to intermediate representation
-    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
-    defer parsed.deinit();
+    // Parse JSON to intermediate representation.
+    // The arena lives on the stack: `parseFromSlice` would heap-allocate an
+    // `ArenaAllocator` per call just to hold it, and route the scanner's
+    // scratch allocations through `allocator` instead of the arena.
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), json_str, .{});
 
-    // Convert to target type with validation
-    return try fromJsonValue(T, parsed.value, allocator);
+    // Convert to target type with validation.
+    // Strings are duped with `allocator`, so the result outlives the arena.
+    return try fromJsonValue(T, parsed, allocator);
 }
 
 /// Convert a JSON Value to a typed struct with validation
@@ -143,12 +148,13 @@ fn fromJsonValueTyped(comptime T: type, value: std.json.Value, allocator: std.me
 /// BatchValidate validates multiple JSON objects from an array.
 /// Validates multiple JSON objects from an array.
 pub fn batchValidate(comptime T: type, json_array: []const u8, allocator: std.mem.Allocator) ![]validator.ValidationResult(T) {
-    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_array, .{});
-    defer parsed.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), json_array, .{});
 
-    if (parsed.value != .array) return error.ExpectedArray;
+    if (parsed != .array) return error.ExpectedArray;
 
-    const items = parsed.value.array.items;
+    const items = parsed.array.items;
     var results = try allocator.alloc(validator.ValidationResult(T), items.len);
 
     for (items, 0..) |item, i| {
