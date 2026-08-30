@@ -3955,6 +3955,14 @@ function overwriteCheck(tx: (value: any) => any): DhiCheckObject {
   return makeCheck({ check: 'overwrite', tx }, payload => { payload.value = tx(payload.value); });
 }
 
+// z.enum: tuple form keeps literal inference via a `const` type parameter (overload 1);
+// object form is a native enum (overload 2)
+function enumFactory<const T extends readonly [string, ...string[]]>(values: T): DhiEnum<T>;
+function enumFactory<T extends Record<string, string | number>>(values: T): DhiNativeEnum<T>;
+function enumFactory(values: any): any {
+  return Array.isArray(values) ? new DhiEnum(values as any) : new DhiNativeEnum(values);
+}
+
 export const z = {
   // Primitives
   string: () => new DhiString(),
@@ -3974,12 +3982,7 @@ export const z = {
   // Literals & Enums
   literal: <T extends string | number | boolean | bigint | null | undefined>(value: T) => new DhiLiteral(value),
   // Zod 4: z.enum([...]) or z.enum({ Key: 'value' }) (object form = nativeEnum)
-  enum: <T extends readonly [string, ...string[]] | Record<string, string | number>>(values: T) =>
-    (Array.isArray(values)
-      ? new DhiEnum(values as any)
-      : new DhiNativeEnum(values as any)) as T extends readonly [string, ...string[]]
-        ? DhiEnum<T>
-        : DhiNativeEnum<Extract<T, Record<string, string | number>>>,
+  enum: enumFactory,
   nativeEnum: <T extends Record<string, string | number>>(enumObj: T) => new DhiNativeEnum(enumObj),
 
   // Composites

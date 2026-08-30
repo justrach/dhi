@@ -62,6 +62,9 @@
 ### Fixed
 - MCP SDK `tools/list` no longer fails with `def.shape is not a function`. (#76)
 - Next.js guide now documents the exported `dhi/nextjs` path. (#76)
+- `z.enum([...])` infers the literal union (`'a' | 'b'`) instead of widening to `string`
+  (`const` type parameter); `z.enum({ ... })` object form is accepted like Zod 4.
+- Windows `pip install dhi` builds: `setup.py` reads the README as UTF-8.
 
 ## [1.5.2] - 2026-07-11
 

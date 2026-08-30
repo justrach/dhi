@@ -111,10 +111,6 @@ jobs:
         working-directory: js-bindings
         run: bun run tests/test-ai-sdk-compat.ts
 
-      - name: Type-level tests (object inference, $ZodType assignability, MCP handler typing)
+      - name: Build package + type-level tests against the built declarations
         working-directory: js-bindings
         run: bun run typecheck
-
-      - name: Build package
-        working-directory: js-bindings
-        run: bun run build

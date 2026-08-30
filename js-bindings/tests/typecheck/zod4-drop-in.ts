@@ -9,7 +9,9 @@
  */
 import type { $ZodType, output as ZodOutput, input as ZodInput } from 'zod/v4/core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from '../../schema';
+// Checked against the BUILT declarations (dist/schema.d.ts) — exactly what a
+// consumer of the npm package sees. (`npm run typecheck` builds first.)
+import { z } from '../../dist/schema.js';
 
 type Expect<T extends true> = T;
 type IsAny<T> = 0 extends 1 & T ? true : false;

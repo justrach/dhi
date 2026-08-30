@@ -48,7 +48,7 @@
   ],
   "scripts": {
     "test": "bun run tests/test-zod4-compat.ts && bun run tests/test-all-features.ts && bun run tests/test-standard-schema-and-jsonschema.ts && bun run tests/test-zod4-new-features.ts && bun run tests/test-jit-coverage.ts && bun run tests/test-zod-parity.ts && bun run tests/test-mcp-compat.ts && bun run tests/test-ai-sdk-compat.ts",
-    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "typecheck": "npm run build && tsc -p tsconfig.typecheck.json",
     "bench": "bun run benchmarks/benchmark-vs-zod.ts",
     "bench:all": "bun run benchmarks/benchmark-vs-all.ts",
     "bench:napi": "bun run benchmarks/benchmark-napi-vs-wasm.ts",
