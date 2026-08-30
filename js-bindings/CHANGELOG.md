@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [1.7.0] - 2026-08-30
+
+### Performance
+- Zig core: JSON parse/validate paths use a stack-owned arena instead of a heap-allocated
+  `Parsed` wrapper (1.6–1.9× on the repo benchmark with the debug allocator, neutral on
+  production allocators); `json_batch_validator` is now part of `zig build test`. (#80)
 
 ### Added
 - **Codecs** — `z.codec(input, output, { decode, encode })` plus `z.encode/decode/safeEncode/
