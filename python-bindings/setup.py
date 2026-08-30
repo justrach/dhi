@@ -6,7 +6,8 @@ import shutil
 
 # Read README
 readme_file = Path(__file__).parent / "README.md"
-long_description = readme_file.read_text() if readme_file.exists() else ""
+# Explicit UTF-8: the README contains non-ASCII and Windows' default codec is cp1252
+long_description = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
 
 # Try to find and use the Zig library
 ext_modules = []
