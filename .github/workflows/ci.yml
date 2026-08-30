@@ -79,6 +79,11 @@ jobs:
         working-directory: js-bindings
         run: bun install
 
+      # Some tests exercise the built package (dist/), so build first
+      - name: Build package
+        working-directory: js-bindings
+        run: bun run build
+
       - name: Run Zod 4 compatibility tests
         working-directory: js-bindings
         run: bun run tests/test-zod4-compat.ts
@@ -111,6 +116,6 @@ jobs:
         working-directory: js-bindings
         run: bun run tests/test-ai-sdk-compat.ts
 
-      - name: Build package + type-level tests against the built declarations
+      - name: Type-level tests against the built declarations
         working-directory: js-bindings
-        run: bun run typecheck
+        run: bunx tsc -p tsconfig.typecheck.json

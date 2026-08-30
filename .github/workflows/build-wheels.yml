@@ -114,6 +114,30 @@ jobs:
           ls -la zig-out/lib/
           file zig-out/lib/libdhi.* zig-out/lib/dhi.* || true
 
+      # Zig's import library also exposes the DLL's CRT-startup symbols
+      # (_DllMainCRTStartup, _tls_index, ...). When MSVC links _native.c against
+      # it, the linker satisfies those from dhi.dll instead of the C runtime, so
+      # msvcrt/ucrt never get pulled in (unresolved __imp_malloc & co). Rebuild a
+      # clean import library that only exports the dhi_* API.
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Regenerate dhi.lib with only the dhi_* exports (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $names = (dumpbin /nologo /exports zig-out\lib\dhi.dll) |
+            Select-String -Pattern '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(dhi_\w+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if ($names.Count -eq 0) { throw 'No dhi_* exports found in dhi.dll' }
+          @('LIBRARY dhi.dll', 'EXPORTS') + $names | Set-Content -Encoding ascii zig-out\lib\dhi.def
+          lib /nologo /def:zig-out\lib\dhi.def /machine:x64 /out:zig-out\lib\dhi.lib
+          Write-Host "dhi.def: $($names.Count) exports"
+          dumpbin /nologo /exports zig-out\lib\dhi.lib | Select-String -Pattern 'DllMainCRTStartup|_tls_' | ForEach-Object { throw "CRT symbol leaked into dhi.lib: $_" }
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         env:
