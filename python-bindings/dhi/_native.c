@@ -10,6 +10,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* MSVC portability: the hot paths use GCC/Clang builtins and attributes as
+ * pure optimisation hints. On MSVC they compile to plain C (the SIMD UUID
+ * scanner is already guarded and falls back to the scalar table below). */
+#if defined(_MSC_VER) && !defined(__clang__)
+#  define __builtin_expect(expr, expected) (expr)
+#  define __builtin_prefetch(...) ((void)0)
+#  define __attribute__(x)
+#endif
+
 // =============================================================================
 // INLINE VALIDATORS - Avoid FFI overhead for simple checks
 // =============================================================================

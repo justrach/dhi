@@ -149,11 +149,13 @@ test('String: email (SIMD)', () => {
   expect(z.string().email().safeParse('a@@b.com').success).toBeFalse();
 });
 
-test('String: url (SIMD)', () => {
+test('String: url (Zod 4: any WHATWG-parsable URL)', () => {
   expect(z.string().url().safeParse('https://example.com').success).toBeTrue();
   expect(z.string().url().safeParse('http://www.test.org/path').success).toBeTrue();
   expect(z.string().url().safeParse('invalid').success).toBeFalse();
-  expect(z.string().url().safeParse('ftp://nope.com').success).toBeFalse();
+  expect(z.string().url().safeParse('ftp://nope.com').success).toBeTrue(); // Zod 4 accepts any valid URL
+  expect(z.httpUrl().safeParse('ftp://nope.com').success).toBeFalse(); // httpUrl restricts to http(s) + domain
+  expect(z.httpUrl().safeParse('https://example.com/x').success).toBeTrue();
 });
 
 test('String: uuid (SIMD)', () => {
@@ -201,8 +203,15 @@ test('String: trim + transforms', () => {
   expect(z.string().toUpperCase().parse('hello')).toBe('HELLO');
 });
 
-test('String: datetime', () => {
-  expect(z.string().datetime().safeParse('2024-01-15T10:30:00').success).toBeTrue();
+test('String: datetime (Zod 4: Z required unless local/offset)', () => {
+  expect(z.string().datetime().safeParse('2024-01-15T10:30:00Z').success).toBeTrue();
+  expect(z.string().datetime().safeParse('2024-01-15T10:30:00.123Z').success).toBeTrue();
+  expect(z.string().datetime().safeParse('2024-01-15T10:30:00').success).toBeFalse();
+  expect(z.string().datetime({ local: true }).safeParse('2024-01-15T10:30:00').success).toBeTrue();
+  expect(z.string().datetime().safeParse('2024-01-15T10:30:00+02:00').success).toBeFalse();
+  expect(z.string().datetime({ offset: true }).safeParse('2024-01-15T10:30:00+02:00').success).toBeTrue();
+  expect(z.string().datetime({ precision: 3 }).safeParse('2024-01-15T10:30:00.123Z').success).toBeTrue();
+  expect(z.string().datetime({ precision: 3 }).safeParse('2024-01-15T10:30:00Z').success).toBeFalse();
   expect(z.string().datetime().safeParse('not-a-date').success).toBeFalse();
 });
 

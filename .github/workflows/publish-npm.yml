@@ -47,6 +47,18 @@ jobs:
         working-directory: js-bindings
         run: bun run tests/test-standard-schema-and-jsonschema.ts
 
+      - name: Run dhi-vs-Zod differential parity tests
+        working-directory: js-bindings
+        run: bun run tests/test-zod-parity.ts
+
+      - name: Run MCP SDK compatibility tests
+        working-directory: js-bindings
+        run: bun run tests/test-mcp-compat.ts
+
+      - name: Type-level tests
+        working-directory: js-bindings
+        run: bun run typecheck
+
       - name: Verify WASM exists
         run: |
           if [ ! -f "js-bindings/dhi.wasm" ]; then

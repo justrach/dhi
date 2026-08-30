@@ -55,15 +55,30 @@ try:
                 shutil.copy2(src, dst)
                 print(f"Copied {src} -> {dst}")
         
-        # Create extension
+        # Create extension.
+        # - macOS: rpath to @loader_path so the bundled libdhi.dylib is found next to the .so
+        # - Linux: runtime_library_dirs (rpath) for the bundled libdhi.so
+        # - Windows: MSVC has no rpath concept (and rejects runtime_library_dirs);
+        #   the extension links against the Zig-generated dhi.lib import library and
+        #   dhi.dll is loaded from the package directory next to the .pyd at import time.
+        if sys.platform == 'win32':
+            runtime_dirs = []
+            link_args = []
+        elif sys.platform == 'darwin':
+            runtime_dirs = []
+            link_args = ['-Wl,-rpath,@loader_path']
+        else:
+            runtime_dirs = [lib_dir]
+            link_args = []
+
         native_ext = Extension(
             'dhi._dhi_native',
             sources=['dhi/_native.c'],
             include_dirs=[],
             library_dirs=[lib_dir],
             libraries=[lib_name],
-            runtime_library_dirs=[lib_dir] if sys.platform != 'darwin' else [],
-            extra_link_args=['-Wl,-rpath,@loader_path'] if sys.platform == 'darwin' else [],
+            runtime_library_dirs=runtime_dirs,
+            extra_link_args=link_args,
         )
         ext_modules = [native_ext]
         print("✅ Building with native Zig extension")

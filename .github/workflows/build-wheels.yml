@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the built wheels to PyPI (tag pushes always publish)'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build_zig_library:
@@ -25,6 +31,11 @@ jobs:
             arch: arm64
             target: aarch64-macos-none
             artifact: zig-lib-macos-arm64
+          # Windows: Zig cross-compiles dhi.dll + the dhi.lib import library from Linux
+          - os: ubuntu-latest
+            arch: AMD64
+            target: x86_64-windows-msvc
+            artifact: zig-lib-windows-x86_64
 
     steps:
       - uses: actions/checkout@v5
@@ -37,6 +48,15 @@ jobs:
       - name: Build Zig library
         run: |
           zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+
+      # Zig installs Windows DLLs under zig-out/bin and the import library under
+      # zig-out/lib; stage both in zig-out/lib so setup.py finds dhi.dll (bundled
+      # into the wheel) and the linker finds dhi.lib in the same directory.
+      - name: Stage Windows artifacts
+        if: contains(matrix.target, 'windows')
+        run: |
+          cp zig-out/bin/dhi.dll zig-out/lib/
+          ls -la zig-out/lib/
 
       - name: Upload Zig library artifact
         uses: actions/upload-artifact@v4
@@ -67,6 +87,10 @@ jobs:
             arch: arm64
             zig-artifact: zig-lib-macos-arm64
             cibw-archs: arm64
+          - os: windows-latest
+            arch: AMD64
+            zig-artifact: zig-lib-windows-x86_64
+            cibw-archs: AMD64
 
     steps:
       - uses: actions/checkout@v5
@@ -84,10 +108,11 @@ jobs:
           path: zig-out/lib
 
       - name: Verify Zig library
+        shell: bash
         run: |
           echo "Zig library for ${{ matrix.arch }}:"
           ls -la zig-out/lib/
-          file zig-out/lib/libdhi.* || true
+          file zig-out/lib/libdhi.* zig-out/lib/dhi.* || true
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
@@ -127,6 +152,9 @@ jobs:
           CIBW_BUILD_VERBOSITY: 1
           # Zig 0.17 currently emits macOS 14.0 dylibs; keep wheel metadata aligned.
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=14.0
+          # Windows: dhi.dll is copied into the package by setup.py and ships inside
+          # the wheel next to _dhi_native.pyd (Python >= 3.8 loads dependent DLLs
+          # from the extension's own directory), so no delvewheel repair is needed.
         with:
           package-dir: ./python-bindings
           output-dir: wheelhouse
@@ -161,7 +189,9 @@ jobs:
     name: Publish to PyPI
     needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
+    # Tag pushes publish; a manual run only publishes when the `publish` input is set
+    # (so the matrix can be exercised on a branch without touching PyPI).
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
 
     steps:
       - name: Download all artifacts

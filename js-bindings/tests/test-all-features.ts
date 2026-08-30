@@ -104,16 +104,18 @@ test("string().trim()", () => {
   if (result !== "hello") throw new Error("Failed");
 });
 
-test("string().lowercase()", () => {
+test("string().lowercase() validates (Zod 4)", () => {
   const schema = z.string().lowercase();
-  const result = schema.parse("HELLO");
-  if (result !== "hello") throw new Error("Failed");
+  if (schema.parse("hello") !== "hello") throw new Error("Failed");
+  if (schema.safeParse("HELLO").success) throw new Error("Should reject uppercase");
+  if (z.string().toLowerCase().parse("HELLO") !== "hello") throw new Error("toLowerCase should transform");
 });
 
-test("string().uppercase()", () => {
+test("string().uppercase() validates (Zod 4)", () => {
   const schema = z.string().uppercase();
-  const result = schema.parse("hello");
-  if (result !== "HELLO") throw new Error("Failed");
+  if (schema.parse("HELLO") !== "HELLO") throw new Error("Failed");
+  if (schema.safeParse("hello").success) throw new Error("Should reject lowercase");
+  if (z.string().toUpperCase().parse("hello") !== "HELLO") throw new Error("toUpperCase should transform");
 });
 
 // ============================================================================

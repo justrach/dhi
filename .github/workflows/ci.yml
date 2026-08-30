@@ -90,3 +90,31 @@ jobs:
       - name: Run Standard Schema + JSON Schema import tests
         working-directory: js-bindings
         run: bun run tests/test-standard-schema-and-jsonschema.ts
+
+      - name: Run Zod 4 new-feature tests
+        working-directory: js-bindings
+        run: bun run tests/test-zod4-new-features.ts
+
+      - name: Run JIT/interpreter semantic parity tests
+        working-directory: js-bindings
+        run: bun run tests/test-jit-coverage.ts
+
+      - name: Run dhi-vs-Zod differential parity tests
+        working-directory: js-bindings
+        run: bun run tests/test-zod-parity.ts
+
+      - name: Run MCP SDK compatibility tests
+        working-directory: js-bindings
+        run: bun run tests/test-mcp-compat.ts
+
+      - name: Run AI SDK compatibility tests
+        working-directory: js-bindings
+        run: bun run tests/test-ai-sdk-compat.ts
+
+      - name: Type-level tests (object inference, $ZodType assignability, MCP handler typing)
+        working-directory: js-bindings
+        run: bun run typecheck
+
+      - name: Build package
+        working-directory: js-bindings
+        run: bun run build

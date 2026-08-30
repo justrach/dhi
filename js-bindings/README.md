@@ -196,9 +196,13 @@ Three things working together:
 
 1. **JIT-compiled object schemas** — When you define an object schema, dhi generates a specialized validator function for that exact shape. No loops, no dynamic dispatch. Just straight-line type checks.
 
-2. **SIMD WASM validators** — Email, URL, and IP validation runs through a 28KB WebAssembly module with 128-bit SIMD vector operations. Parallel character processing instead of regex.
+2. **Hand-written format scanners** — Email, UUID, IPv4, base64 and ISO date validation are branch-light `charCode` loops instead of regexes, and their accept/reject behaviour is verified against Zod itself on thousands of inputs (`tests/test-zod-parity.ts`).
 
 3. **Zero-allocation fast paths** — Errors only allocate when validation actually fails. The happy path avoids the garbage collector entirely.
+
+The `z` API is pure TypeScript: no WASM to instantiate, no top-level await, so
+it loads instantly and bundles anywhere (the optional SIMD WASM module only
+backs the low-level `validators` / `dhi/turbo` APIs).
 
 ---
 
@@ -247,6 +251,47 @@ try {
 
 ---
 
+## Ecosystem compatibility
+
+dhi schemas carry Zod 4's `_zod` internals and the Standard Schema (`~standard`)
+interface, so libraries that detect a Zod 4 schema — and call Zod's own core
+helpers on it — work unchanged. At the type level every dhi schema is
+assignable to Zod's `$ZodType`, so `z.output<S>` / `z.input<S>` resolve to
+dhi's inferred types.
+
+```typescript
+import { z } from 'dhi';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+const server = new McpServer({ name: 'docs', version: '1.0.0' });
+
+server.registerTool(
+  'search_docs',
+  {
+    description: 'Search the docs',
+    inputSchema: z.object({
+      project: z.string().min(1).max(120),
+      query: z.string().min(1).max(500),
+      limit: z.number().int().min(1).max(20).default(8),
+    }),
+  },
+  // project: string, query: string, limit: number — contextual typing just works
+  async ({ project, query, limit }) => ({ content: [{ type: 'text', text: `${project}:${query}:${limit}` }] }),
+);
+```
+
+| Integration | Status | Covered by |
+|-------------|--------|------------|
+| `@modelcontextprotocol/sdk` (`registerTool`, `registerPrompt`, raw shapes, output schemas) | ✅ | `tests/test-mcp-compat.ts`, `tests/typecheck/` |
+| Vercel AI SDK (`generateObject`, `streamObject`, tool schemas) | ✅ | `tests/test-ai-sdk-compat.ts` |
+| Standard Schema v1 + Standard JSON Schema v1 | ✅ | `tests/test-standard-schema-and-jsonschema.ts` |
+| Zod 4 core (`z.safeParse(dhiSchema)`, `z.toJSONSchema(dhiSchema)`, `instanceof z.ZodObject`) | ✅ | `tests/test-zod-parity.ts` |
+| Next.js 16 (Turbopack + webpack), App Router, Edge Runtime | ✅ | `dhi/nextjs` — same core, no WASM / TLA |
+| OpenNext + Cloudflare Workers | ✅ | `dhi/cloudflare` — same core |
+| Deno / Bun / Node 18+ / browsers | ✅ | — |
+
+---
+
 ## Run Benchmarks
 
 ```bash
@@ -262,12 +307,12 @@ bun run benchmark-zod4-features.ts  # Zod 4 features
 ## Requirements
 
 - Node.js 18+ / Bun / Deno
-- Works anywhere WebAssembly runs (all modern browsers, edge runtimes)
+- Works anywhere JavaScript runs (browsers, Workers, edge runtimes) — no WASM, no top-level await
 
 ## Bundle Size
 
-- **28KB** WASM binary (gzipped: ~12KB)
-- Zero production dependencies
+- Pure TypeScript core, zero production dependencies
+- Optional **28KB** WASM binary (gzipped: ~12KB) for the low-level `validators` / `dhi/turbo` APIs
 
 ---
 
