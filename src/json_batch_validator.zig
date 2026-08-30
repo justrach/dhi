@@ -48,26 +48,29 @@ pub fn validateJsonArray(
     field_specs: []const FieldSpec,
     allocator: std.mem.Allocator,
 ) ![]ValidationResult {
-    var results: std.ArrayList(ValidationResult) = .empty;
-    defer results.deinit(allocator);
-    
-    // Parse JSON
-    const parsed = try std.json.parseFromSlice(
+    // Parse JSON into a stack-owned arena. `parseFromSlice` would heap-allocate
+    // an `ArenaAllocator` per call and route scanner scratch through `allocator`.
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(
         std.json.Value,
-        allocator,
+        arena.allocator(),
         json_bytes,
         .{},
     );
-    defer parsed.deinit();
-    
-    const array = parsed.value.array;
-    
+
+    const array = parsed.array;
+
+    // Results only borrow `field_specs` names, never arena memory, so they
+    // stay valid after the arena is torn down.
+    var results: std.ArrayList(ValidationResult) = try .initCapacity(allocator, array.items.len);
+    errdefer results.deinit(allocator);
+
     // Validate each item
     for (array.items) |item| {
-        const result = validateJsonObject(item.object, field_specs);
-        try results.append(allocator, result);
+        results.appendAssumeCapacity(validateJsonObject(item.object, field_specs));
     }
-    
+
     return try results.toOwnedSlice(allocator);
 }
 
@@ -80,7 +83,7 @@ fn validateJsonObject(
         const field_value = obj.get(spec.name) orelse {
             return .{ .is_valid = false, .error_field = spec.name };
         };
-        
+
         const is_valid = switch (spec.validator_type) {
             .Int => validateIntField(field_value, spec.param1, spec.param2),
             .IntGt => blk: {
@@ -155,12 +158,12 @@ fn validateJsonObject(
             },
             .Boolean => field_value == .bool,
         };
-        
+
         if (!is_valid) {
             return .{ .is_valid = false, .error_field = spec.name };
         }
     }
-    
+
     return .{ .is_valid = true };
 }
 
@@ -178,7 +181,7 @@ fn validateStringField(value: std.json.Value, min_len: i64, max_len: i64) bool {
 
 test "JSON array validation" {
     const allocator = std.testing.allocator;
-    
+
     const json =
         \\[
         \\  {"name": "Alice", "age": 25, "email": "alice@example.com"},
@@ -186,16 +189,16 @@ test "JSON array validation" {
         \\  {"name": "X", "age": 15, "email": "invalid"}
         \\]
     ;
-    
+
     const specs = [_]FieldSpec{
         .{ .name = "name", .validator_type = .String, .param1 = 2, .param2 = 100 },
         .{ .name = "age", .validator_type = .Int, .param1 = 18, .param2 = 120 },
         .{ .name = "email", .validator_type = .Email },
     };
-    
+
     const results = try validateJsonArray(json, &specs, allocator);
     defer allocator.free(results);
-    
+
     try std.testing.expect(results[0].is_valid);
     try std.testing.expect(results[1].is_valid);
     try std.testing.expect(!results[2].is_valid); // Multiple failures
