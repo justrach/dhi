@@ -1,5 +1,60 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Codecs** — `z.codec(input, output, { decode, encode })` plus `z.encode/decode/safeEncode/
+  safeDecode` (and the `*Async` variants) and the matching `.encode()/.decode()/.safeEncode()/
+  .safeDecode()` methods on every schema. Encoding runs the schema backwards through codecs,
+  pipes and `z.stringbool()`, and refuses one-way `.transform()`s with a `ZodEncodeError`.
+- **Real async parsing** — `.parseAsync()` / `.safeParseAsync()` / `.spa()` await async
+  refinements, superRefinements, transforms and `.check()` callbacks, including when nested in
+  objects, arrays, tuples, records, sets, maps, unions and wrappers. A synchronous `.parse()`
+  that meets one now throws `ZodAsyncError` instead of leaking a Promise.
+- **Error helpers** — `z.treeifyError()`, `z.flattenError()`, `z.formatError()` (all with the
+  optional issue mapper). `ZodError` is now an `Error` (with a lazily built `.stack`),
+  and gains `.isEmpty`, `.addIssue()`, `.addIssues()` and mapper arguments on
+  `.format()` / `.flatten()`.
+- **Top-level functional API** — `z.parse/safeParse/parseAsync/safeParseAsync`, `z.transform`,
+  `z.catch`, `z.default`/`z._default`, `z.prefault`, `z.nullish`, `z.nonoptional`, `z.readonly`,
+  `z.exactOptional`, `z.keyof`, `z.clone`, `z.xor`, `z.stringFormat`, `z.slugify`, `z.describe`,
+  `z.meta`, `z._function`, `z.fromJSONSchema`.
+- **Constants and namespaces** — `z.NEVER`, `z.TimePrecision`, `z.ZodIssueCode`, `z.$brand`,
+  `z.$input`, `z.$output`, `z.regexes`, `z.util`, `z.core`, `z.locales`, `z.config()`,
+  `z.getErrorMap()`, `z.setErrorMap()`, and runtime `z.ZodString` / `z.ZodObject` / … class
+  aliases so `instanceof` checks and `z.ZodType` resolve.
+- **Schema introspection** — `.type`, `.apply()`, `.with()`, `.toJSONSchema()`, `.spa()` on every
+  schema; `.format`/`.minValue`/`.maxValue`/`.isInt`/`.isFinite` on numbers, `.minValue`/
+  `.maxValue` on bigints, `.minDate`/`.maxDate` on dates, `.element`/`.unwrap()` on arrays,
+  `.values` on literals, `.keyType`/`.valueType` on records and maps, `.unwrap()` on the
+  wrapper types, and `.input`/`.output` on functions.
+- `z.object().safeExtend()`, `z.tuple(items, rest)`, `z.map().min/max/size/nonempty()`,
+  `z.function().implementAsync()`, `z.string().slugify()`.
+- `z.toJSONSchema()` now accepts `target`, `metadata`, `unrepresentable`, `override` and `io`,
+  and emits Zod's document shape (`$schema`, `additionalProperties`, registry metadata).
+  `schema.toJsonSchema()` keeps dhi's existing leaner output.
+- `.meta()` registers in `z.globalRegistry` and reads back with no argument; registered metadata
+  is emitted into the generated JSON Schema.
+
+### Changed
+- Issues now carry Zod 4 codes natively: `invalid_string` → `invalid_format`,
+  `invalid_literal`/`invalid_enum_value` → `invalid_value`, `invalid_date` → `invalid_type`,
+  `invalid_union_discriminator` → `invalid_union`. Zod 3 spellings passed to `ctx.addIssue()`
+  are still accepted and normalised. Union failures now carry the members' issues under `errors`.
+- `.prefault(v)` runs the fallback through the schema (so its checks and transforms apply);
+  `.default(v)` still short-circuits, matching Zod.
+- `.transform()` and codec transforms receive Zod's `ctx` (`{ value, issues, addIssue }`);
+  `.catch()` receives `{ value, issues, error, input }`; `.refine()` accepts `{ when, abort,
+  path, message, error }`; `ctx.addIssue()` keeps `fatal` and appends nested paths.
+- `z.prettifyError()` uses Zod's layout (`✖ message` / `  → at a.b[0]`), and
+  `error.flatten()` keys `fieldErrors` by the first path segment like Zod.
+- `.extend()`, `.pick()`, `.omit()`, `.partial()` and `.required()` keep the object's
+  unknown-key policy (strict / loose / catchall), matching Zod.
+- `z.discriminatedUnion()` resolves discriminator values through optional, nullable, enum and
+  nested-union options, and throws a descriptive error for an option that has none.
+- `z.file().mime()` compares `File.type` exactly, like Zod.
+- `z.string().slugify()` matches Zod's algorithm (non-word characters are dropped, not hyphenated).
+
 ## [1.6.0] - 2026-08-30
 
 ### Added
