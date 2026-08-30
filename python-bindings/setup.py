@@ -6,7 +6,8 @@ import shutil
 
 # Read README
 readme_file = Path(__file__).parent / "README.md"
-long_description = readme_file.read_text() if readme_file.exists() else ""
+# Explicit UTF-8: the README contains non-ASCII and Windows' default codec is cp1252
+long_description = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
 
 # Try to find and use the Zig library
 ext_modules = []
@@ -55,24 +56,40 @@ try:
                 shutil.copy2(src, dst)
                 print(f"Copied {src} -> {dst}")
         
-        # Create extension
+        # Create extension.
+        # - macOS: rpath to @loader_path so the bundled libdhi.dylib is found next to the .so
+        # - Linux: runtime_library_dirs (rpath) for the bundled libdhi.so
+        # - Windows: MSVC has no rpath concept (and rejects runtime_library_dirs);
+        #   the extension links against the Zig-generated dhi.lib import library and
+        #   dhi.dll is loaded from the package directory next to the .pyd at import time.
+        if sys.platform == 'win32':
+            runtime_dirs = []
+            link_args = []
+        elif sys.platform == 'darwin':
+            runtime_dirs = []
+            link_args = ['-Wl,-rpath,@loader_path']
+        else:
+            runtime_dirs = [lib_dir]
+            link_args = []
+
         native_ext = Extension(
             'dhi._dhi_native',
             sources=['dhi/_native.c'],
             include_dirs=[],
             library_dirs=[lib_dir],
             libraries=[lib_name],
-            runtime_library_dirs=[lib_dir] if sys.platform != 'darwin' else [],
-            extra_link_args=['-Wl,-rpath,@loader_path'] if sys.platform == 'darwin' else [],
+            runtime_library_dirs=runtime_dirs,
+            extra_link_args=link_args,
         )
         ext_modules = [native_ext]
-        print("✅ Building with native Zig extension")
+        # ASCII only: Windows build consoles use cp1252 and cannot print emoji
+        print("[dhi] Building with native Zig extension")
     else:
-        print("⚠️  Zig library not found - installing pure Python version")
+        print("[dhi] WARNING: Zig library not found - installing pure Python version")
         print(f"   Searched in: {[str(loc) for loc in lib_locations]}")
 
 except Exception as e:
-    print(f"⚠️  Error setting up native extension: {e}")
+    print(f"[dhi] WARNING: Error setting up native extension: {e}")
     print("   Installing pure Python version")
 
 setup(

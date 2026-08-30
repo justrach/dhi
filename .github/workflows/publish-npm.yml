@@ -35,6 +35,11 @@ jobs:
         working-directory: js-bindings
         run: bun install
 
+      # Some tests exercise the built package (dist/), so build first
+      - name: Build package
+        working-directory: js-bindings
+        run: bun run build
+
       - name: Run compatibility tests
         working-directory: js-bindings
         run: bun run tests/test-zod4-compat.ts
@@ -46,6 +51,18 @@ jobs:
       - name: Run Standard Schema + JSON Schema import tests
         working-directory: js-bindings
         run: bun run tests/test-standard-schema-and-jsonschema.ts
+
+      - name: Run dhi-vs-Zod differential parity tests
+        working-directory: js-bindings
+        run: bun run tests/test-zod-parity.ts
+
+      - name: Run MCP SDK compatibility tests
+        working-directory: js-bindings
+        run: bun run tests/test-mcp-compat.ts
+
+      - name: Type-level tests against the built declarations
+        working-directory: js-bindings
+        run: bunx tsc -p tsconfig.typecheck.json
 
       - name: Verify WASM exists
         run: |

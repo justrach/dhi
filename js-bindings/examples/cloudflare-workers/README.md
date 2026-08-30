@@ -112,14 +112,17 @@ curl -X POST http://localhost:8787/benchmark
 
 ## How It Works
 
-dhi provides multiple builds optimized for different runtimes:
+dhi exposes one entry point per runtime, but since 1.6 they all re-export the
+same runtime-agnostic core (`schema-core.js`): pure TypeScript, no WASM to
+instantiate, no top-level await. The conditional exports only exist so bundlers
+and runtimes resolve a file they recognise.
 
-| Build | Import | WASM Loading | Use Case |
-|-------|--------|--------------|----------|
-| `schema.js` | `dhi` | `fs.readFileSync` | Node.js, Bun |
-| `schema-cloudflare.js` | `dhi/cloudflare` | ES module import | Cloudflare Workers |
-| `schema-edge.js` | `dhi/edge` | ES module import | Vercel Edge, Deno |
-| `schema-nextjs-edge.js` | `dhi/nextjs` | Embedded base64 | Next.js Edge Runtime |
+| Build | Import | Runtime |
+|-------|--------|---------|
+| `schema.js` | `dhi` | Node.js, Bun |
+| `schema-cloudflare.js` | `dhi/cloudflare` | Cloudflare Workers (`workerd` condition) |
+| `schema-edge.js` | `dhi/edge` | Vercel Edge, Deno |
+| `schema-nextjs-edge.js` | `dhi/nextjs` | Next.js Edge Runtime, browsers |
 
 The package.json exports map these correctly:
 

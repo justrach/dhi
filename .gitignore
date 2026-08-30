@@ -31,3 +31,10 @@ js-bindings/dhi_native.node
 # Project-specific
 Socials.md
 .remotion/
+
+# Local tooling artifacts
+.graff/
+harness.trace.jsonl
+harness.trajectory.jsonl
+.zigrep_archive
+js-bindings/.bisect/

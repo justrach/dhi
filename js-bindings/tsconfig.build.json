@@ -16,6 +16,7 @@
   },
   "include": [
     "types.d.ts",
+    "schema-core.ts",
     "schema.ts",
     "schema-turbo.ts",
     "schema-cloudflare.ts",

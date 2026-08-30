@@ -1,6 +1,8 @@
 # Using dhi with Next.js
 
-Complete guide for integrating dhi (the fastest TypeScript validation library) with Next.js.
+dhi is a drop-in Zod 4 replacement that works in every Next.js target — Node
+server, Edge Runtime, browser, Server Actions, Route Handlers, Middleware — and
+deploys unchanged through Vercel and OpenNext/Cloudflare.
 
 ## Quick Start
 
@@ -14,149 +16,84 @@ pnpm add dhi
 yarn add dhi
 ```
 
-### 2. Use Next.js-Compatible Import
+### 2. Import
 
 ```typescript
-// ✅ Use this import for Next.js
-import { z } from 'dhi/schema-nextjs';
-
-// ❌ Don't use this in Next.js (uses top-level await)
-import { z } from 'dhi/schema';
+import { z } from 'dhi';
 ```
 
-### 3. Configure Next.js (Optional)
+That's it. The package's conditional exports pick the right build for every
+Next.js target automatically, and every build is the same runtime-agnostic
+core: **no WASM to load, no top-level await, no `next.config.js` changes**.
+It bundles cleanly with webpack, Turbopack and OpenNext.
 
-Add WASM support to `next.config.js`:
+If you prefer an explicit entry point, `dhi/nextjs` is the same code:
 
-```javascript
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  webpack: (config) => {
-    config.experiments = {
-      ...config.experiments,
-      asyncWebAssembly: true,
-      layers: true,
-    };
-
-    config.module.rules.push({
-      test: /\.wasm$/,
-      type: 'asset/resource',
-    });
-
-    return config;
-  },
-};
-
-module.exports = nextConfig;
+```typescript
+import { z } from 'dhi/nextjs';
 ```
+
+> `dhi/schema-nextjs` (the path documented in older versions of this guide) is
+> kept as an alias of `dhi/nextjs`.
+
+### 3. Configure Next.js
+
+Nothing to configure — dhi needs no WASM/experiments flags.
 
 ## Usage Examples
 
-### Client Component
-
-```typescript
-'use client';
-
-import { useState } from 'react';
-import { z } from 'dhi/schema-nextjs';
-
-const UserSchema = z.object({
-  name: z.string().min(2).max(100),
-  email: z.string().email(),
-  age: z.number().positive().int(),
-}).strict();
-
-export default function UserForm() {
-  const [result, setResult] = useState<string>('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const formData = {
-      name: 'John Doe',
-      email: 'john@example.com',
-      age: 25,
-    };
-
-    try {
-      // Async validation (WASM loads on first call)
-      const user = await UserSchema.parse(formData);
-      setResult(`Valid: ${JSON.stringify(user)}`);
-    } catch (error) {
-      setResult(`Invalid: ${error}`);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      {/* Your form fields */}
-      <button type="submit">Validate</button>
-      <pre>{result}</pre>
-    </form>
-  );
-}
-```
+The API is Zod 4's API, so every example below is what you would write with
+`import { z } from 'zod'`.
 
 ### Server Component (App Router)
 
 ```typescript
-import { z } from 'dhi/schema-nextjs';
+import { z } from 'dhi';
 
 const PostSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string().min(10),
-  published: z.boolean(),
+  published: z.boolean().default(false),
 });
 
-export default async function PostPage({ params }: { params: { id: string } }) {
-  const postData = await fetch(`https://api.example.com/posts/${params.id}`);
-  const post = await postData.json();
+export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const res = await fetch(`https://api.example.com/posts/${id}`);
+  const result = PostSchema.safeParse(await res.json());
 
-  try {
-    // Validate server-side
-    const validPost = await PostSchema.parse(post);
-    
-    return (
-      <article>
-        <h1>{validPost.title}</h1>
-        <p>{validPost.content}</p>
-      </article>
-    );
-  } catch (error) {
-    return <div>Invalid post data</div>;
+  if (!result.success) {
+    return <div>Invalid post data: {z.prettifyError(result.error)}</div>;
   }
+
+  return (
+    <article>
+      <h1>{result.data.title}</h1>
+      <p>{result.data.content}</p>
+    </article>
+  );
 }
 ```
 
-### API Route (App Router)
+### Route Handler
 
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'dhi/schema-nextjs';
+// app/api/users/route.ts
+import { NextResponse } from 'next/server';
+import { z } from 'dhi';
 
-const CreateUserSchema = z.object({
+const CreateUser = z.object({
   name: z.string().min(2).max(100),
-  email: z.string().email(),
-  age: z.number().positive().int(),
+  email: z.email(),
+  age: z.number().int().positive().optional(),
 });
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    
-    // Validate request body
-    const validData = await CreateUserSchema.parse(body);
-    
-    // Process valid data...
-    // await db.users.create(validData);
-    
-    return NextResponse.json({ success: true, user: validData });
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Validation failed', details: String(error) },
-      { status: 400 }
-    );
+export async function POST(request: Request) {
+  const result = CreateUser.safeParse(await request.json());
+  if (!result.success) {
+    return NextResponse.json({ errors: result.error.issues }, { status: 400 });
   }
+  const user = result.data; // { name: string; email: string; age?: number }
+  return NextResponse.json({ user }, { status: 201 });
 }
 ```
 
@@ -165,168 +102,153 @@ export async function POST(request: NextRequest) {
 ```typescript
 'use server';
 
-import { z } from 'dhi/schema-nextjs';
-import { revalidatePath } from 'next/cache';
+import { z } from 'dhi';
 
-const FormSchema = z.object({
-  email: z.string().email(),
-  message: z.string().min(10).max(1000),
+const Contact = z.object({
+  email: z.email(),
+  message: z.string().trim().min(10).max(2000),
 });
 
-export async function submitContactForm(formData: FormData) {
-  const data = {
-    email: formData.get('email'),
-    message: formData.get('message'),
-  };
-
-  try {
-    const validData = await FormSchema.parse(data);
-    
-    // Process form...
-    // await sendEmail(validData);
-    
-    revalidatePath('/contact');
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: String(error) };
-  }
+export async function sendContact(formData: FormData) {
+  const parsed = Contact.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { ok: false, issues: parsed.error.issues };
+  // ...send it
+  return { ok: true };
 }
 ```
 
-### Middleware (Edge Runtime)
+### Client Component
 
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'dhi/schema-nextjs';
+'use client';
 
-const ApiKeySchema = z.object({
-  'x-api-key': z.string().length(32),
+import { useState } from 'react';
+import { z } from 'dhi';
+
+const UserSchema = z.object({
+  name: z.string().min(2).max(100),
+  email: z.email(),
+  age: z.coerce.number().int().positive(),
 });
 
-export async function middleware(request: NextRequest) {
-  const headers = {
-    'x-api-key': request.headers.get('x-api-key') || '',
-  };
+export default function UserForm() {
+  const [error, setError] = useState<string | null>(null);
 
-  try {
-    await ApiKeySchema.parse(headers);
-    return NextResponse.next();
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Invalid API key' },
-      { status: 401 }
-    );
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const result = UserSchema.safeParse(Object.fromEntries(new FormData(e.currentTarget)));
+    setError(result.success ? null : z.prettifyError(result.error));
   }
-}
 
-export const config = {
-  matcher: '/api/:path*',
-};
+  return (
+    <form onSubmit={onSubmit}>
+      {/* fields */}
+      <button type="submit">Save</button>
+      {error && <pre>{error}</pre>}
+    </form>
+  );
+}
 ```
 
-## Key Differences from Regular dhi
+### Middleware / Edge Runtime
 
-### ✅ Next.js-Compatible (`dhi/schema-nextjs`)
+```typescript
+// middleware.ts
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'dhi';
 
-- ✅ Async validation: `await schema.parse(data)`
-- ✅ Lazy WASM loading
-- ✅ Works in Node.js, Edge Runtime, and Browser
-- ✅ No top-level await
-- ✅ Compatible with Turbopack and Webpack
+const Query = z.object({ page: z.coerce.number().int().min(1).default(1) });
 
-### ❌ Regular dhi (`dhi/schema`)
+export function middleware(request: NextRequest) {
+  const result = Query.safeParse(Object.fromEntries(request.nextUrl.searchParams));
+  if (!result.success) return NextResponse.json({ error: 'Bad query' }, { status: 400 });
+  return NextResponse.next();
+}
+```
 
-- ❌ Top-level `await` breaks Next.js builds
-- ❌ Uses `import.meta.dir` (not portable)
-- ❌ Uses `fs.readFileSync` (doesn't work in Edge)
-- ⚠️ Only use in non-Next.js projects (Node.js scripts, etc.)
+The Edge Runtime build is the same core as the Node build — same JIT, same
+behaviour — so there is nothing special to do for `export const runtime = 'edge'`.
 
-## API Differences
+## MCP servers (`@modelcontextprotocol/sdk`)
 
-| Feature | `dhi/schema` | `dhi/schema-nextjs` |
-|---------|-------------|---------------------|
-| **Validation** | `schema.parse(data)` | `await schema.parse(data)` |
-| **Safe Parse** | `schema.safeParse(data)` | `await schema.safeParse(data)` |
-| **WASM Loading** | Synchronous (top-level) | Async (lazy) |
-| **Initialization** | Automatic | Automatic (lazy) or manual `await init()` |
-| **Performance** | Same | Same after WASM loads |
+dhi schemas are accepted by `McpServer.registerTool()` / `registerPrompt()`
+directly (object schemas, raw shapes and output schemas), with full contextual
+typing for the handler arguments — no Zod fallback needed:
+
+```typescript
+import { z } from 'dhi';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+const server = new McpServer({ name: 'docs', version: '1.0.0' });
+
+server.registerTool(
+  'search_docs',
+  {
+    description: 'Search the docs',
+    inputSchema: z.object({
+      project: z.string().min(1).max(120),
+      query: z.string().min(1).max(500),
+      limit: z.number().int().min(1).max(20).default(8),
+    }),
+  },
+  async ({ project, query, limit }) => {
+    // project: string, query: string, limit: number
+    return { content: [{ type: 'text', text: `${project}:${query}:${limit}` }] };
+  },
+);
+```
+
+## OpenNext / Cloudflare
+
+`@opennextjs/cloudflare` resolves the `workerd` export condition to
+`dhi/cloudflare`, which is the same core again. No WASM bindings, no
+`nodejs_compat` requirements from dhi itself.
+
+## Type inference
+
+```typescript
+const docsBundleSchema = z.object({
+  schemaVersion: z.literal(1),
+  pages: z.array(z.object({ title: z.string().min(1), markdown: z.string().min(1) })).min(1),
+});
+
+type DocsBundle = z.infer<typeof docsBundleSchema>;
+// { schemaVersion: 1; pages: { title: string; markdown: string }[] }
+
+const bundle = docsBundleSchema.parse(input); // typed as DocsBundle, not any
+bundle.pages.map(page => page.title);         // page: { title: string; markdown: string }
+```
 
 ## Performance
 
-**After WASM loads (cached), performance is identical:**
-
-- **parseSafe**: 7.02M ops/s (3.37x faster than Zod)
-- **parseStrict**: 1.46M ops/s (1.11x faster than Zod)
-- **Average**: 1.78x faster than Zod
-
-**First validation** adds ~10-20ms for WASM initialization (one-time cost).
-
-## Manual Initialization (Optional)
-
-Pre-load WASM to avoid delay on first validation:
-
-```typescript
-import { z, init } from 'dhi/schema-nextjs';
-
-// Pre-load WASM (optional)
-await init();
-
-// Now validations are instant
-const result = await schema.parse(data);
-```
+There is no initialization step: the first validation is as fast as the last.
+Object schemas JIT-compile a specialised validator on first use (microseconds),
+after which validation is typically 4–7x faster than Zod for objects and up to
+48x faster for numbers (see the README benchmarks).
 
 ## Troubleshooting
 
 ### Error: "Cannot find module 'dhi/schema-nextjs'"
 
-**Solution**: Update `package.json` in dhi package to include exports:
-
-```json
-{
-  "exports": {
-    "./schema": "./schema.js",
-    "./schema-nextjs": "./schema-nextjs.js",
-    "./turbo": "./schema-turbo.js"
-  }
-}
-```
+Upgrade to dhi >= 1.6 (which exports both `dhi/nextjs` and the
+`dhi/schema-nextjs` alias), or simply import from `'dhi'`.
 
 ### Error: "Top-level await is not available"
 
-**Solution**: Make sure you're using `dhi/schema-nextjs`, not `dhi/schema`.
+Upgrade to dhi >= 1.6: no entry point uses top-level await any more.
 
-```typescript
-// ✅ Correct
-import { z } from 'dhi/schema-nextjs';
+### `DhiObject.parse()` returns `any`
 
-// ❌ Wrong
-import { z } from 'dhi/schema';
-```
+Fixed in dhi 1.6 — `parse()` / `safeParse()` return the inferred object type.
 
-### WASM not loading in Edge Runtime
+### MCP SDK: `def.shape is not a function`
 
-**Solution**: Ensure `next.config.js` has WASM support:
-
-```javascript
-config.experiments = {
-  asyncWebAssembly: true,
-};
-```
-
-### Slow first validation
-
-**Solution**: Pre-initialize WASM in layout or middleware:
-
-```typescript
-import { init } from 'dhi/schema-nextjs';
-
-// In layout.tsx or middleware
-await init();
-```
+Fixed in dhi 1.6 — dhi schemas now expose Zod 4's `_zod` internals, which the
+MCP SDK uses for JSON Schema generation and argument validation.
 
 ## TypeScript Configuration
 
-Add to `tsconfig.json` for best experience:
+Any modern config works; for the best experience:
 
 ```json
 {
@@ -334,153 +256,8 @@ Add to `tsconfig.json` for best experience:
     "moduleResolution": "bundler",
     "module": "ESNext",
     "target": "ES2020",
+    "strict": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"]
   }
 }
 ```
-
-## Vercel Deployment
-
-Works out-of-the-box on Vercel! No additional configuration needed.
-
-**Supported runtimes:**
-- ✅ Node.js runtime
-- ✅ Edge runtime
-- ✅ Serverless functions
-
-## Example App
-
-See `examples/nextjs-app/` for a complete working example with:
-- Client-side form validation
-- Server-side API validation
-- Server actions
-- Tailwind CSS styling
-
-**Run the example:**
-
-```bash
-cd examples/nextjs-app
-npm install
-npm run dev
-```
-
-Visit `http://localhost:3000` to see it in action!
-
-## Comparison with Zod
-
-### Migration from Zod
-
-**Before (Zod):**
-```typescript
-import { z } from 'zod';
-
-const schema = z.object({
-  email: z.string().email(),
-  age: z.number().positive(),
-});
-
-const result = schema.safeParse(data);
-```
-
-**After (dhi):**
-```typescript
-import { z } from 'dhi/schema-nextjs';
-
-const schema = z.object({
-  email: z.string().email(),
-  age: z.number().positive(),
-});
-
-const result = await schema.safeParse(data); // Just add 'await'!
-```
-
-### Performance Gains
-
-| Test | Zod | dhi | Speedup |
-|------|-----|-----|---------|
-| Simple object | 2.08M ops/s | 7.02M ops/s | **3.37x** |
-| Strict validation | 1.31M ops/s | 1.46M ops/s | **1.11x** |
-| Complex nested | 0.85M ops/s | 1.45M ops/s | **1.71x** |
-
-## Best Practices
-
-### 1. Pre-initialize in App Layout
-
-```typescript
-// app/layout.tsx
-import { init } from 'dhi/schema-nextjs';
-
-export default async function RootLayout({ children }) {
-  await init(); // Load WASM once for all pages
-  
-  return (
-    <html>
-      <body>{children}</body>
-    </html>
-  );
-}
-```
-
-### 2. Reuse Schemas
-
-```typescript
-// lib/schemas.ts
-import { z } from 'dhi/schema-nextjs';
-
-export const UserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(2),
-});
-
-// Use in multiple places
-import { UserSchema } from '@/lib/schemas';
-```
-
-### 3. Handle Errors Gracefully
-
-```typescript
-try {
-  const data = await schema.parse(input);
-  // Success
-} catch (error) {
-  // Validation failed
-  console.error('Validation error:', error);
-  // Show user-friendly error
-}
-```
-
-## Limitations
-
-### No Sync API
-
-Since WASM loading is async, there's no synchronous `parseSync()` equivalent. Always use `await`.
-
-```typescript
-// ❌ Not available
-const result = schema.parseSync(data);
-
-// ✅ Use async
-const result = await schema.parse(data);
-```
-
-### First Validation Latency
-
-First validation adds ~10-20ms for WASM initialization. Pre-initialize if this matters:
-
-```typescript
-await init(); // One-time cost
-```
-
-## Support
-
-- **GitHub**: https://github.com/justrach/dhi
-- **npm**: https://www.npmjs.com/package/dhi
-- **Issues**: https://github.com/justrach/dhi/issues
-
-## License
-
-MIT - Free to use in commercial and open-source projects.
-
----
-
-**dhi + Next.js**: The fastest way to validate data in Next.js applications! 🚀

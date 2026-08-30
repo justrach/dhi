@@ -177,13 +177,14 @@ class _ZigValidator:
                     self._lib.dhi_version.restype = ctypes.c_char_p
                     
                     version = self._lib.dhi_version().decode('utf-8')
-                    print(f"✅ Loaded native Zig library v{version}: {name}")
+                    # ASCII only: Windows consoles/pipes may use cp1252 and cannot print emoji
+                    print(f"[dhi] Loaded native Zig library v{version}: {name}")
                     return
                 except Exception as e:
-                    print(f"⚠️  Failed to load {name}: {e}")
+                    print(f"[dhi] WARNING: Failed to load {name}: {e}")
         
         if not HAS_NATIVE_EXT:
-            print("ℹ️  Using pure Python implementation (slower)")
+            print("[dhi] Using pure Python implementation (slower)")
     
     @property
     def available(self) -> bool:

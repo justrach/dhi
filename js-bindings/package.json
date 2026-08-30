@@ -1,6 +1,6 @@
 {
   "name": "dhi",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "Ultra-fast Zod 4 drop-in replacement - 20x faster average, full API parity, SIMD WASM, 28KB binary",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -47,12 +47,13 @@
     "!examples/"
   ],
   "scripts": {
-    "test": "bun test",
+    "test": "bun run tests/test-zod4-compat.ts && bun run tests/test-all-features.ts && bun run tests/test-standard-schema-and-jsonschema.ts && bun run tests/test-zod4-new-features.ts && bun run tests/test-jit-coverage.ts && bun run tests/test-zod-parity.ts && bun run tests/test-mcp-compat.ts && bun run tests/test-ai-sdk-compat.ts",
+    "typecheck": "npm run build && tsc -p tsconfig.typecheck.json",
     "bench": "bun run benchmarks/benchmark-vs-zod.ts",
     "bench:all": "bun run benchmarks/benchmark-vs-all.ts",
     "bench:napi": "bun run benchmarks/benchmark-napi-vs-wasm.ts",
     "test:napi": "bun tests/test-napi-compat.ts",
-    "build": "rm -rf dist && bun run scripts/generate-nextjs-edge.ts && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp dhi.wasm dist/",
     "build:napi": "bash scripts/build-napi.sh",
     "prepublishOnly": "npm run build",
     "test:nextjs": "cd examples/nextjs-app && npm install && npm run build"
@@ -90,10 +91,15 @@
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema-nextjs-edge.js"
     },
+    "./schema-nextjs": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema-nextjs-edge.js"
+    },
     "./dhi.wasm": "./dist/dhi.wasm"
   },
   "devDependencies": {
     "@ai-sdk/groq": "^3.0.21",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/bun": "^1.2.5",
     "@types/node": "^20.19.30",
     "ai": "^6.0.71",

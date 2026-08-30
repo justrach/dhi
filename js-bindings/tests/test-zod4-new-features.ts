@@ -273,10 +273,12 @@ test('z.json() with objects', () => {
 console.log('\n✅ Success Wrapper');
 console.log('------------------------------------------------------------');
 
-test('z.success() always succeeds', () => {
+test('z.success() (Zod 4 semantics: true when the inner schema passes)', () => {
   const schema = z.success(z.string());
   expect(schema.safeParse('hello').success).toBe(true);
-  expect(schema.safeParse(123).success).toBe(true); // Should still succeed
+  expect(schema.parse('hello')).toBe(true);
+  // Zod 4 propagates the inner schema's issues, so a failing inner schema fails the parse
+  expect(schema.safeParse(123).success).toBe(false);
 });
 
 // StringBool
