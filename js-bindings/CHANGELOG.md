@@ -64,7 +64,9 @@
 - Next.js guide now documents the exported `dhi/nextjs` path. (#76)
 - `z.enum([...])` infers the literal union (`'a' | 'b'`) instead of widening to `string`
   (`const` type parameter); `z.enum({ ... })` object form is accepted like Zod 4.
-- Windows `pip install dhi` builds: `setup.py` reads the README as UTF-8.
+- Windows `pip install dhi` builds: `setup.py` reads the README as UTF-8; status output is
+  ASCII-only; `_native.c` uses 64-bit integers (`long long`) everywhere so large ints
+  validate and parse correctly on LLP64 platforms.
 
 ## [1.5.2] - 2026-07-11
 
