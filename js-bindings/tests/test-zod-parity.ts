@@ -383,6 +383,59 @@ add('object().check(z.property("a", z.string().min(2)))', z => z.object({ a: z.s
 add('string().check(payload fn)', z => z.string().check((ctx: any) => { if (ctx.value.length < 2) ctx.issues.push({ code: 'custom', message: 'short', input: ctx.value }); }), STRS);
 
 // ---------------------------------------------------------------------------
+// Zod 4 API surface added in 1.7.0
+// ---------------------------------------------------------------------------
+const NUMSTRS = ['42', '0', '-1', '3.5', 'x', '', ' 7 ', 'Infinity', null, undefined, 42];
+const strToNum = (z: any) => z.codec(z.string(), z.number(), { decode: (s: string) => Number(s), encode: (n: number) => String(n) });
+add('codec(string -> number)', z => strToNum(z), NUMSTRS);
+add('codec inside object', z => z.object({ n: strToNum(z) }), [{ n: '1' }, { n: 'x' }, { n: 1 }, {}]);
+add('codec inside array', z => z.array(strToNum(z)), [['1', '2'], ['x'], [], [1]]);
+add('codec().optional()', z => strToNum(z).optional(), NUMSTRS);
+
+add('prefault(valid)', z => z.string().transform((s: string) => s.length).prefault('abc'), ['ab', undefined, 1]);
+add('prefault(invalid)', z => z.string().min(5).prefault('ab'), ['abcdef', undefined, 'abc']);
+add('prefault(fn)', z => z.string().transform((s: string) => s.length).prefault(() => 'abcd'), [undefined, 'ab']);
+
+add('transform with ctx.addIssue', z => z.string().transform((s: string, ctx: any) => {
+  if (s.length < 2) { ctx.addIssue({ code: 'custom', message: 'short' }); return z.NEVER; }
+  return s.length;
+}), STRS);
+add('transform ctx.addIssue(string)', z => z.string().transform((s: string, ctx: any) => {
+  if (s.length < 2) ctx.addIssue('short');
+  return s;
+}), STRS);
+
+add('refine({ when })', z => z.string().refine((s: string) => s.length > 3, { when: (p: any) => p.value.startsWith('h') }), STRS);
+add('refine({ abort })', z => z.string().refine((s: string) => s.length > 3, { abort: true }), STRS);
+add('catch(ctx)', z => z.number().catch((ctx: any) => ctx.issues.length), MIXED);
+
+add('tuple(items, rest)', z => z.tuple([z.string()], z.number()), [['a'], ['a', 1], ['a', 1, 2], ['a', 'b'], [], [1]]);
+add('map().min(1)', z => z.map(z.string(), z.number()).min(1), [new Map(), new Map([['a', 1]]), new Map([['a', 1], ['b', 2]])]);
+add('map().max(1)', z => z.map(z.string(), z.number()).max(1), [new Map(), new Map([['a', 1]]), new Map([['a', 1], ['b', 2]])]);
+add('map().size(1)', z => z.map(z.string(), z.number()).size(1), [new Map(), new Map([['a', 1]]), new Map([['a', 1], ['b', 2]])]);
+add('map().nonempty()', z => z.map(z.string(), z.number()).nonempty(), [new Map(), new Map([['a', 1]])]);
+
+add('xor([string, number])', z => z.xor([z.string(), z.number()]), MIXED);
+add('xor with overlap', z => z.xor([z.string(), z.string().min(2)]), STRS);
+add('stringFormat(regex)', z => z.stringFormat('hexish', /^[0-9a-f]+$/), ['abc', 'ABC', '0f', 'z', '', 1, null]);
+add('stringFormat(fn)', z => z.stringFormat('short', (s: string) => s.length < 3), STRS);
+add('string().slugify()', z => z.string().slugify(), ['  Hello World! ', 'a_b-c', 'héllo wörld', '', '---', 'Already-Slug']);
+
+add('discriminatedUnion with optional discriminator', z => z.discriminatedUnion('k', [
+  z.object({ k: z.literal('a').optional(), x: z.string().optional() }),
+  z.object({ k: z.literal('b'), y: z.number() }),
+]), [{}, { k: 'a' }, { k: 'b', y: 1 }, { k: 'b' }, { k: 'c' }, null]);
+add('discriminatedUnion with enum discriminator', z => z.discriminatedUnion('k', [
+  z.object({ k: z.enum(['a', 'b']), x: z.string() }),
+  z.object({ k: z.literal('c') }),
+]), [{ k: 'a', x: 'v' }, { k: 'b', x: 'v' }, { k: 'c' }, { k: 'd' }, {}]);
+
+add('strictObject().extend() stays strict', z => z.strictObject({ a: z.string() }).extend({ b: z.number() }), [{ a: 'x', b: 1 }, { a: 'x', b: 1, c: 2 }]);
+add('object().catchall().extend() keeps catchall', z => z.object({ a: z.string() }).catchall(z.number()).extend({ b: z.number() }), [{ a: 'x', b: 1 }, { a: 'x', b: 1, c: 2 }, { a: 'x', b: 1, c: 'z' }]);
+add('strictObject().pick() stays strict', z => z.strictObject({ a: z.string(), b: z.number() }).pick({ a: true }), [{ a: 'x' }, { a: 'x', c: 1 }]);
+add('object().safeExtend()', z => z.object({ a: z.string() }).safeExtend({ b: z.number() }), [{ a: 'x', b: 1 }, { a: 'x' }]);
+
+// ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
 function ser(v: unknown): string {
@@ -451,6 +504,144 @@ for (const c of cases) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Async parse parity: the same schema with async refinements / transforms
+// ---------------------------------------------------------------------------
+const asyncCases: Case[] = [];
+const addAsync = (name: string, build: (z: any) => any, inputs: unknown[], compareData = true) =>
+  asyncCases.push({ name, build, inputs, compareData });
+
+addAsync('async refine', z => z.string().refine(async (s: string) => s.length > 2), STRS);
+addAsync('async refine in object', z => z.object({ a: z.string().refine(async (s: string) => s.length > 2) }), [{ a: 'abc' }, { a: 'a' }, { a: 1 }, {}]);
+addAsync('async refine in array', z => z.array(z.string().refine(async (s: string) => s.length > 2)), [['abc'], ['a'], [], ['abc', 'z']]);
+addAsync('async transform', z => z.string().transform(async (s: string) => s.length), STRS);
+addAsync('async transform in object', z => z.object({ a: z.string().transform(async (s: string) => s.length) }), [{ a: 'abc' }, { a: 1 }]);
+addAsync('async transform then pipe', z => z.string().transform(async (s: string) => s.length).pipe(z.number().min(2)), STRS);
+addAsync('async superRefine', z => z.string().superRefine(async (s: string, ctx: any) => {
+  if (s.length < 2) ctx.addIssue({ code: 'custom', message: 'short' });
+}), STRS);
+addAsync('async refine in union', z => z.union([z.string().refine(async (s: string) => s.length > 2), z.number()]), MIXED);
+addAsync('async refine under optional', z => z.string().refine(async (s: string) => s.length > 2).optional(), MIXED);
+addAsync('async refine in tuple', z => z.tuple([z.string().refine(async (s: string) => s.length > 2)]), [['abc'], ['a'], []]);
+addAsync('async refine in record', z => z.record(z.string(), z.string().refine(async (s: string) => s.length > 2)), [{ k: 'abc' }, { k: 'a' }, {}]);
+addAsync('sync schema through parseAsync', z => z.object({ a: z.string(), b: z.number().int() }), [{ a: 'x', b: 1 }, { a: 'x', b: 1.5 }, null]);
+
+for (const c of asyncCases) {
+  const zs = c.build(zod);
+  const ds = c.build(dhi);
+  for (const input of c.inputs) {
+    checks++;
+    let zr: any, dr: any;
+    try {
+      zr = await zs.safeParseAsync(input);
+    } catch (e: any) {
+      zr = { success: false, threw: e?.message ?? String(e) };
+    }
+    try {
+      dr = await ds.safeParseAsync(input);
+    } catch (e: any) {
+      failures.push(`async ${c.name} :: ${show(input)} -> dhi threw: ${e?.message ?? e}`);
+      continue;
+    }
+    if (!!zr.success !== !!dr.success) {
+      failures.push(`async ${c.name} :: ${show(input)} -> zod ${zr.success ? 'accepts' : 'rejects'}, dhi ${dr.success ? 'accepts' : 'rejects'}`);
+      continue;
+    }
+    if (zr.success && c.compareData !== false) {
+      const a = ser(zr.data);
+      const b = ser(dr.data);
+      if (a !== b) failures.push(`async ${c.name} :: ${show(input)} -> data differs: zod ${show(zr.data)} vs dhi ${show(dr.data)}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Encode parity (`z.safeEncode`): codecs run backwards, transforms refuse
+// ---------------------------------------------------------------------------
+const encodeCases: Array<[string, (z: any) => any, unknown[]]> = [
+  ['codec(string -> number)', z => strToNum(z), [1, 0, -3, 1.5, 'x', null, undefined]],
+  ['codec inside object', z => z.object({ n: strToNum(z) }), [{ n: 1 }, { n: 'x' }, {}]],
+  ['codec inside array', z => z.array(strToNum(z)), [[1, 2], ['x'], []]],
+  ['codec optional', z => strToNum(z).optional(), [1, undefined, 'x']],
+  ['plain string', z => z.string(), ['a', 1, null]],
+  ['object of primitives', z => z.object({ a: z.string(), b: z.number() }), [{ a: 'x', b: 1 }, { a: 1, b: 1 }]],
+  ['stringbool', z => z.stringbool(), [true, false, 'true', 1]],
+  ['pipe of validators', z => z.string().pipe(z.string().min(2)), ['ab', 'a', 1]],
+];
+for (const [name, build, inputs] of encodeCases) {
+  const zs = build(zod);
+  const ds = build(dhi);
+  for (const input of inputs) {
+    checks++;
+    let zr: any, dr: any;
+    try {
+      zr = zod.safeEncode(zs, input);
+    } catch (e: any) {
+      zr = { success: false, threw: true };
+    }
+    try {
+      dr = dhi.safeEncode(ds, input);
+    } catch (e: any) {
+      dr = { success: false, threw: true };
+    }
+    if (!!zr.success !== !!dr.success) {
+      failures.push(`encode ${name} :: ${show(input)} -> zod ${zr.success ? 'accepts' : 'rejects'}, dhi ${dr.success ? 'accepts' : 'rejects'}`);
+      continue;
+    }
+    if (zr.success && ser(zr.data) !== ser(dr.data)) {
+      failures.push(`encode ${name} :: ${show(input)} -> data differs: zod ${show(zr.data)} vs dhi ${show(dr.data)}`);
+    }
+  }
+}
+
+// A one-way `.transform()` must refuse to encode in both libraries
+checks++;
+{
+  const zThrew = (() => { try { zod.encode(zod.string().transform((s: string) => s.length), 3); return false; } catch { return true; } })();
+  const dThrew = (() => { try { dhi.encode(dhi.string().transform((s: string) => s.length), 3); return false; } catch { return true; } })();
+  if (zThrew !== dThrew) failures.push(`encode through transform: zod ${zThrew ? 'throws' : 'succeeds'}, dhi ${dThrew ? 'throws' : 'succeeds'}`);
+}
+
+// ---------------------------------------------------------------------------
+// Issue-code parity: dhi emits Zod 4 codes (messages are dhi's own wording)
+// ---------------------------------------------------------------------------
+const codeCases: Array<[string, (z: any) => any, unknown[]]> = [
+  ['string type', z => z.string(), [1, null, undefined, true, {}]],
+  ['string min/max/length', z => z.string().min(3).max(5), ['a', 'abcdef', 'abcd']],
+  ['string formats', z => z.string().email(), ['x', 'a@b.co']],
+  ['string regex', z => z.string().regex(/^a/), ['b']],
+  ['string startsWith', z => z.string().startsWith('a'), ['b']],
+  ['number min', z => z.number().min(3), [1, 4]],
+  ['number multipleOf', z => z.number().multipleOf(2), [5, 4]],
+  ['number int', z => z.number().int(), [1.5]],
+  ['enum', z => z.enum(['a', 'b']), ['c', 1]],
+  ['literal', z => z.literal('a'), ['b']],
+  ['literal multi', z => z.literal(['a', 'b']), ['c']],
+  ['date', z => z.date(), ['x', new Date('nope')]],
+  ['array min', z => z.array(z.string()).min(2), [['a']]],
+  ['array element', z => z.array(z.string()), [[1], ['a', 2]]],
+  ['unrecognized keys', z => z.strictObject({ a: z.string() }), [{ a: 'x', b: 1 }]],
+  ['union', z => z.union([z.string(), z.number()]), [true]],
+  ['custom refine', z => z.string().refine(() => false), ['a']],
+  ['bigint', z => z.bigint(), [1]],
+  ['set min', z => z.set(z.string()).min(2), [new Set(['a'])]],
+  ['file', z => z.file(), ['x']],
+  ['nested object', z => z.object({ a: z.object({ b: z.number() }) }), [{ a: { b: 'x' } }]],
+];
+for (const [name, build, inputs] of codeCases) {
+  const zs = build(zod);
+  const ds = build(dhi);
+  for (const input of inputs) {
+    checks++;
+    const zr = zs.safeParse(input);
+    const dr = ds.safeParse(input);
+    if (zr.success || dr.success) continue;
+    const zc = JSON.stringify(zr.error.issues.map((i: any) => [i.code, i.path]));
+    const dc = JSON.stringify(dr.error.issues.map((i: any) => [i.code, i.path]));
+    if (zc !== dc) failures.push(`issue codes ${name} :: ${show(input)} -> zod ${zc} vs dhi ${dc}`);
+  }
+}
+
 // JSON Schema parity for object required-ness (io: input vs output), like the MCP SDK relies on
 const jsonCases: Array<[string, (z: any) => any]> = [
   ['plain', z => z.object({ a: z.string(), b: z.number().optional(), c: z.number().default(1), d: z.string().nullable(), e: z.string().nullish(), f: z.number().catch(0), h: z.unknown(), i: z.any(), j: z.string().exactOptional() })],
@@ -475,6 +666,32 @@ for (const [name, build] of jsonCases) {
     const zk = JSON.stringify(Object.keys(zj.properties ?? {}).sort());
     const dk = JSON.stringify(Object.keys(dj.properties ?? {}).sort());
     if (zk !== dk) failures.push(`toJSONSchema ${name} (${io}) property keys differ: zod ${zk} vs dhi ${dk}`);
+    if (zj.$schema !== dj.$schema) failures.push(`toJSONSchema ${name} (${io}) $schema differs: zod ${zj.$schema} vs dhi ${dj.$schema}`);
+    const za = JSON.stringify(zj.additionalProperties);
+    const da = JSON.stringify(dj.additionalProperties);
+    if (za !== da) failures.push(`toJSONSchema ${name} (${io}) additionalProperties differ: zod ${za} vs dhi ${da}`);
+  }
+}
+
+// Unknown-key policy in the emitted JSON Schema, per object mode and direction
+for (const [name, build] of [
+  ['strip', (z: any) => z.object({ a: z.string() })],
+  ['strict', (z: any) => z.strictObject({ a: z.string() })],
+  ['loose', (z: any) => z.looseObject({ a: z.string() })],
+  ['catchall', (z: any) => z.object({ a: z.string() }).catchall(z.number())],
+] as Array<[string, (z: any) => any]>) {
+  for (const io of ['input', 'output'] as const) {
+    for (const target of ['draft-2020-12', 'draft-7', 'openapi-3.0'] as const) {
+      checks++;
+      const zj = zod.toJSONSchema(build(zod), { io, target } as any);
+      const dj = dhi.toJSONSchema(build(dhi), { io, target });
+      if (JSON.stringify(zj.additionalProperties) !== JSON.stringify(dj.additionalProperties)) {
+        failures.push(`toJSONSchema unknown keys ${name} (${io}/${target}): zod ${JSON.stringify(zj.additionalProperties)} vs dhi ${JSON.stringify(dj.additionalProperties)}`);
+      }
+      if (zj.$schema !== dj.$schema) {
+        failures.push(`toJSONSchema $schema ${name} (${io}/${target}): zod ${zj.$schema} vs dhi ${dj.$schema}`);
+      }
+    }
   }
 }
 

@@ -214,8 +214,11 @@ test('z.file() basic', () => {
 test('z.file().mime()', () => {
   const txtFile = new File(['hello'], 'test.txt', { type: 'text/plain' });
   const pngFile = new File([''], 'test.png', { type: 'image/png' });
-  expect(z.file().mime('text/plain').safeParse(txtFile).success).toBe(true);
-  expect(z.file().mime('text/plain').safeParse(pngFile).success).toBe(false);
+  // Zod compares `File.type` exactly; some runtimes append a charset parameter
+  // to the type given to `new File(...)`, so match against the actual value.
+  expect(z.file().mime(txtFile.type).safeParse(txtFile).success).toBe(true);
+  expect(z.file().mime(txtFile.type).safeParse(pngFile).success).toBe(false);
+  expect(z.file().mime([txtFile.type, pngFile.type]).safeParse(pngFile).success).toBe(true);
 });
 
 test('z.file().min().max()', () => {
@@ -357,6 +360,301 @@ test('z.hostname()', () => {
   expect(z.hostname().safeParse('localhost').success).toBe(true);
   expect(z.hostname().safeParse('-invalid.com').success).toBe(false);
 });
+
+// ============================================================================
+// Zod 4 API surface (1.7.0)
+// ============================================================================
+console.log('\n🧩 Error helpers');
+console.log('------------------------------------------------------------');
+
+const failing = z.object({ a: z.object({ b: z.string() }), arr: z.array(z.number()) })
+  .safeParse({ a: { b: 1 }, arr: ['x', 2] });
+const err = (failing as { success: false; error: any }).error;
+
+test('ZodError is an Error with issues, name and stack', () => {
+  expect(err instanceof Error).toBe(true);
+  expect(err.name).toBe('ZodError');
+  expect(Array.isArray(err.issues)).toBe(true);
+  expect(typeof err.stack).toBe('string');
+  expect(err.isEmpty).toBe(false);
+  expect(JSON.parse(err.message).length).toBe(2);
+});
+
+test('z.treeifyError()', () => {
+  const tree = z.treeifyError(err) as any;
+  expect(tree.properties.a.properties.b.errors.length).toBe(1);
+  expect(tree.properties.arr.items[0].errors.length).toBe(1);
+});
+
+test('z.flattenError() / error.flatten()', () => {
+  const flat = z.flattenError(err);
+  expect(Object.keys(flat.fieldErrors).sort().join(',')).toBe('a,arr');
+  expect(flat.formErrors.length).toBe(0);
+  expect(JSON.stringify(err.flatten())).toBe(JSON.stringify(flat));
+});
+
+test('z.formatError() / error.format()', () => {
+  const formatted = z.formatError(err) as any;
+  expect(formatted.a.b._errors.length).toBe(1);
+  expect(JSON.stringify(err.format())).toBe(JSON.stringify(formatted));
+});
+
+test('z.prettifyError() uses Zod 4 layout', () => {
+  const lines = z.prettifyError(err).split('\n');
+  expect(lines[0].startsWith('✖ ')).toBe(true);
+  expect(lines[1]).toBe('  → at a.b');
+  expect(lines[3]).toBe('  → at arr[0]');
+});
+
+test('mappers are honoured', () => {
+  expect(z.flattenError(err, () => 'X').fieldErrors.a[0]).toBe('X');
+  expect((z.treeifyError(err, () => 'Y') as any).properties.a.properties.b.errors[0]).toBe('Y');
+});
+
+console.log('\n🔁 Codecs');
+console.log('------------------------------------------------------------');
+
+const StringToNumber = z.codec(z.string(), z.number(), {
+  decode: (s) => Number(s),
+  encode: (n) => String(n),
+});
+
+test('z.codec() decodes and encodes', () => {
+  expect(StringToNumber.parse('42')).toBe(42);
+  expect(StringToNumber.decode('7')).toBe(7);
+  expect(StringToNumber.encode(7)).toBe('7');
+  expect(z.decode(StringToNumber, '3')).toBe(3);
+  expect(z.encode(StringToNumber, 3)).toBe('3');
+});
+
+test('safeDecode / safeEncode', () => {
+  expect(z.safeDecode(StringToNumber, 'x').success).toBe(false);
+  expect(z.safeEncode(StringToNumber, 'x').success).toBe(false);
+  expect(z.safeEncode(StringToNumber, 5).success).toBe(true);
+});
+
+test('codecs compose through containers', () => {
+  const Wrapped = z.object({ n: StringToNumber, list: z.array(StringToNumber) });
+  expect(JSON.stringify(Wrapped.parse({ n: '1', list: ['2', '3'] }))).toBe(JSON.stringify({ n: 1, list: [2, 3] }));
+  expect(JSON.stringify(Wrapped.encode({ n: 1, list: [2, 3] }))).toBe(JSON.stringify({ n: '1', list: ['2', '3'] }));
+});
+
+test('encoding through a one-way transform throws', () => {
+  let threw = false;
+  try {
+    z.encode(z.string().transform((s) => s.length), 3);
+  } catch {
+    threw = true;
+  }
+  expect(threw).toBe(true);
+});
+
+console.log('\n⚙️  Top-level API');
+console.log('------------------------------------------------------------');
+
+test('functional parse helpers', () => {
+  expect(z.parse(z.string(), 'a')).toBe('a');
+  expect(z.safeParse(z.string(), 1).success).toBe(false);
+});
+
+test('top-level wrappers', () => {
+  expect(z.nullish(z.string()).safeParse(null).success).toBe(true);
+  expect(z.nonoptional(z.string().optional()).safeParse(undefined).success).toBe(false);
+  expect(z.readonly(z.string()).parse('a')).toBe('a');
+  expect(z.exactOptional(z.string()).safeParse('a').success).toBe(true);
+  expect(z.keyof(z.object({ a: z.string(), b: z.number() })).options.join(',')).toBe('a,b');
+  expect(z.catch(z.number(), 0).parse('x')).toBe(0);
+  expect(z.default(z.string(), 'd').parse(undefined)).toBe('d');
+  expect(z.prefault(z.string().min(2), 'ab').parse(undefined)).toBe('ab');
+  expect(z.clone(z.string()).parse('a')).toBe('a');
+});
+
+test('z.xor() requires exactly one match', () => {
+  expect(z.xor([z.string(), z.number()]).safeParse('a').success).toBe(true);
+  expect(z.xor([z.string(), z.string().min(1)]).safeParse('a').success).toBe(false);
+});
+
+test('z.stringFormat() and z.slugify()', () => {
+  const Hexish = z.stringFormat('hexish', /^[0-9a-f]+$/);
+  expect(Hexish.safeParse('0f').success).toBe(true);
+  expect(Hexish.safeParse('zz').error!.issues[0].code).toBe('invalid_format');
+  expect(z.string().slugify().parse('  Hello World! ')).toBe('hello-world');
+  expect(z.string().check(z.slugify()).parse('A B')).toBe('a-b');
+});
+
+test('constants and namespaces', () => {
+  expect(typeof z.NEVER).toBe('object');
+  expect(z.TimePrecision.Millisecond).toBe(3);
+  expect(z.ZodIssueCode.invalid_format).toBe('invalid_format');
+  expect(typeof z.$brand).toBe('symbol');
+  expect(z.util.slugify('A B')).toBe('a-b');
+  expect(z.util.toDotPath(['a', 0, 'b'])).toBe('a[0].b');
+  expect(z.regexes.cuid instanceof RegExp).toBe(true);
+  expect(typeof z.core.toJSONSchema).toBe('function');
+  expect(z.core.NEVER).toBe(z.NEVER);
+});
+
+test('z.config() / get+setErrorMap / locales', () => {
+  const cfg = z.config();
+  expect(typeof cfg).toBe('object');
+  const map = () => undefined;
+  z.setErrorMap(map);
+  expect(z.getErrorMap()).toBe(map);
+  z.config({ customError: undefined });
+  expect(typeof z.locales.en).toBe('function');
+});
+
+test('runtime Zod* class aliases', () => {
+  expect(z.string() instanceof z.ZodString).toBe(true);
+  expect(z.object({}) instanceof z.ZodObject).toBe(true);
+  expect(z.array(z.string()) instanceof z.ZodArray).toBe(true);
+  expect(StringToNumber instanceof z.ZodCodec).toBe(true);
+  expect(z.string().optional() instanceof z.ZodOptional).toBe(true);
+  expect(z.string() instanceof z.ZodType).toBe(true);
+  expect(z.ZodRealError).toBe(z.ZodError);
+});
+
+console.log('\n🔍 Schema introspection');
+console.log('------------------------------------------------------------');
+
+test('.type / .apply / .with / .spa', () => {
+  expect(z.string().type).toBe('string');
+  expect(z.object({}).type).toBe('object');
+  expect(z.string().apply((s) => s.type)).toBe('string');
+  expect(z.string().with(z.minLength(3)).safeParse('ab').success).toBe(false);
+});
+
+test('number / bigint / date accessors', () => {
+  expect(z.number().min(3).minValue).toBe(3);
+  expect(z.number().max(9).maxValue).toBe(9);
+  expect(z.number().int().isInt).toBe(true);
+  expect(z.number().isFinite).toBe(true);
+  expect(z.number().int().format).toBe('safeint');
+  expect(z.bigint().min(1n).minValue).toBe(1n);
+  expect(z.date().min(new Date(0)).minDate!.getTime()).toBe(0);
+});
+
+test('container accessors', () => {
+  expect(z.array(z.string()).element.type).toBe('string');
+  expect(z.array(z.string()).unwrap().type).toBe('string');
+  expect([...z.literal(['a', 'b']).values].join(',')).toBe('a,b');
+  expect(z.record(z.string(), z.number()).keyType.type).toBe('string');
+  expect(z.record(z.string(), z.number()).valueType.type).toBe('number');
+  expect(z.map(z.string(), z.number()).valueType.type).toBe('number');
+  expect(z.string().email().format).toBe('email');
+  expect(z.string().format).toBe(null);
+});
+
+test('object.safeExtend()', () => {
+  const Base = z.object({ a: z.string() });
+  expect(Object.keys(Base.safeExtend({ b: z.number() }).shape).join(',')).toBe('a,b');
+  let threw = false;
+  try {
+    (Base as any).safeExtend('nope');
+  } catch {
+    threw = true;
+  }
+  expect(threw).toBe(true);
+});
+
+console.log('\n🗂  JSON Schema');
+console.log('------------------------------------------------------------');
+
+test('z.toJSONSchema() emits Zod\'s document shape', () => {
+  const out = z.toJSONSchema(z.object({ a: z.string() }));
+  expect(out.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
+  expect(out.additionalProperties).toBe(false);
+  expect(z.toJSONSchema(z.looseObject({ a: z.string() })).additionalProperties!.constructor).toBe(Object);
+  expect(z.toJSONSchema(z.string(), { target: 'draft-7' }).$schema).toBe('http://json-schema.org/draft-07/schema#');
+  expect(z.toJSONSchema(z.string(), { target: 'openapi-3.0' }).$schema).toBe(undefined);
+  expect(z.string().toJSONSchema().type).toBe('string');
+});
+
+test('toJSONSchema metadata, override and unrepresentable', () => {
+  expect(z.toJSONSchema(z.object({ a: z.string().meta({ title: 'A' }) })).properties.a.title).toBe('A');
+  const registry = z.registry<{ title: string }>();
+  const inner = z.string();
+  registry.add(inner, { title: 'R' });
+  expect(z.toJSONSchema(z.object({ a: inner }), { metadata: registry }).properties.a.title).toBe('R');
+  expect(z.toJSONSchema(z.string(), { override: (ctx) => { ctx.jsonSchema.foo = 1; } }).foo).toBe(1);
+  let threw = false;
+  try {
+    z.toJSONSchema(z.bigint(), { unrepresentable: 'throw' });
+  } catch {
+    threw = true;
+  }
+  expect(threw).toBe(true);
+  expect(JSON.stringify(z.toJSONSchema(z.bigint()))).toBe('{"$schema":"https://json-schema.org/draft/2020-12/schema"}');
+});
+
+test('.meta() round-trips through the global registry', () => {
+  const schema = z.string().meta({ title: 'T', examples: ['a'] });
+  expect(z.globalRegistry.get(schema)?.title).toBe('T');
+  expect(schema.meta()?.title).toBe('T');
+  expect(z.string().describe('d').description).toBe('d');
+  expect(z.string().check(z.describe('via check')).description).toBe('via check');
+  expect(z.string().check(z.meta({ title: 'M' })).meta()?.title).toBe('M');
+});
+
+console.log('\n⏳ Async');
+console.log('------------------------------------------------------------');
+
+const asyncTests: Array<[string, () => Promise<void>]> = [];
+const atest = (name: string, fn: () => Promise<void>) => asyncTests.push([name, fn]);
+
+atest('parseAsync awaits async refinements', async () => {
+  const schema = z.string().refine(async (s) => s.length > 2);
+  expect((await schema.safeParseAsync('abc')).success).toBe(true);
+  expect((await schema.safeParseAsync('a')).success).toBe(false);
+});
+
+atest('async refinements nested in containers', async () => {
+  const schema = z.object({ list: z.array(z.string().refine(async (s) => s.length > 1)) });
+  expect((await schema.safeParseAsync({ list: ['ab', 'cd'] })).success).toBe(true);
+  expect((await schema.safeParseAsync({ list: ['ab', 'c'] })).success).toBe(false);
+});
+
+atest('async transforms and pipes', async () => {
+  const schema = z.string().transform(async (s) => s.length).pipe(z.number().min(2));
+  expect(await schema.parseAsync('abc')).toBe(3);
+  expect((await schema.safeParseAsync('a')).success).toBe(false);
+});
+
+atest('sync parse refuses an async refinement', async () => {
+  let threw = false;
+  try {
+    z.string().refine(async () => true).parse('a');
+  } catch (e: any) {
+    threw = e.name === 'ZodAsyncError';
+  }
+  expect(threw).toBe(true);
+});
+
+atest('spa is safeParseAsync', async () => {
+  expect((await z.string().spa('a')).success).toBe(true);
+});
+
+atest('encodeAsync / decodeAsync', async () => {
+  expect(await StringToNumber.decodeAsync('9')).toBe(9);
+  expect(await StringToNumber.encodeAsync(9)).toBe('9');
+  expect((await z.safeEncodeAsync(StringToNumber, 'x')).success).toBe(false);
+});
+
+atest('z.function().implementAsync()', async () => {
+  const fn = z.function({ input: [z.number()], output: z.number() }).implementAsync(async (n: number) => n + 1);
+  expect(await fn(1)).toBe(2);
+});
+
+for (const [name, fn] of asyncTests) {
+  try {
+    await fn();
+    console.log(`✅ ${name}`);
+    passed++;
+  } catch (e: any) {
+    console.log(`❌ ${name}: ${e.message}`);
+    failed++;
+  }
+}
 
 // Summary
 console.log('\n============================================================');
