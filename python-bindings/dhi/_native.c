@@ -45,7 +45,7 @@ static inline int inline_validate_email(const char* str) {
 
 // External Zig functions from libdhi - COMPREHENSIVE VALIDATORS
 // Basic validators
-extern int dhi_validate_int(long value, long min, long max);
+extern int dhi_validate_int(long long value, long long min, long long max);
 extern int dhi_validate_string_length(const char* str, size_t min_len, size_t max_len);
 extern int dhi_validate_email(const char* str);
 
@@ -61,15 +61,15 @@ extern int dhi_validate_starts_with(const char* str, const char* prefix);
 extern int dhi_validate_ends_with(const char* str, const char* suffix);
 
 // Number validators (Pydantic-style)
-extern int dhi_validate_int_gt(long value, long min);
-extern int dhi_validate_int_gte(long value, long min);
-extern int dhi_validate_int_lt(long value, long max);
-extern int dhi_validate_int_lte(long value, long max);
-extern int dhi_validate_int_positive(long value);
-extern int dhi_validate_int_non_negative(long value);
-extern int dhi_validate_int_negative(long value);
-extern int dhi_validate_int_non_positive(long value);
-extern int dhi_validate_int_multiple_of(long value, long divisor);
+extern int dhi_validate_int_gt(long long value, long long min);
+extern int dhi_validate_int_gte(long long value, long long min);
+extern int dhi_validate_int_lt(long long value, long long max);
+extern int dhi_validate_int_lte(long long value, long long max);
+extern int dhi_validate_int_positive(long long value);
+extern int dhi_validate_int_non_negative(long long value);
+extern int dhi_validate_int_negative(long long value);
+extern int dhi_validate_int_non_positive(long long value);
+extern int dhi_validate_int_multiple_of(long long value, long long divisor);
 
 // Float validators
 extern int dhi_validate_float_gt(double value, double min);
@@ -92,7 +92,7 @@ extern int dhi_extract_json_string(
 );
 extern int dhi_parse_json_int(
     const char* json, size_t len, size_t start,
-    long* out_value, size_t* out_end
+    long long* out_value, size_t* out_end
 );
 extern int dhi_parse_json_float(
     const char* json, size_t len, size_t start,
@@ -247,8 +247,8 @@ static inline uint64_t fnv1a_hash_inline(const char *str, size_t len) {
     return hash;
 }
 
-static inline int py_object_as_long_valid(PyObject* obj, long* out) {
-    long value = PyLong_AsLong(obj);
+static inline int py_object_as_long_valid(PyObject* obj, long long* out) {
+    long long value = PyLong_AsLongLong(obj);
     if (value == -1 && PyErr_Occurred()) {
         PyErr_Clear();
         return 0;
@@ -259,9 +259,9 @@ static inline int py_object_as_long_valid(PyObject* obj, long* out) {
 
 // Python wrapper: validate_int(value, min, max) -> bool
 static PyObject* py_validate_int(PyObject* self, PyObject* args) {
-    long value, min, max;
+    long long value, min, max;
     
-    if (!PyArg_ParseTuple(args, "lll", &value, &min, &max)) {
+    if (!PyArg_ParseTuple(args, "LLL", &value, &min, &max)) {
         return NULL;
     }
     
@@ -272,9 +272,9 @@ static PyObject* py_validate_int(PyObject* self, PyObject* args) {
 // Python wrapper: validate_int_range_batch_direct(values, min, max) -> (list[bool], int)
 static PyObject* py_validate_int_range_batch_direct(PyObject* self, PyObject* args) {
     PyObject* values_list;
-    long min, max;
+    long long min, max;
 
-    if (!PyArg_ParseTuple(args, "O!ll", &PyList_Type, &values_list, &min, &max)) {
+    if (!PyArg_ParseTuple(args, "O!LL", &PyList_Type, &values_list, &min, &max)) {
         return NULL;
     }
 
@@ -287,7 +287,7 @@ static PyObject* py_validate_int_range_batch_direct(PyObject* self, PyObject* ar
     Py_ssize_t valid_count = 0;
     for (Py_ssize_t i = 0; i < count; i++) {
         PyObject* item = PyList_GET_ITEM(values_list, i);  // borrowed ref
-        long value = 0;
+        long long value = 0;
         int is_valid = py_object_as_long_valid(item, &value) && (value >= min && value <= max);
 
         if (is_valid) valid_count++;
@@ -423,8 +423,8 @@ struct FieldSpec {
     PyObject* field_name_obj;  // Cached PyObject* for fast dict lookup
     const char* field_name;
     enum ValidatorType validator_type;
-    long param1;
-    long param2;
+    long long param1;
+    long long param2;
     PyObject* last_utf8_obj;
     const char* last_utf8;
     Py_ssize_t last_utf8_len;
@@ -522,10 +522,10 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
             field_specs[field_idx].param1 = 0;
             field_specs[field_idx].param2 = 0;
             if (PyTuple_Size(spec) >= 2) {
-                field_specs[field_idx].param1 = PyLong_AsLong(PyTuple_GET_ITEM(spec, 1));
+                field_specs[field_idx].param1 = PyLong_AsLongLong(PyTuple_GET_ITEM(spec, 1));
             }
             if (PyTuple_Size(spec) >= 3) {
-                field_specs[field_idx].param2 = PyLong_AsLong(PyTuple_GET_ITEM(spec, 2));
+                field_specs[field_idx].param2 = PyLong_AsLongLong(PyTuple_GET_ITEM(spec, 2));
             }
         } else {
             field_specs[field_idx].validator_type = VAL_UNKNOWN;
@@ -583,48 +583,48 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
             
             switch (field_specs[f].validator_type) {
                 case VAL_INT: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) &&
                                (value >= field_specs[f].param1 && value <= field_specs[f].param2);
                     break;
                 }
                 case VAL_INT_GT: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) &&
                                (value > field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_GTE: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) &&
                                (value >= field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_LT: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) &&
                                (value < field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_LTE: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) &&
                                (value <= field_specs[f].param1);
                     break;
                 }
                 case VAL_INT_POSITIVE: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) && (value > 0);
                     break;
                 }
                 case VAL_INT_NON_NEGATIVE: {
-                    long value = 0;
+                    long long value = 0;
                     is_valid = py_object_as_long_valid(field_value, &value) && (value >= 0);
                     break;
                 }
                 case VAL_INT_MULTIPLE_OF: {
-                    long value = 0;
-                    long divisor = field_specs[f].param1;
+                    long long value = 0;
+                    long long divisor = field_specs[f].param1;
                     is_valid = py_object_as_long_valid(field_value, &value) &&
                                (divisor != 0 && value % divisor == 0);
                     break;
@@ -718,15 +718,15 @@ static PyObject* py_validate_batch_direct(PyObject* self, PyObject* args) {
 }
 
 // Helpers: safely extract numeric values from PyObject (handles int/float mix)
-static long as_long_coerce(PyObject* obj) {
-    if (PyLong_Check(obj)) return PyLong_AsLong(obj);
-    if (PyFloat_Check(obj)) return (long)PyFloat_AsDouble(obj);
-    return PyLong_AsLong(obj);
+static long long as_long_coerce(PyObject* obj) {
+    if (PyLong_Check(obj)) return PyLong_AsLongLong(obj);
+    if (PyFloat_Check(obj)) return (long long)PyFloat_AsDouble(obj);
+    return PyLong_AsLongLong(obj);
 }
 
 static double as_double_coerce(PyObject* obj) {
     if (PyFloat_Check(obj)) return PyFloat_AsDouble(obj);
-    if (PyLong_Check(obj)) return (double)PyLong_AsLong(obj);
+    if (PyLong_Check(obj)) return (double)PyLong_AsLongLong(obj);
     return PyFloat_AsDouble(obj);
 }
 
@@ -751,7 +751,7 @@ typedef struct {
     // Pre-parsed constraints (no per-call PyLong_AsLong/PyTuple_GET_ITEM):
     int type_code, strict;
     int has_gt, has_ge, has_lt, has_le, has_mul;
-    long gt_long, ge_long, lt_long, le_long, mul_long;
+    long long gt_long, ge_long, lt_long, le_long, mul_long;
     double gt_dbl, ge_dbl, lt_dbl, le_dbl, mul_dbl;
     int has_minl, has_maxl;
     Py_ssize_t min_len, max_len;
@@ -823,7 +823,7 @@ static PyObject* py_compile_model_specs(PyObject* self, PyObject* args) {
         }
 
         // Pre-parse all constraint values ONCE (not per-call)
-        fs->type_code = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 0));
+        fs->type_code = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 0));
         // Override type_code based on field kind
         if (fs->nested_model_type != NULL) {
             fs->type_code = 6;  // Nested model field
@@ -831,7 +831,7 @@ static PyObject* py_compile_model_specs(PyObject* self, PyObject* args) {
             // type_code from constraints tells us: 7=list-of-models, 8=union
             // Keep the type_code from constraints (7 or 8)
         }
-        fs->strict    = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 1));
+        fs->strict    = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 1));
 
         PyObject *gt = PyTuple_GET_ITEM(constraints, 2);
         PyObject *ge = PyTuple_GET_ITEM(constraints, 3);
@@ -859,11 +859,11 @@ static PyObject* py_compile_model_specs(PyObject* self, PyObject* args) {
         fs->min_len = fs->has_minl ? PyLong_AsSsize_t(minl) : 0;
         fs->max_len = fs->has_maxl ? PyLong_AsSsize_t(maxl) : 0;
 
-        fs->allow_inf_nan = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 9));
-        fs->format_code   = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 10));
-        fs->strip_ws      = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 11));
-        fs->to_lower      = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 12));
-        fs->to_upper      = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 13));
+        fs->allow_inf_nan = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 9));
+        fs->format_code   = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 10));
+        fs->strip_ws      = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 11));
+        fs->to_lower      = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 12));
+        fs->to_upper      = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 13));
     }
 
     return PyCapsule_New(ms, "dhi.compiled_specs", compiled_specs_destructor);
@@ -1054,12 +1054,12 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
         // OPTIMIZATION: Simple comparisons are inlined in C instead of calling Zig
         int validation_failed = 0;
         if (PyLong_Check(result) && !PyBool_Check(result)) {
-            long val = PyLong_AsLong(result);
+            long long val = PyLong_AsLongLong(result);
             // INLINED: val > gt_long
             if (fs->has_gt && val <= fs->gt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld", field_name, fs->gt_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %lld, got %lld", field_name, fs->gt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -1067,7 +1067,7 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             if (fs->has_ge && val < fs->ge_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld", field_name, fs->ge_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %lld, got %lld", field_name, fs->ge_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -1075,7 +1075,7 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             if (fs->has_lt && val >= fs->lt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld", field_name, fs->lt_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %lld, got %lld", field_name, fs->lt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -1083,7 +1083,7 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             if (fs->has_le && val > fs->le_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld", field_name, fs->le_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %lld, got %lld", field_name, fs->le_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -1091,7 +1091,7 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
             if (fs->has_mul && (val % fs->mul_long) != 0) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be a multiple of %ld, got %ld", field_name, fs->mul_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be a multiple of %lld, got %lld", field_name, fs->mul_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -1201,8 +1201,8 @@ static PyObject* py_init_model_compiled(PyObject* self_unused, PyObject* args) {
 // Core validation logic - no arg parsing overhead
 static PyObject* validate_field_core(PyObject *value, const char *field_name, PyObject *constraints) {
     // Unpack constraints
-    int type_code    = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 0));
-    int strict       = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 1));
+    int type_code    = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 0));
+    int strict       = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 1));
     PyObject *gt_obj = PyTuple_GET_ITEM(constraints, 2);
     PyObject *ge_obj = PyTuple_GET_ITEM(constraints, 3);
     PyObject *lt_obj = PyTuple_GET_ITEM(constraints, 4);
@@ -1210,11 +1210,11 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
     PyObject *mul_obj = PyTuple_GET_ITEM(constraints, 6);
     PyObject *minl_obj = PyTuple_GET_ITEM(constraints, 7);
     PyObject *maxl_obj = PyTuple_GET_ITEM(constraints, 8);
-    int allow_inf_nan = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 9));
-    int format_code   = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 10));
-    int strip_ws     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 11));
-    int to_lower     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 12));
-    int to_upper     = (int)PyLong_AsLong(PyTuple_GET_ITEM(constraints, 13));
+    int allow_inf_nan = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 9));
+    int format_code   = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 10));
+    int strip_ws     = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 11));
+    int to_lower     = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 12));
+    int to_upper     = (int)PyLong_AsLongLong(PyTuple_GET_ITEM(constraints, 13));
 
     PyObject* result = value;
     Py_INCREF(result);
@@ -1337,45 +1337,45 @@ static PyObject* validate_field_core(PyObject *value, const char *field_name, Py
 
     // --- NUMERIC CONSTRAINTS (use Zig validators) ---
     if (PyLong_Check(result) && !PyBool_Check(result)) {
-        long val = PyLong_AsLong(result);
+        long long val = PyLong_AsLongLong(result);
         if (gt_obj != Py_None) {
-            long gt_val = as_long_coerce(gt_obj);
+            long long gt_val = as_long_coerce(gt_obj);
             if (!dhi_validate_int_gt(val, gt_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
-                    "%s: Value must be > %ld, got %ld", field_name, gt_val, val);
+                    "%s: Value must be > %lld, got %lld", field_name, gt_val, val);
             }
         }
         if (ge_obj != Py_None) {
-            long ge_val = as_long_coerce(ge_obj);
+            long long ge_val = as_long_coerce(ge_obj);
             if (!dhi_validate_int_gte(val, ge_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
-                    "%s: Value must be >= %ld, got %ld", field_name, ge_val, val);
+                    "%s: Value must be >= %lld, got %lld", field_name, ge_val, val);
             }
         }
         if (lt_obj != Py_None) {
-            long lt_val = as_long_coerce(lt_obj);
+            long long lt_val = as_long_coerce(lt_obj);
             if (!dhi_validate_int_lt(val, lt_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
-                    "%s: Value must be < %ld, got %ld", field_name, lt_val, val);
+                    "%s: Value must be < %lld, got %lld", field_name, lt_val, val);
             }
         }
         if (le_obj != Py_None) {
-            long le_val = as_long_coerce(le_obj);
+            long long le_val = as_long_coerce(le_obj);
             if (!dhi_validate_int_lte(val, le_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
-                    "%s: Value must be <= %ld, got %ld", field_name, le_val, val);
+                    "%s: Value must be <= %lld, got %lld", field_name, le_val, val);
             }
         }
         if (mul_obj != Py_None) {
-            long mul_val = as_long_coerce(mul_obj);
+            long long mul_val = as_long_coerce(mul_obj);
             if (!dhi_validate_int_multiple_of(val, mul_val)) {
                 Py_DECREF(result);
                 return PyErr_Format(PyExc_ValueError,
-                    "%s: Value must be a multiple of %ld, got %ld", field_name, mul_val, val);
+                    "%s: Value must be a multiple of %lld, got %lld", field_name, mul_val, val);
             }
         }
     } else if (PyFloat_Check(result)) {
@@ -2089,12 +2089,12 @@ static PyObject* init_model_core(PyObject *model_self, CompiledModelSpecs *ms, i
         // This eliminates FFI overhead for trivial checks (gt/ge/lt/le)
         int validation_failed = 0;
         if (PyLong_Check(result) && !PyBool_Check(result)) {
-            long val = PyLong_AsLong(result);
+            long long val = PyLong_AsLongLong(result);
             // INLINED: val > gt_long (was dhi_validate_int_gt)
             if (fs->has_gt && val <= fs->gt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld", field_name, fs->gt_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %lld, got %lld", field_name, fs->gt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -2102,7 +2102,7 @@ static PyObject* init_model_core(PyObject *model_self, CompiledModelSpecs *ms, i
             if (fs->has_ge && val < fs->ge_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld", field_name, fs->ge_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %lld, got %lld", field_name, fs->ge_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -2110,7 +2110,7 @@ static PyObject* init_model_core(PyObject *model_self, CompiledModelSpecs *ms, i
             if (fs->has_lt && val >= fs->lt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld", field_name, fs->lt_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %lld, got %lld", field_name, fs->lt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -2118,7 +2118,7 @@ static PyObject* init_model_core(PyObject *model_self, CompiledModelSpecs *ms, i
             if (fs->has_le && val > fs->le_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld", field_name, fs->le_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %lld, got %lld", field_name, fs->le_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -2126,7 +2126,7 @@ static PyObject* init_model_core(PyObject *model_self, CompiledModelSpecs *ms, i
             if (fs->has_mul && (val % fs->mul_long) != 0) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be a multiple of %ld, got %ld", field_name, fs->mul_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be a multiple of %lld, got %lld", field_name, fs->mul_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -2324,7 +2324,7 @@ static PyObject* py_init_model_full(PyObject* self_unused, PyObject *const *args
     }
 
     // Get extra_mode as C int (0=ignore, 1=forbid, 2=allow)
-    int extra_mode = (int)PyLong_AsLong(extra_mode_obj);
+    int extra_mode = (int)PyLong_AsLongLong(extra_mode_obj);
     if (extra_mode == -1 && PyErr_Occurred()) return NULL;
 
     CompiledModelSpecs *ms = (CompiledModelSpecs*)PyCapsule_GetPointer(capsule, "dhi.compiled_specs");
@@ -2716,9 +2716,9 @@ static PyObject* py_dump_json_compiled(PyObject* self_unused, PyObject* args) {
                 }
             }
         } else if (PyLong_Check(value)) {
-            long val = PyLong_AsLong(value);
+            long long val = PyLong_AsLongLong(value);
             char num_buf[32];
-            int num_len = snprintf(num_buf, sizeof(num_buf), "%ld", val);
+            int num_len = snprintf(num_buf, sizeof(num_buf), "%lld", val);
             if (json_append(&buf, &buf_size, &pos, num_buf, num_len) < 0) {
                 free(buf); Py_DECREF(obj_dict); return PyErr_NoMemory();
             }
@@ -3012,32 +3012,32 @@ static int DhiStruct_init(DhiStructObject *self, PyObject *args, PyObject *kwarg
         // --- NUMERIC CONSTRAINTS (INLINED - no FFI) ---
         int validation_failed = 0;
         if (PyLong_Check(result) && !PyBool_Check(result)) {
-            long val = PyLong_AsLong(result);
+            long long val = PyLong_AsLongLong(result);
             if (fs->has_gt && val <= fs->gt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld", field_name, fs->gt_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be > %lld, got %lld", field_name, fs->gt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
             if (fs->has_ge && val < fs->ge_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld", field_name, fs->ge_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be >= %lld, got %lld", field_name, fs->ge_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
             if (fs->has_lt && val >= fs->lt_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld", field_name, fs->lt_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be < %lld, got %lld", field_name, fs->lt_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
             if (fs->has_le && val > fs->le_long) {
                 field_name = PyUnicode_AsUTF8(fs->name_obj);
                 if (!errors) { errors = PyList_New(0); }
-                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld", field_name, fs->le_long, val);
+                PyObject *msg = PyUnicode_FromFormat("%s: Value must be <= %lld, got %lld", field_name, fs->le_long, val);
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg); Py_DECREF(msg);
                 PyList_Append(errors, err); Py_DECREF(err); Py_DECREF(result); continue;
             }
@@ -3446,7 +3446,7 @@ static PyObject* json_unescape_string(const char *str, size_t len) {
 
 // Parse JSON integer
 __attribute__((unused))
-static int json_parse_integer(const char *json, size_t *pos, size_t len, long *out) {
+static int json_parse_integer(const char *json, size_t *pos, size_t len, long long *out) {
     size_t start = *pos;
     int negative = 0;
 
@@ -3457,7 +3457,7 @@ static int json_parse_integer(const char *json, size_t *pos, size_t len, long *o
 
     if (start >= len || json[start] < '0' || json[start] > '9') return 0;
 
-    long value = 0;
+    long long value = 0;
     while (start < len && json[start] >= '0' && json[start] <= '9') {
         value = value * 10 + (json[start] - '0');
         start++;
@@ -3483,7 +3483,7 @@ static inline PyObject* json_parse_number(const char *json, size_t *pos, size_t 
 
     // Fast path: parse small integer inline (up to 18 digits fits in int64)
     if (i < len && json[i] >= '0' && json[i] <= '9') {
-        long value = 0;
+        long long value = 0;
         int digit_count = 0;
 
         while (i < len && json[i] >= '0' && json[i] <= '9') {
@@ -3499,7 +3499,7 @@ static inline PyObject* json_parse_number(const char *json, size_t *pos, size_t 
         } else if (digit_count <= 18) {
             // It's a small integer - use fast path
             *pos = i;
-            return PyLong_FromLong(is_negative ? -value : value);
+            return PyLong_FromLongLong(is_negative ? -value : value);
         }
     }
 
@@ -3565,7 +3565,7 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
     // Fast path: inline parsing for small integers (up to 18 digits)
     // This avoids FFI overhead for common cases like "30", "100", etc.
     if (i < len && json[i] >= '0' && json[i] <= '9') {
-        long value = 0;
+        long long value = 0;
         int digit_count = 0;
 
         while (i < len && json[i] >= '0' && json[i] <= '9') {
@@ -3592,11 +3592,11 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
         // Small integer - return directly (no FFI needed!)
         if (digit_count <= 18) {
             *pos = i;
-            return PyLong_FromLong(is_negative ? -value : value);
+            return PyLong_FromLongLong(is_negative ? -value : value);
         }
 
         // Very large integer - fall back to Zig SIMD
-        long int_val;
+        long long int_val;
         size_t end;
         int result = dhi_parse_json_int(json, len, *pos, &int_val, &end);
         if (result != 0) {
@@ -3604,7 +3604,7 @@ static inline PyObject* json_parse_number_simd(const char *json, size_t *pos, si
             return NULL;
         }
         *pos = end;
-        return PyLong_FromLong(int_val);
+        return PyLong_FromLongLong(int_val);
     }
 
     // Invalid number
@@ -3909,7 +3909,7 @@ field_matched:
         // Numeric constraint validation - combined check for happy path
         if (PyLong_Check(value) && !PyBool_Check(value) &&
             (fs->has_gt | fs->has_ge | fs->has_lt | fs->has_le)) {
-            long val = PyLong_AsLong(value);
+            long long val = PyLong_AsLongLong(value);
             // Combined validity check - single branch for happy path
             int valid = (!fs->has_gt || val > fs->gt_long) &&
                         (!fs->has_ge || val >= fs->ge_long) &&
@@ -3920,16 +3920,16 @@ field_matched:
                 if (!errors) errors = PyList_New(0);
                 PyObject *msg = NULL;
                 if (fs->has_gt && val <= fs->gt_long) {
-                    msg = PyUnicode_FromFormat("%s: Value must be > %ld, got %ld",
+                    msg = PyUnicode_FromFormat("%s: Value must be > %lld, got %lld",
                         field_name, fs->gt_long, val);
                 } else if (fs->has_ge && val < fs->ge_long) {
-                    msg = PyUnicode_FromFormat("%s: Value must be >= %ld, got %ld",
+                    msg = PyUnicode_FromFormat("%s: Value must be >= %lld, got %lld",
                         field_name, fs->ge_long, val);
                 } else if (fs->has_lt && val >= fs->lt_long) {
-                    msg = PyUnicode_FromFormat("%s: Value must be < %ld, got %ld",
+                    msg = PyUnicode_FromFormat("%s: Value must be < %lld, got %lld",
                         field_name, fs->lt_long, val);
                 } else {
-                    msg = PyUnicode_FromFormat("%s: Value must be <= %ld, got %ld",
+                    msg = PyUnicode_FromFormat("%s: Value must be <= %lld, got %lld",
                         field_name, fs->le_long, val);
                 }
                 PyObject *err = Py_BuildValue("(OO)", fs->name_obj, msg);
