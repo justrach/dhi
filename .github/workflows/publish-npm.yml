@@ -28,9 +28,12 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing requires npm >= 11.5.1; Node 20 ships npm 10.x
+      # Trusted publishing requires npm >= 11.5.1; Node 20 ships npm 10.x.
+      # Pinned to the 11.x line: npm@latest is 12.x, which requires Node >= 22.
       - name: Upgrade npm
-        run: npm install -g npm@latest
+        run: |
+          npm install -g npm@11
+          npm --version
       
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
