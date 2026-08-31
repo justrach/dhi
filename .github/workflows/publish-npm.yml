@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Required for npm trusted publishing (OIDC) and provenance attestations
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -25,6 +27,10 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing requires npm >= 11.5.1; Node 20 ships npm 10.x
+      - name: Upgrade npm
+        run: npm install -g npm@latest
       
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -82,11 +88,11 @@ jobs:
         run: |
           npm version ${{ github.event.inputs.version }} --no-git-tag-version --allow-same-version
       
+      # Authentication comes from the npm trusted publisher (OIDC), not a token.
+      # npm derives provenance from the id-token, so no --provenance flag is needed.
       - name: Publish to npm
         working-directory: js-bindings
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
